@@ -45,7 +45,22 @@ export async function POST(request: NextRequest) {
   const results = [];
 
   for (const raw of domains.slice(0, 50)) {
-    const domain = raw.replace(/^www\./, "").toLowerCase();
+    const domain = raw.replace(/^www\./, "").replace(/^m\./, "").toLowerCase();
+
+    // YouTube is always targetable — skip cache entirely
+    const ytDomains = ["youtube.com", "youtu.be"];
+    if (ytDomains.includes(domain)) {
+      results.push({
+        domain,
+        hasGdn: true,
+        gdnPubId: null,
+        networks: ["YouTube", "Google"],
+        detectionMethod: "ads_txt",
+        checkedAt: new Date().toISOString(),
+        cached: false,
+      });
+      continue;
+    }
 
     // Check cache first
     try {

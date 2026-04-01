@@ -4,7 +4,7 @@ import { adInventory } from "@/lib/schema";
 import { eq, sql } from "drizzle-orm";
 import { checkDomain } from "@/lib/gdn-checker";
 
-const CACHE_TTL_DAYS = 14;
+const CACHE_TTL_DAYS = 180; // 6 months
 
 // Auto-create table if missing
 async function ensureTable() {
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     tableReady = true;
   }
 
-  const { domains } = (await request.json()) as { domains: string[] };
+  const { domains, force } = (await request.json()) as { domains: string[]; force?: boolean };
 
   if (!domains?.length) {
     return NextResponse.json({ error: "domains required" }, { status: 400 });
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
         .where(eq(adInventory.domain, domain))
         .limit(1);
 
-      if (cached.length > 0) {
+      if (cached.length > 0 && !force) {
         const entry = cached[0];
         const age = Date.now() - new Date(entry.checkedAt!).getTime();
         if (age < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000) {
@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
             gdnPubId: entry.gdnPubId,
             networks: entry.networks,
             detectionMethod: entry.detectionMethod,
+            checkedAt: entry.checkedAt,
             cached: true,
           });
           continue;

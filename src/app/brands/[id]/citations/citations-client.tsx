@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Header } from "@/components/header";
-import { ModelPill } from "@/components/model-pill";
 import { GdnBadge, NetworkPills } from "@/components/gdn-badge";
 import { useTheme } from "@/components/theme-provider";
 
@@ -26,7 +25,10 @@ interface AdInfo {
   hasGdn: boolean;
   gdnPubId: string | null;
   networks: string[];
+  checkedAt: string | null;
 }
+
+const PAGE_SIZE = 50;
 
 export function CitationsClient({
   brand,
@@ -40,33 +42,77 @@ export function CitationsClient({
   const { colors } = useTheme();
   const [adData, setAdData] = useState<Record<string, AdInfo>>({});
   const [adLoading, setAdLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [networkFilter, setNetworkFilter] = useState<string>("all");
+  const [page, setPage] = useState(0);
 
-  // Fetch GDN data for all citation domains on mount
-  useEffect(() => {
+  // Fetch GDN data
+  function fetchAdData(force = false) {
     const domains = [...new Set(citations.map((c) => c.domain.replace(/^www\./, "")))];
     if (domains.length === 0) { setAdLoading(false); return; }
+
+    if (force) setRefreshing(true);
+    else setAdLoading(true);
 
     fetch("/api/check-gdn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ domains }),
+      body: JSON.stringify({ domains, force }),
     })
       .then((r) => r.json())
       .then((data) => {
         const map: Record<string, AdInfo> = {};
         for (const r of data.results || []) {
-          map[r.domain] = { hasGdn: r.hasGdn, gdnPubId: r.gdnPubId, networks: r.networks || [] };
+          map[r.domain] = { hasGdn: r.hasGdn, gdnPubId: r.gdnPubId, networks: r.networks || [], checkedAt: r.checkedAt || null };
         }
         setAdData(map);
       })
       .catch(() => {})
-      .finally(() => setAdLoading(false));
-  }, [citations]);
+      .finally(() => { setAdLoading(false); setRefreshing(false); });
+  }
 
-  const gdnAvailableCount = Object.values(adData).filter((a) => a.hasGdn).length;
+  useEffect(() => { fetchAdData(); }, [citations]);
+
+  // Collect all unique networks for filter dropdown
+  const allNetworks = useMemo(() => {
+    const nets = new Set<string>();
+    Object.values(adData).forEach((a) => a.networks.forEach((n) => nets.add(n)));
+    return [...nets].sort();
+  }, [adData]);
+
+  // Filter citations by network
+  const filtered = useMemo(() => {
+    if (networkFilter === "all") return citations;
+    if (networkFilter === "gdn") return citations.filter((c) => adData[c.domain.replace(/^www\./, "")]?.hasGdn);
+    if (networkFilter === "no-ads") return citations.filter((c) => {
+      const info = adData[c.domain.replace(/^www\./, "")];
+      return info && !info.hasGdn && info.networks.length === 0;
+    });
+    return citations.filter((c) => {
+      const info = adData[c.domain.replace(/^www\./, "")];
+      return info?.networks.includes(networkFilter);
+    });
+  }, [citations, adData, networkFilter]);
+
+  // Paginate
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  // Reset page when filter changes
+  useEffect(() => { setPage(0); }, [networkFilter]);
+
+  // KPIs
+  const gdnCount = Object.values(adData).filter((a) => a.hasGdn).length;
   const totalCitations = citations.reduce((sum, c) => sum + c.citation_count, 0);
   const uniqueDomains = new Set(citations.map((c) => c.domain)).size;
-  const uniqueModels = new Set(citations.flatMap((c) => c.models)).size;
+  const networksCount = allNetworks.length;
+
+  // Oldest check date
+  const oldestCheck = useMemo(() => {
+    const dates = Object.values(adData).filter((a) => a.checkedAt).map((a) => new Date(a.checkedAt!).getTime());
+    if (dates.length === 0) return null;
+    return new Date(Math.min(...dates));
+  }, [adData]);
 
   return (
     <div className="min-h-screen">
@@ -91,8 +137,7 @@ export function CitationsClient({
         <div className="flex items-center gap-4 mb-8">
           {brand.logo_url ? (
             <img src={brand.logo_url} alt={brand.name}
-              className="w-16 h-16 rounded-xl object-cover"
-              style={{ background: colors.bgCard }} />
+              className="w-16 h-16 rounded-xl object-cover" style={{ background: colors.bgCard }} />
           ) : (
             <div className="w-16 h-16 rounded-xl flex items-center justify-center font-bold text-2xl"
               style={{ background: colors.bgCard, color: colors.textFaint }}>
@@ -110,8 +155,8 @@ export function CitationsClient({
           {[
             { label: "Total Citations", value: totalCitations.toLocaleString() },
             { label: "Unique Sources", value: uniqueDomains.toString() },
-            { label: "AI Models Citing", value: uniqueModels.toString() },
-            { label: "GDN Available", value: adLoading ? "..." : gdnAvailableCount.toString(), accent: true },
+            { label: "Ad Networks Found", value: adLoading ? "..." : networksCount.toString() },
+            { label: "GDN Available", value: adLoading ? "..." : gdnCount.toString(), accent: true },
           ].map((kpi) => (
             <div key={kpi.label} className="p-4 rounded-xl"
               style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}>
@@ -129,29 +174,65 @@ export function CitationsClient({
           </div>
         )}
 
-        {/* Citation table */}
-        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${colors.border}` }}>
-          <div className="px-6 py-4" style={{ background: colors.bgCard, borderBottom: `1px solid ${colors.border}` }}>
-            <h2 className="font-semibold">Citation Sources</h2>
-            <p style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>
-              URLs that AI models cite when answering queries about {brand.name}
-            </p>
+        {/* Filters + refresh bar */}
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <select
+              value={networkFilter}
+              onChange={(e) => setNetworkFilter(e.target.value)}
+              style={{
+                background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 8,
+                padding: '8px 12px', fontSize: 13, color: colors.text, cursor: 'pointer', outline: 'none',
+              }}
+            >
+              <option value="all">All Sources ({citations.length})</option>
+              <option value="gdn">GDN Only ({gdnCount})</option>
+              <option value="no-ads">No Ads</option>
+              {allNetworks.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+            <span style={{ fontSize: 12, color: colors.textFaint }}>
+              {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+            </span>
           </div>
 
+          <div className="flex items-center gap-3">
+            {oldestCheck && (
+              <span style={{ fontSize: 11, color: colors.textFaint }}>
+                Scanned {oldestCheck.toLocaleDateString()}
+              </span>
+            )}
+            <button
+              onClick={() => fetchAdData(true)}
+              disabled={refreshing}
+              style={{
+                padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                background: 'transparent', border: `1px solid ${colors.border}`,
+                color: colors.textMuted, cursor: refreshing ? 'not-allowed' : 'pointer',
+                opacity: refreshing ? 0.5 : 1,
+              }}
+            >
+              {refreshing ? "Scanning..." : "Rescan All"}
+            </button>
+          </div>
+        </div>
+
+        {/* Citation table */}
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${colors.border}` }}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr style={{ borderBottom: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 13 }} className="text-left">
+                <tr style={{ background: colors.bgCard, borderBottom: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 13 }} className="text-left">
                   <th className="px-6 py-3 font-medium">URL</th>
                   <th className="px-6 py-3 font-medium">Domain</th>
                   <th className="px-6 py-3 font-medium text-right">Citations</th>
-                  <th className="px-6 py-3 font-medium">Models</th>
                   <th className="px-6 py-3 font-medium">Ad Inventory</th>
                   <th className="px-6 py-3 font-medium">Networks</th>
                 </tr>
               </thead>
               <tbody style={{ background: colors.bg }}>
-                {citations.map((citation) => {
+                {paginated.map((citation) => {
                   const cleanDomain = citation.domain.replace(/^www\./, "");
                   const info = adData[cleanDomain];
                   return (
@@ -160,10 +241,10 @@ export function CitationsClient({
                         <a
                           href={citation.url.startsWith("http") ? citation.url : `https://${citation.url}`}
                           target="_blank" rel="noopener noreferrer"
-                          className="truncate block max-w-xs"
+                          className="truncate block max-w-sm"
                           style={{ fontSize: 13, color: '#60A5FA' }}
                         >
-                          {citation.url.replace(/^https?:\/\/(www\.)?/, "")}
+                          {citation.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60)}
                         </a>
                       </td>
                       <td className="px-6 py-3" style={{ fontSize: 13, color: colors.textMuted }}>
@@ -171,13 +252,6 @@ export function CitationsClient({
                       </td>
                       <td className="px-6 py-3 font-mono text-right" style={{ fontSize: 13 }}>
                         {citation.citation_count}
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {citation.models.map((model) => (
-                            <ModelPill key={model} model={model} />
-                          ))}
-                        </div>
                       </td>
                       <td className="px-6 py-3">
                         <GdnBadge adInfo={adLoading ? undefined : info} />
@@ -201,6 +275,41 @@ export function CitationsClient({
             </div>
           )}
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4">
+            <span style={{ fontSize: 13, color: colors.textMuted }}>
+              Page {page + 1} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage(Math.max(0, page - 1))}
+                disabled={page === 0}
+                style={{
+                  padding: '6px 14px', borderRadius: 6, fontSize: 13,
+                  background: colors.bgCard, border: `1px solid ${colors.border}`,
+                  color: page === 0 ? colors.textFaint : colors.text,
+                  cursor: page === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                disabled={page >= totalPages - 1}
+                style={{
+                  padding: '6px 14px', borderRadius: 6, fontSize: 13,
+                  background: colors.bgCard, border: `1px solid ${colors.border}`,
+                  color: page >= totalPages - 1 ? colors.textFaint : colors.text,
+                  cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

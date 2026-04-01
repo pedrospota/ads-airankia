@@ -101,8 +101,7 @@ export async function getCitationsForBrand(
       citation_count: c.count,
       models: Array.from(c.models),
     }))
-    .sort((a, b) => b.citation_count - a.citation_count)
-    .slice(0, 50);
+    .sort((a, b) => b.citation_count - a.citation_count);
 }
 
 // GDN availability is now checked dynamically via ads.txt + scraping

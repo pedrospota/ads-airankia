@@ -21,7 +21,7 @@ export default async function CitationsPage({
   const supabase = createSupabaseReadClient(accessToken);
   const { data: brand } = await supabase
     .from("brand_project")
-    .select("id, name, industry, website, logo_url")
+    .select("id, name, industry, website, logo_url, workspace_id")
     .eq("id", brandId)
     .single();
 

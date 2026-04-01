@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Header } from "@/components/header";
 import { ModelPill } from "@/components/model-pill";
-import { GdnBadge } from "@/components/gdn-badge";
+import { GdnBadge, NetworkPills } from "@/components/gdn-badge";
 import { useTheme } from "@/components/theme-provider";
 
 interface Brand {
@@ -21,6 +22,12 @@ interface Citation {
   gdn_available: boolean;
 }
 
+interface AdInfo {
+  hasGdn: boolean;
+  gdnPubId: string | null;
+  networks: string[];
+}
+
 export function CitationsClient({
   brand,
   citations,
@@ -31,7 +38,32 @@ export function CitationsClient({
   error: string | null;
 }) {
   const { colors } = useTheme();
-  const gdnAvailableCount = citations.filter((c) => c.gdn_available).length;
+  const [adData, setAdData] = useState<Record<string, AdInfo>>({});
+  const [adLoading, setAdLoading] = useState(true);
+
+  // Fetch GDN data for all citation domains on mount
+  useEffect(() => {
+    const domains = [...new Set(citations.map((c) => c.domain.replace(/^www\./, "")))];
+    if (domains.length === 0) { setAdLoading(false); return; }
+
+    fetch("/api/check-gdn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domains }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const map: Record<string, AdInfo> = {};
+        for (const r of data.results || []) {
+          map[r.domain] = { hasGdn: r.hasGdn, gdnPubId: r.gdnPubId, networks: r.networks || [] };
+        }
+        setAdData(map);
+      })
+      .catch(() => {})
+      .finally(() => setAdLoading(false));
+  }, [citations]);
+
+  const gdnAvailableCount = Object.values(adData).filter((a) => a.hasGdn).length;
   const totalCitations = citations.reduce((sum, c) => sum + c.citation_count, 0);
   const uniqueDomains = new Set(citations.map((c) => c.domain)).size;
   const uniqueModels = new Set(citations.flatMap((c) => c.models)).size;
@@ -58,12 +90,9 @@ export function CitationsClient({
         {/* Brand header */}
         <div className="flex items-center gap-4 mb-8">
           {brand.logo_url ? (
-            <img
-              src={brand.logo_url}
-              alt={brand.name}
+            <img src={brand.logo_url} alt={brand.name}
               className="w-16 h-16 rounded-xl object-cover"
-              style={{ background: colors.bgCard }}
-            />
+              style={{ background: colors.bgCard }} />
           ) : (
             <div className="w-16 h-16 rounded-xl flex items-center justify-center font-bold text-2xl"
               style={{ background: colors.bgCard, color: colors.textFaint }}>
@@ -82,7 +111,7 @@ export function CitationsClient({
             { label: "Total Citations", value: totalCitations.toLocaleString() },
             { label: "Unique Sources", value: uniqueDomains.toString() },
             { label: "AI Models Citing", value: uniqueModels.toString() },
-            { label: "GDN Available", value: gdnAvailableCount.toString(), accent: true },
+            { label: "GDN Available", value: adLoading ? "..." : gdnAvailableCount.toString(), accent: true },
           ].map((kpi) => (
             <div key={kpi.label} className="p-4 rounded-xl"
               style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}>
@@ -117,41 +146,48 @@ export function CitationsClient({
                   <th className="px-6 py-3 font-medium">Domain</th>
                   <th className="px-6 py-3 font-medium text-right">Citations</th>
                   <th className="px-6 py-3 font-medium">Models</th>
-                  <th className="px-6 py-3 font-medium">GDN</th>
+                  <th className="px-6 py-3 font-medium">Ad Inventory</th>
+                  <th className="px-6 py-3 font-medium">Networks</th>
                 </tr>
               </thead>
               <tbody style={{ background: colors.bg }}>
-                {citations.map((citation) => (
-                  <tr key={citation.url} style={{ borderBottom: `1px solid ${colors.bgCard}` }}>
-                    <td className="px-6 py-3">
-                      <a
-                        href={citation.url.startsWith("http") ? citation.url : `https://${citation.url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="truncate block max-w-xs"
-                        style={{ fontSize: 13, color: '#60A5FA' }}
-                      >
-                        {citation.url.replace(/^https?:\/\/(www\.)?/, "")}
-                      </a>
-                    </td>
-                    <td className="px-6 py-3" style={{ fontSize: 13, color: colors.textMuted }}>
-                      {citation.domain.replace(/^www\./, "")}
-                    </td>
-                    <td className="px-6 py-3 font-mono text-right" style={{ fontSize: 13 }}>
-                      {citation.citation_count}
-                    </td>
-                    <td className="px-6 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {citation.models.map((model) => (
-                          <ModelPill key={model} model={model} />
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-6 py-3">
-                      <GdnBadge domain={citation.domain} />
-                    </td>
-                  </tr>
-                ))}
+                {citations.map((citation) => {
+                  const cleanDomain = citation.domain.replace(/^www\./, "");
+                  const info = adData[cleanDomain];
+                  return (
+                    <tr key={citation.url} style={{ borderBottom: `1px solid ${colors.bgCard}` }}>
+                      <td className="px-6 py-3">
+                        <a
+                          href={citation.url.startsWith("http") ? citation.url : `https://${citation.url}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="truncate block max-w-xs"
+                          style={{ fontSize: 13, color: '#60A5FA' }}
+                        >
+                          {citation.url.replace(/^https?:\/\/(www\.)?/, "")}
+                        </a>
+                      </td>
+                      <td className="px-6 py-3" style={{ fontSize: 13, color: colors.textMuted }}>
+                        {cleanDomain}
+                      </td>
+                      <td className="px-6 py-3 font-mono text-right" style={{ fontSize: 13 }}>
+                        {citation.citation_count}
+                      </td>
+                      <td className="px-6 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {citation.models.map((model) => (
+                            <ModelPill key={model} model={model} />
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-6 py-3">
+                        <GdnBadge adInfo={adLoading ? undefined : info} />
+                      </td>
+                      <td className="px-6 py-3">
+                        {!adLoading && info && <NetworkPills networks={info.networks} />}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

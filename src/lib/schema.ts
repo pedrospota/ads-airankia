@@ -78,6 +78,22 @@ export const performance = pgTable(
   ]
 );
 
+export const adInventory = pgTable(
+  "ad_inventory",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    domain: text("domain").notNull(),
+    hasGdn: boolean("has_gdn").default(false),
+    gdnPubId: text("gdn_pub_id"),
+    networks: text("networks").array(),
+    detectionMethod: text("detection_method"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("ad_inventory_domain_idx").on(table.domain),
+  ]
+);
+
 export const bannerAssets = pgTable("banner_assets", {
   id: uuid("id").primaryKey().defaultRandom(),
   campaignId: uuid("campaign_id").references(() => campaigns.id),

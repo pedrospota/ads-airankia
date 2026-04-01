@@ -105,40 +105,10 @@ export async function getCitationsForBrand(
     .slice(0, 50);
 }
 
-// Known GDN-available domains
-const GDN_DOMAINS = new Set([
-  "g2.com",
-  "capterra.com",
-  "trustradius.com",
-  "techradar.com",
-  "pcmag.com",
-  "cnet.com",
-  "tomsguide.com",
-  "forbes.com",
-  "businessinsider.com",
-  "bloomberg.com",
-  "nytimes.com",
-  "theguardian.com",
-  "bbc.com",
-  "hubspot.com",
-  "semrush.com",
-  "moz.com",
-  "reddit.com",
-  "medium.com",
-  "zdnet.com",
-  "wired.com",
-  "theverge.com",
-  "arstechnica.com",
-  "creativebloq.com",
-  "rtings.com",
-  "windowscentral.com",
-  "gamesradar.com",
-  "seranking.com",
-  "ninjaseo.es",
-  "inboundcycle.com",
-]);
-
-export function isGdnAvailable(domain: string): boolean {
-  const clean = domain.replace(/^www\./, "");
-  return GDN_DOMAINS.has(clean);
+// GDN availability is now checked dynamically via ads.txt + scraping
+// and cached in the ad_inventory table. The isGdnAvailable function
+// is kept as a sync fallback for server-side rendering — real data
+// comes from the /api/check-gdn endpoint called client-side.
+export function isGdnAvailable(_domain: string): boolean {
+  return false; // default unknown — client will fetch real status
 }

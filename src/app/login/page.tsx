@@ -38,7 +38,7 @@ export default function LoginPage() {
     <div className="flex items-center justify-center min-h-screen" style={{ background: '#0A0A0E' }}>
       <div style={{ width: '100%', maxWidth: 380 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-          <img src="/airankia-logo-light.png" alt="AI Rankia" style={{ height: 36, width: 'auto', marginBottom: 20, objectFit: 'contain' }} />
+          <img src="/airankia-logo.png" alt="AI Rankia" style={{ height: 36, width: 'auto', marginBottom: 20, objectFit: 'contain' }} />
           <h1 style={{ fontSize: 22, fontWeight: 600, color: '#fff', letterSpacing: '-0.5px', margin: 0, lineHeight: 1.2 }}>
             Ads Platform
           </h1>

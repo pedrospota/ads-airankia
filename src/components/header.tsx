@@ -15,7 +15,7 @@ export function Header({
         <div className="flex items-center gap-3">
           <Link href="/brands" className="flex items-center gap-2">
             <img
-              src="/airankia-logo-light.png"
+              src="/airankia-logo.png"
               alt="AI Rankia"
               style={{ height: 28, width: 'auto' }}
             />

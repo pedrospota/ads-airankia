@@ -43,7 +43,10 @@ export function CitationsClient({
           { label: "Citations" },
         ]}
         action={
-          <button className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm transition-colors">
+          <button style={{
+            padding: '8px 16px', borderRadius: 8, background: '#10B981',
+            color: '#000', fontWeight: 600, fontSize: 13, border: 'none', cursor: 'pointer'
+          }}>
             Start Campaign
           </button>
         }
@@ -56,33 +59,36 @@ export function CitationsClient({
             <img
               src={brand.logo_url}
               alt={brand.name}
-              className="w-16 h-16 rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800"
+              className="w-16 h-16 rounded-xl object-cover"
+              style={{ background: '#1C1C23' }}
             />
           ) : (
-            <div className="w-16 h-16 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400 dark:text-zinc-500 font-bold text-2xl">
+            <div className="w-16 h-16 rounded-xl flex items-center justify-center font-bold text-2xl"
+              style={{ background: '#1C1C23', color: 'rgba(255,255,255,0.3)' }}>
               {brand.name.charAt(0)}
             </div>
           )}
           <div>
             <h1 className="text-3xl font-bold">{brand.name}</h1>
-            <p className="text-zinc-500 dark:text-zinc-400">{brand.industry}</p>
+            <p style={{ color: 'rgba(255,255,255,0.4)' }}>{brand.industry}</p>
           </div>
         </div>
 
         {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Citations", value: totalCitations.toLocaleString(), color: "" },
-            { label: "Unique Sources", value: uniqueDomains.toString(), color: "" },
-            { label: "AI Models Citing", value: uniqueModels.toString(), color: "" },
-            { label: "GDN Available", value: gdnAvailableCount.toString(), color: "text-emerald-600 dark:text-emerald-400" },
+            { label: "Total Citations", value: totalCitations.toLocaleString() },
+            { label: "Unique Sources", value: uniqueDomains.toString() },
+            { label: "AI Models Citing", value: uniqueModels.toString() },
+            { label: "GDN Available", value: gdnAvailableCount.toString(), accent: true },
           ].map((kpi) => (
             <div
               key={kpi.label}
-              className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm dark:shadow-none"
+              className="p-4 rounded-xl"
+              style={{ background: '#1C1C23', border: '1px solid #38383F' }}
             >
-              <p className="text-sm text-zinc-500">{kpi.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>{kpi.label}</p>
+              <p className="text-2xl font-bold mt-1" style={{ color: kpi.accent ? '#10B981' : '#fff' }}>
                 {kpi.value}
               </p>
             </div>
@@ -90,25 +96,24 @@ export function CitationsClient({
         </div>
 
         {error && (
-          <div className="p-4 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 mb-6">
+          <div style={{ padding: 16, borderRadius: 8, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#F87171', marginBottom: 24 }}>
             {error}
           </div>
         )}
 
         {/* Citation table */}
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm dark:shadow-none">
-          <div className="px-6 py-4 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #38383F' }}>
+          <div className="px-6 py-4" style={{ background: '#1C1C23', borderBottom: '1px solid #38383F' }}>
             <h2 className="font-semibold">Citation Sources</h2>
-            <p className="text-sm text-zinc-500 mt-1">
-              URLs that AI models cite when answering queries about{" "}
-              {brand.name}
+            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
+              URLs that AI models cite when answering queries about {brand.name}
             </p>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-zinc-200 dark:border-zinc-800 text-left text-sm text-zinc-500">
+                <tr style={{ borderBottom: '1px solid #38383F', color: 'rgba(255,255,255,0.4)', fontSize: 13 }} className="text-left">
                   <th className="px-6 py-3 font-medium">URL</th>
                   <th className="px-6 py-3 font-medium">Domain</th>
                   <th className="px-6 py-3 font-medium text-right">Citations</th>
@@ -116,30 +121,27 @@ export function CitationsClient({
                   <th className="px-6 py-3 font-medium">GDN</th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-zinc-950">
+              <tbody style={{ background: '#0A0A0E' }}>
                 {citations.map((citation) => (
                   <tr
                     key={citation.url}
-                    className="border-b border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
+                    style={{ borderBottom: '1px solid #1C1C23' }}
                   >
                     <td className="px-6 py-3">
                       <a
-                        href={
-                          citation.url.startsWith("http")
-                            ? citation.url
-                            : `https://${citation.url}`
-                        }
+                        href={citation.url.startsWith("http") ? citation.url : `https://${citation.url}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 truncate block max-w-xs"
+                        className="truncate block max-w-xs"
+                        style={{ fontSize: 13, color: '#60A5FA' }}
                       >
                         {citation.url.replace(/^https?:\/\/(www\.)?/, "")}
                       </a>
                     </td>
-                    <td className="px-6 py-3 text-sm text-zinc-500 dark:text-zinc-400">
+                    <td className="px-6 py-3" style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
                       {citation.domain.replace(/^www\./, "")}
                     </td>
-                    <td className="px-6 py-3 text-sm font-mono text-right">
+                    <td className="px-6 py-3 font-mono text-right" style={{ fontSize: 13 }}>
                       {citation.citation_count}
                     </td>
                     <td className="px-6 py-3">
@@ -159,11 +161,10 @@ export function CitationsClient({
           </div>
 
           {citations.length === 0 && !error && (
-            <div className="px-6 py-12 text-center text-zinc-500">
+            <div className="px-6 py-12 text-center" style={{ color: 'rgba(255,255,255,0.4)' }}>
               <p>No citations found for this brand yet.</p>
-              <p className="text-sm mt-2">
-                Run monitored prompts in AI Rankia to start collecting citation
-                data.
+              <p style={{ fontSize: 13, marginTop: 8 }}>
+                Run monitored prompts in AI Rankia to start collecting citation data.
               </p>
             </div>
           )}

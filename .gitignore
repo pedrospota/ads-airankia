@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.env.local
+.env
+public/file.svg
+public/globe.svg
+public/next.svg
+public/vercel.svg
+public/window.svg

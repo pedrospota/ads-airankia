@@ -182,7 +182,7 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
 }
 
 function CampaignModal({ colors, brand, selectedCount, onClose, onCreate, creating, result }: {
-  colors: ReturnType<typeof useTheme>["colors"]; brand: { name: string; website: string | null }; selectedCount: number;
+  colors: ReturnType<typeof useTheme>["colors"]; brand: Brand; selectedCount: number;
   onClose: () => void; onCreate: (n: string, l: string, b: number) => void; creating: boolean; result: { id: string; placementCount: number } | null;
 }) {
   const [step, setStep] = useState<"settings" | "banners" | "review">("settings");
@@ -219,19 +219,6 @@ function CampaignModal({ colors, brand, selectedCount, onClose, onCreate, creati
       setBanners(data.banners);
     } catch (e) { setBannerError(e instanceof Error ? e.message : "Failed"); }
     setGenBanners(false);
-  }
-
-  async function saveDraftAndPublish() {
-    // Step 1: Save as draft
-    setPublishing(true);
-    try {
-      const r = await fetch("/api/campaigns", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandId: brand.id, brandName: brand.name, brandWebsite: brand.website, workspaceId: (brand as unknown as { workspace_id: string }).workspace_id || "", campaignName: name, landingPageUrl: lp, dailyBudgetCents: Math.round(budget * 100), urls: [] }) });
-      // Note: urls are passed via onCreate which already has them
-    } catch {}
-
-    // Use the existing onCreate which saves to DB
-    onCreate(name, lp, budget);
   }
 
   async function publishToGoogleAds() {

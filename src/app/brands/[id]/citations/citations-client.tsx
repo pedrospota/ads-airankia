@@ -47,15 +47,23 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   useEffect(() => { setPage(0); }, [networkFilter]);
 
-  const gdnCount = Object.values(adData).filter((a) => a.hasGdn).length;
+  const gdnDomains = Object.values(adData).filter((a) => a.hasGdn && !a.networks.includes("YouTube")).length;
+  const ytDomains = Object.values(adData).filter((a) => a.networks.includes("YouTube")).length;
   const totalCitations = citations.reduce((s, c) => s + c.citation_count, 0);
   const uniqueDomains = new Set(citations.map((c) => c.domain)).size;
 
   const oldestCheck = useMemo(() => { const d = Object.values(adData).filter((a) => a.checkedAt).map((a) => new Date(a.checkedAt!).getTime()); return d.length ? new Date(Math.min(...d)) : null; }, [adData]);
 
-  const gdnCitations = useMemo(() => citations.filter((c) => adData[c.domain.replace(/^www\./, "")]?.hasGdn), [citations, adData]);
+  // All targetable = GDN websites + YouTube
+  const targetableCitations = useMemo(() => citations.filter((c) => {
+    const d = c.domain.replace(/^www\./, "").replace(/^m\./, "");
+    return adData[d]?.hasGdn || adData["youtube.com"]?.hasGdn && (d === "youtube.com" || d === "youtu.be");
+  }), [citations, adData]);
+
+  const gdnCitations = useMemo(() => citations.filter((c) => adData[c.domain.replace(/^www\./, "").replace(/^m\./, "")]?.hasGdn), [citations, adData]);
+
   function toggleSelect(url: string) { setSelected((p) => { const n = new Set(p); if (n.has(url)) n.delete(url); else n.add(url); return n; }); }
-  function selectAllGdn() { setSelected(new Set(gdnCitations.map((c) => c.url))); }
+  function selectAllTargetable() { setSelected(new Set(gdnCitations.map((c) => c.url))); }
 
   async function createCampaign(name: string, landingPage: string, dailyBudget: number) {
     setCreating(true);
@@ -86,7 +94,7 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {[{ l: "Total Citations", v: totalCitations.toLocaleString() }, { l: "Unique Domains", v: uniqueDomains.toString() }, { l: "Ad Networks", v: adLoading ? "..." : allNetworks.length.toString() }, { l: "GDN Targetable", v: adLoading ? "..." : `${gdnCount} domains / ${gdnCitations.length} URLs`, a: true }]
+          {[{ l: "Total Citations", v: totalCitations.toLocaleString() }, { l: "Unique Domains", v: uniqueDomains.toString() }, { l: "Targetable", v: adLoading ? "..." : `${gdnCitations.length} URLs`, a: true }, { l: "Breakdown", v: adLoading ? "..." : `${gdnDomains} GDN + ${ytDomains > 0 ? ytDomains + " YT" : "0 YT"}` }]
             .map((k) => (<div key={k.l} className="p-4 rounded-xl" style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}><p style={{ fontSize: 13, color: colors.textMuted }}>{k.l}</p><p className="font-bold mt-1" style={{ fontSize: k.a ? 16 : 24, color: k.a ? colors.accent : colors.text }}>{k.v}</p></div>))}
         </div>
 
@@ -95,10 +103,10 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <select value={networkFilter} onChange={(e) => setNetworkFilter(e.target.value)} style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 13, color: colors.text, cursor: 'pointer', outline: 'none' }}>
-              <option value="all">All Sources ({citations.length})</option><option value="gdn">GDN Only ({gdnCount})</option><option value="no-ads">No Ads</option>
+              <option value="all">All Sources ({citations.length})</option><option value="gdn">All Targetable ({gdnCitations.length})</option><option value="YouTube">YouTube Only</option><option value="no-ads">No Ads</option>
               {allNetworks.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
-            {!adLoading && gdnCount > 0 && <button onClick={selectAllGdn} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>Select all GDN ({gdnCount})</button>}
+            {!adLoading && gdnCount > 0 && <button onClick={selectAllTargetable} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>Select all targetable ({gdnCount})</button>}
             {selected.size > 0 && <button onClick={() => setSelected(new Set())} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, cursor: 'pointer' }}>Clear ({selected.size})</button>}
             <span style={{ fontSize: 12, color: colors.textFaint }}>{filtered.length} results</span>
           </div>
@@ -117,9 +125,9 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
                 <th className="px-3 py-3 w-10"></th><th className="px-3 py-3 font-medium">URL</th><th className="px-3 py-3 font-medium">Domain</th><th className="px-3 py-3 font-medium text-right">Citations</th><th className="px-3 py-3 font-medium">Ad Inventory</th><th className="px-3 py-3 font-medium">Networks</th>
               </tr></thead>
               <tbody style={{ background: colors.bg }}>
-                {paginated.map((c) => { const d = c.domain.replace(/^www\./, ""); const info = adData[d]; const isGdn = info?.hasGdn; const sel = selected.has(c.url); return (
+                {paginated.map((c) => { const d = c.domain.replace(/^www\./, "").replace(/^m\./, ""); const info = adData[d]; const isTargetable = info?.hasGdn; const sel = selected.has(c.url); return (
                   <tr key={c.url} style={{ borderBottom: `1px solid ${colors.bgCard}`, background: sel ? 'rgba(16,185,129,0.05)' : undefined }}>
-                    <td className="px-3 py-3">{isGdn && <input type="checkbox" checked={sel} onChange={() => toggleSelect(c.url)} style={{ width: 16, height: 16, cursor: 'pointer', accentColor: colors.accent }} />}</td>
+                    <td className="px-3 py-3">{isTargetable && <input type="checkbox" checked={sel} onChange={() => toggleSelect(c.url)} style={{ width: 16, height: 16, cursor: 'pointer', accentColor: colors.accent }} />}</td>
                     <td className="px-3 py-3"><a href={c.url.startsWith("http") ? c.url : `https://${c.url}`} target="_blank" rel="noopener noreferrer" className="truncate block max-w-sm" style={{ fontSize: 13, color: '#60A5FA' }}>{c.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60)}</a></td>
                     <td className="px-3 py-3" style={{ fontSize: 13, color: colors.textMuted }}>{d}</td>
                     <td className="px-3 py-3 font-mono text-right" style={{ fontSize: 13 }}>{c.citation_count}</td>

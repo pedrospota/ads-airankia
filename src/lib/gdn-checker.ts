@@ -119,9 +119,41 @@ function detectAdTagsInHtml(html: string): { hasGoogleAds: boolean; networks: Se
   return { hasGoogleAds, networks };
 }
 
+// Detect YouTube URL type
+export function parseYouTubeUrl(url: string): { type: "video" | "short" | "channel" | "none"; id: string | null } {
+  const u = url.toLowerCase();
+  // Video: youtube.com/watch?v=XXX or youtu.be/XXX
+  const videoMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/i);
+  if (videoMatch) return { type: "video", id: videoMatch[1] };
+  // Shorts: youtube.com/shorts/XXX
+  const shortsMatch = url.match(/youtube\.com\/shorts\/([\w-]+)/i);
+  if (shortsMatch) return { type: "short", id: shortsMatch[1] };
+  // Channel: youtube.com/@handle or /channel/XXX or /c/XXX
+  const channelMatch = url.match(/youtube\.com\/(?:@|channel\/|c\/)([\w-]+)/i);
+  if (channelMatch) return { type: "channel", id: channelMatch[1] };
+  return { type: "none", id: null };
+}
+
+export function isYouTubeDomain(domain: string): boolean {
+  const d = domain.replace(/^www\./, "").replace(/^m\./, "").toLowerCase();
+  return d === "youtube.com" || d === "youtu.be";
+}
+
 // Check a single domain for ad inventory
 export async function checkDomain(domain: string): Promise<AdInventoryResult> {
-  const clean = domain.replace(/^www\./, "").toLowerCase();
+  const clean = domain.replace(/^www\./, "").replace(/^m\./, "").toLowerCase();
+
+  // YouTube is ALWAYS targetable — skip ads.txt check entirely
+  if (isYouTubeDomain(clean)) {
+    return {
+      domain: clean,
+      hasGdn: true,
+      gdnPubId: null,
+      networks: ["YouTube", "Google"],
+      detectionMethod: "ads_txt", // known
+    };
+  }
+
   let gdnPubId: string | null = null;
   let allNetworks = new Set<string>();
   let method: AdInventoryResult["detectionMethod"] = "none";

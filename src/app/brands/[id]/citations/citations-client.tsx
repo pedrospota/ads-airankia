@@ -86,8 +86,8 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {[{ l: "Total Citations", v: totalCitations.toLocaleString() }, { l: "Unique Sources", v: uniqueDomains.toString() }, { l: "Ad Networks", v: adLoading ? "..." : allNetworks.length.toString() }, { l: "GDN Available", v: adLoading ? "..." : gdnCount.toString(), a: true }]
-            .map((k) => (<div key={k.l} className="p-4 rounded-xl" style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}><p style={{ fontSize: 13, color: colors.textMuted }}>{k.l}</p><p className="text-2xl font-bold mt-1" style={{ color: k.a ? colors.accent : colors.text }}>{k.v}</p></div>))}
+          {[{ l: "Total Citations", v: totalCitations.toLocaleString() }, { l: "Unique Domains", v: uniqueDomains.toString() }, { l: "Ad Networks", v: adLoading ? "..." : allNetworks.length.toString() }, { l: "GDN Targetable", v: adLoading ? "..." : `${gdnCount} domains / ${gdnCitations.length} URLs`, a: true }]
+            .map((k) => (<div key={k.l} className="p-4 rounded-xl" style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}><p style={{ fontSize: 13, color: colors.textMuted }}>{k.l}</p><p className="font-bold mt-1" style={{ fontSize: k.a ? 16 : 24, color: k.a ? colors.accent : colors.text }}>{k.v}</p></div>))}
         </div>
 
         {error && <div style={{ padding: 16, borderRadius: 8, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#F87171', marginBottom: 24 }}>{error}</div>}

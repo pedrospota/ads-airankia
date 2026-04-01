@@ -43,7 +43,7 @@ export default function LoginPage() {
             Ads Platform
           </h1>
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
-            by AI Rankia \u00b7 Sign in to your workspace
+            by AI Rankia · Sign in to your workspace
           </p>
         </div>
 
@@ -56,13 +56,13 @@ export default function LoginPage() {
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)', marginBottom: 7, textTransform: 'uppercase' }}>Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••"
                 style={{ width: '100%', background: '#0A0A0E', border: '1px solid #38383F', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#fff', outline: 'none', boxSizing: 'border-box' }} />
             </div>
             {error && <p style={{ fontSize: 12, color: '#F87171', background: 'rgba(248,113,113,0.1)', padding: '8px 12px', borderRadius: 7, margin: 0 }}>{error}</p>}
             <button type="submit" disabled={loading}
               style={{ width: '100%', background: '#10B981', border: 'none', borderRadius: 8, padding: '11px', fontSize: 13, fontWeight: 600, color: '#000', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1, marginTop: 4 }}>
-              {loading ? 'Signing in\u2026' : 'Sign in'}
+              {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
 
@@ -85,7 +85,7 @@ export default function LoginPage() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.2)', marginTop: 20 }}>
-          Citation Retargeting \u00b7 Powered by AI Rankia
+          Citation Retargeting · Powered by AI Rankia
         </p>
       </div>
     </div>

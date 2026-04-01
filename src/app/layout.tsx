@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Rankia Ads \u2014 Citation Retargeting",
+  title: "AI Rankia Ads — Citation Retargeting",
   description:
     "Run display ads on the exact URLs that AI models cite. Capture buyers at peak intent.",
   icons: {

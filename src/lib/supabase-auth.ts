@@ -9,7 +9,7 @@ export async function createSupabaseServerClient() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll() { /* no-op \u2014 session owned by airankia */ },
+        setAll() { /* no-op — session owned by airankia */ },
       },
     }
   )

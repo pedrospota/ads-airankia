@@ -45,13 +45,13 @@ export default async function BrandsPage() {
       <main className="max-w-6xl mx-auto px-6 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold">Your Brands</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 mt-2">
+          <p style={{ color: 'rgba(255,255,255,0.4)', marginTop: 8 }}>
             Select a brand to see its AI citation sources and start retargeting.
           </p>
         </div>
 
         {error && (
-          <div className="p-4 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400">
+          <div style={{ padding: 16, borderRadius: 8, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#F87171' }}>
             {error}
           </div>
         )}
@@ -61,31 +61,34 @@ export default async function BrandsPage() {
             <Link
               key={brand.id}
               href={`/brands/${brand.id}/citations`}
-              className="group p-6 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 transition-colors shadow-sm hover:shadow-md dark:shadow-none"
+              className="group p-6 rounded-xl transition-colors"
+              style={{ background: '#1C1C23', border: '1px solid #38383F' }}
             >
               <div className="flex items-start gap-4">
                 {brand.logo_url ? (
                   <img
                     src={brand.logo_url}
                     alt={brand.name}
-                    className="w-12 h-12 rounded-lg object-cover bg-zinc-100 dark:bg-zinc-800"
+                    className="w-12 h-12 rounded-lg object-cover"
+                    style={{ background: '#0A0A0E' }}
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400 dark:text-zinc-500 font-bold text-lg">
+                  <div className="w-12 h-12 rounded-lg flex items-center justify-center font-bold text-lg"
+                    style={{ background: '#0A0A0E', color: 'rgba(255,255,255,0.3)' }}>
                     {brand.name.charAt(0)}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">
+                  <h3 className="font-semibold truncate" style={{ color: '#fff' }}>
                     {brand.name}
                   </h3>
                   {brand.industry && (
-                    <p className="text-sm text-zinc-500 mt-1 truncate">
+                    <p className="text-sm mt-1 truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
                       {brand.industry}
                     </p>
                   )}
                   {brand.website && (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-600 mt-1 truncate">
+                    <p className="text-xs mt-1 truncate" style={{ color: 'rgba(255,255,255,0.25)' }}>
                       {brand.website}
                     </p>
                   )}
@@ -96,7 +99,7 @@ export default async function BrandsPage() {
         </div>
 
         {brands.length === 0 && !error && (
-          <div className="text-center py-16 text-zinc-500">
+          <div className="text-center py-16" style={{ color: 'rgba(255,255,255,0.4)' }}>
             <p className="text-lg">No brands found for this workspace.</p>
             <p className="text-sm mt-2">
               Add brands in AI Rankia to start citation retargeting.

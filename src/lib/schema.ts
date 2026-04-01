@@ -11,6 +11,28 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+// Topup credit balance (like Google Ads prepaid)
+export const wallets = pgTable("wallets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  workspaceId: uuid("workspace_id").notNull(),
+  balanceCents: integer("balance_cents").default(0).notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const transactions = pgTable("transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  walletId: uuid("wallet_id").references(() => wallets.id).notNull(),
+  type: text("type").notNull(), // 'topup' | 'spend' | 'refund'
+  amountCents: integer("amount_cents").notNull(),
+  description: text("description"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  campaignId: uuid("campaign_id").references(() => campaigns.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 export const campaigns = pgTable("campaigns", {
   id: uuid("id").primaryKey().defaultRandom(),
   brandId: uuid("brand_id").notNull(),
@@ -19,27 +41,15 @@ export const campaigns = pgTable("campaigns", {
   googleCampaignId: bigint("google_campaign_id", { mode: "number" }),
   googleAdgroupId: bigint("google_adgroup_id", { mode: "number" }),
   googleAccountId: text("google_account_id"),
-  status: text("status").default("draft").notNull(),
-  budgetTier: text("budget_tier"),
+  status: text("status").default("draft").notNull(), // draft | active | paused | exhausted | stopped
   dailyBudgetCents: integer("daily_budget_cents"),
+  totalBudgetCents: integer("total_budget_cents"),
+  spentCents: integer("spent_cents").default(0),
   landingPageUrl: text("landing_page_url"),
   brandName: text("brand_name"),
   brandWebsite: text("brand_website"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
-
-export const subscriptions = pgTable("subscriptions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  campaignId: uuid("campaign_id").references(() => campaigns.id),
-  userId: uuid("user_id").notNull(),
-  stripeCustomerId: text("stripe_customer_id"),
-  stripeSubscriptionId: text("stripe_subscription_id"),
-  stripePriceId: text("stripe_price_id"),
-  status: text("status").default("incomplete").notNull(),
-  currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
-  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 export const placements = pgTable("placements", {

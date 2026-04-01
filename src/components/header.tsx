@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useTheme } from "./theme-provider";
+import { createSupabaseBrowser } from "@/lib/supabase-browser";
 
 export function Header({
   breadcrumbs,
@@ -11,17 +13,20 @@ export function Header({
   action?: React.ReactNode;
 }) {
   const { theme, toggleTheme, colors } = useTheme();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  async function handleLogout() {
+    const supabase = createSupabaseBrowser();
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
 
   return (
     <header style={{ borderBottom: `1px solid ${colors.border}`, padding: '16px 24px', background: colors.bg }}>
       <div className="max-w-6xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/brands" className="flex items-center gap-2">
-            <img
-              src={theme === "dark" ? "/airankia-logo.png" : "/airankia-logo.png"}
-              alt="AI Rankia"
-              style={{ height: 28, width: 'auto' }}
-            />
+            <img src="/airankia-logo.png" alt="AI Rankia" style={{ height: 28, width: 'auto' }} />
             <span style={{
               fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
               background: 'rgba(16,185,129,0.15)', color: colors.accent,
@@ -45,7 +50,8 @@ export function Header({
             </span>
           ))}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {action}
           <button
             onClick={toggleTheme}
             style={{
@@ -64,7 +70,48 @@ export function Header({
               </svg>
             )}
           </button>
-          {action}
+
+          {/* User menu */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              style={{
+                padding: 8, borderRadius: 8, background: 'transparent',
+                border: `1px solid ${colors.border}`, cursor: 'pointer', display: 'flex',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+            </button>
+            {menuOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMenuOpen(false)} />
+                <div style={{
+                  position: 'absolute', right: 0, top: '100%', marginTop: 8, zIndex: 50,
+                  background: colors.bgCard, border: `1px solid ${colors.border}`,
+                  borderRadius: 10, padding: 4, minWidth: 160, boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                }}>
+                  <button
+                    onClick={handleLogout}
+                    style={{
+                      width: '100%', padding: '10px 14px', borderRadius: 6,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      fontSize: 13, color: '#F87171', textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </header>

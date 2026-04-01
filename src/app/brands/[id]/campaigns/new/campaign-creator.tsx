@@ -81,6 +81,21 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
         .catch(() => {})
         .finally(() => setScraping(false));
     }
+
+    // Auto-load brand logo as uploaded image
+    const logoUrl = brand.logo_url;
+    if (logoUrl && logoUrl.startsWith("http")) {
+      fetch(logoUrl).then((r) => r.blob()).then((blob) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const [header, base64] = dataUrl.split(",");
+          const mimeType = header.match(/data:([^;]+)/)?.[1] || "image/png";
+          setUploadedImages([{ base64, mimeType, preview: dataUrl, name: "Brand Logo" }]);
+        };
+        reader.readAsDataURL(blob);
+      }).catch(() => {});
+    }
   }, [brand]);
 
   // Scan GDN on mount

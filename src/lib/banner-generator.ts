@@ -1,10 +1,9 @@
-// Banner generation via Gemini API — generates GDN-compliant display ad banners
+// Banner generation via Gemini API with multi-modal support (text + uploaded images)
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 const GEMINI_MODEL = "gemini-2.5-flash-preview-04-17";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-// Standard GDN banner sizes (width x height)
 export const GDN_SIZES = [
   { width: 300, height: 250, name: "Medium Rectangle", aspect: "6:5" },
   { width: 336, height: 280, name: "Large Rectangle", aspect: "6:5" },
@@ -18,9 +17,9 @@ export interface BannerRequest {
   brandWebsite: string;
   tagline?: string;
   ctaText?: string;
-  logoUrl?: string;
   colorScheme?: string;
   style?: string;
+  images?: { base64: string; mimeType: string }[]; // uploaded brand assets
 }
 
 export interface GeneratedBanner {
@@ -35,7 +34,7 @@ function buildPrompt(req: BannerRequest, size: typeof GDN_SIZES[number]): string
   const cta = req.ctaText || "Learn More";
   const tagline = req.tagline || `Discover ${req.brandName}`;
   const colors = req.colorScheme || "professional dark theme with brand colors";
-  const style = req.style || "clean, modern, corporate";
+  const hasImages = req.images && req.images.length > 0;
 
   return `Create a professional Google Display Network banner advertisement.
 
@@ -45,16 +44,14 @@ EXACT REQUIREMENTS:
 - Tagline: "${tagline}" — smaller text below or near the brand name
 - CTA button: "${cta}" — a clear call-to-action button
 - Color scheme: ${colors}
-- Style: ${style}
-- The banner must look like a real professional display ad, NOT a photo or illustration
+- The banner must look like a real professional display ad
 - Clean typography, no clutter
 - The brand name should be the focal point
-- Include a subtle border or edge definition so the ad is distinguishable on any background
-- DO NOT include any placeholder logos or stock imagery — text-based design only
+- Include a subtle border so the ad is distinguishable on any background
+${hasImages ? "- IMPORTANT: Use the provided brand images/logo in the banner design. Incorporate the logo prominently." : "- Text-based design, no placeholder imagery"}
 - Make it look like it was designed by a professional advertising agency`;
 }
 
-// Map GDN size to closest Gemini aspect ratio
 function getGeminiAspect(size: typeof GDN_SIZES[number]): string {
   const ratio = size.width / size.height;
   if (ratio >= 7) return "8:1";
@@ -63,7 +60,6 @@ function getGeminiAspect(size: typeof GDN_SIZES[number]): string {
   if (ratio >= 1.3) return "4:3";
   if (ratio >= 0.9) return "1:1";
   if (ratio >= 0.6) return "3:4";
-  if (ratio >= 0.3) return "1:4";
   return "1:4";
 }
 
@@ -74,17 +70,26 @@ export async function generateBanner(
   const prompt = buildPrompt(req, size);
   const aspect = getGeminiAspect(size);
 
+  // Build parts: text prompt + any uploaded images
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+    { text: prompt },
+  ];
+
+  // Add uploaded images as multi-modal input
+  if (req.images?.length) {
+    for (const img of req.images.slice(0, 3)) { // max 3 images
+      parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } });
+    }
+  }
+
   const resp = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
       generationConfig: {
         responseModalities: ["TEXT", "IMAGE"],
-        imageConfig: {
-          aspectRatio: aspect,
-          imageSize: "1K",
-        },
+        imageConfig: { aspectRatio: aspect, imageSize: "1K" },
       },
     }),
   });
@@ -95,14 +100,12 @@ export async function generateBanner(
   }
 
   const data = await resp.json();
-  const parts = data.candidates?.[0]?.content?.parts || [];
+  const resParts = data.candidates?.[0]?.content?.parts || [];
 
-  for (const part of parts) {
+  for (const part of resParts) {
     if (part.inlineData) {
       return {
-        width: size.width,
-        height: size.height,
-        name: size.name,
+        width: size.width, height: size.height, name: size.name,
         base64: part.inlineData.data,
         mimeType: part.inlineData.mimeType || "image/png",
       };
@@ -112,24 +115,30 @@ export async function generateBanner(
   throw new Error("Gemini did not return an image");
 }
 
-// Generate all standard GDN banner sizes
+// Generate one specific size
+export async function generateSingleBanner(
+  req: BannerRequest,
+  sizeId: string
+): Promise<GeneratedBanner> {
+  const size = GDN_SIZES.find((s) => `${s.width}x${s.height}` === sizeId);
+  if (!size) throw new Error(`Unknown size: ${sizeId}`);
+  return generateBanner(req, size);
+}
+
+// Generate multiple sizes
 export async function generateAllBanners(
   req: BannerRequest,
   sizes?: typeof GDN_SIZES[number][]
 ): Promise<GeneratedBanner[]> {
   const targetSizes = sizes || [...GDN_SIZES];
   const results: GeneratedBanner[] = [];
-
-  // Generate sequentially to avoid rate limits
   for (const size of targetSizes) {
     try {
       const banner = await generateBanner(req, size);
       results.push(banner);
     } catch (e) {
       console.error(`Failed to generate ${size.name}:`, e);
-      // Continue with other sizes
     }
   }
-
   return results;
 }

@@ -52,6 +52,8 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
   const [colorStyle, setColorStyle] = useState("");
   const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set(["300x250", "728x90"]));
   const [bannerError, setBannerError] = useState<string | null>(null);
+  const [uploadedImages, setUploadedImages] = useState<{ base64: string; mimeType: string; preview: string; name: string }[]>([]);
+  const [regenSize, setRegenSize] = useState<string | null>(null);
 
   // Publishing
   const [saving, setSaving] = useState(false);
@@ -106,16 +108,52 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
     setSelected((p) => { const n = new Set(p); if (n.has(url)) n.delete(url); else n.add(url); return n; });
   }
 
+  const bannerPayload = () => ({
+    brandName: brand.name, brandWebsite: brand.website, tagline: brandTagline,
+    ctaText: cta, colorScheme: colorStyle,
+    images: uploadedImages.map((i) => ({ base64: i.base64, mimeType: i.mimeType })),
+  });
+
   async function generateBanners() {
     setGenBanners(true); setBannerError(null);
     try {
       const r = await fetch("/api/banners", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandName: brand.name, brandWebsite: brand.website, tagline: brandTagline, ctaText: cta, colorScheme: colorStyle, sizes: [...selectedSizes] }) });
+        body: JSON.stringify({ ...bannerPayload(), sizes: [...selectedSizes] }) });
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setBanners(data.banners);
     } catch (e) { setBannerError(e instanceof Error ? e.message : "Failed"); }
     setGenBanners(false);
+  }
+
+  async function regenerateBanner(sizeId: string) {
+    setRegenSize(sizeId);
+    try {
+      const r = await fetch("/api/banners", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...bannerPayload(), singleSize: sizeId }) });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      if (data.banners?.[0]) {
+        setBanners((prev) => prev.map((b) => `${b.width}x${b.height}` === sizeId ? data.banners[0] : b));
+      }
+    } catch (e) { setBannerError(e instanceof Error ? e.message : "Regen failed"); }
+    setRegenSize(null);
+  }
+
+  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).slice(0, 5).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const [header, base64] = dataUrl.split(",");
+        const mimeType = header.match(/data:([^;]+)/)?.[1] || "image/png";
+        setUploadedImages((prev) => [...prev, { base64, mimeType, preview: dataUrl, name: file.name }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
   }
 
   async function saveDraft() {
@@ -304,11 +342,34 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
         {step === "creatives" && (
           <div>
             <h1 className="text-2xl font-bold mb-2">Create Ad Banners</h1>
-            <p style={{ color: colors.textMuted, marginBottom: 24 }}>AI generates display banners using your brand info. Edit and regenerate until happy.</p>
+            <p style={{ color: colors.textMuted, marginBottom: 24 }}>Upload brand assets + AI generates professional display banners.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Left: controls */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Image upload */}
+                <div>
+                  <label style={lbl}>Brand Assets (logo, product images)</label>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 8, border: `2px dashed ${colors.border}`, cursor: 'pointer', color: colors.textMuted, fontSize: 13 }}>
+                    <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{ display: 'none' }} />
+                    📎 Upload images (max 5)
+                  </label>
+                  {uploadedImages.length > 0 && (
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      {uploadedImages.map((img, i) => (
+                        <div key={i} style={{ position: 'relative' }}>
+                          <img src={img.preview} alt={img.name} style={{ width: 56, height: 56, borderRadius: 6, objectFit: 'cover', border: `1px solid ${colors.border}` }} />
+                          <button onClick={() => setUploadedImages((p) => p.filter((_, j) => j !== i))}
+                            style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: 99, background: '#EF4444', color: '#fff', border: 'none', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p style={{ fontSize: 10, color: colors.textFaint, marginTop: 4 }}>
+                    {uploadedImages.length > 0 ? `${uploadedImages.length} image${uploadedImages.length > 1 ? 's' : ''} — AI will incorporate these into banners` : "Upload your logo for better results"}
+                  </p>
+                </div>
+
                 <div><label style={lbl}>Tagline</label><input value={brandTagline} onChange={(e) => setBrandTagline(e.target.value)} style={inp} /></div>
                 <div><label style={lbl}>Call to Action</label><input value={cta} onChange={(e) => setCta(e.target.value)} style={inp} /></div>
                 <div><label style={lbl}>Color / Style</label><input value={colorStyle} onChange={(e) => setColorStyle(e.target.value)} style={inp} /></div>
@@ -332,29 +393,41 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                 {bannerError && <p style={{ fontSize: 12, color: '#F87171' }}>{bannerError}</p>}
               </div>
 
-              {/* Right: previews (2 cols) */}
+              {/* Right: previews */}
               <div className="md:col-span-2">
                 {banners.length === 0 && !genBanners && (
                   <div className="py-16 text-center" style={{ border: `2px dashed ${colors.border}`, borderRadius: 12 }}>
-                    <p style={{ color: colors.textMuted, fontSize: 14 }}>No banners yet. Configure and click Generate.</p>
+                    <p style={{ color: colors.textMuted, fontSize: 14 }}>
+                      {uploadedImages.length > 0 ? `${uploadedImages.length} images ready. Click Generate.` : "Upload brand assets and click Generate."}
+                    </p>
                   </div>
                 )}
                 {genBanners && (
                   <div className="py-16 text-center animate-pulse" style={{ border: `2px dashed ${colors.border}`, borderRadius: 12 }}>
-                    <p style={{ color: colors.textMuted, fontSize: 14 }}>Generating banners with AI...</p>
+                    <p style={{ color: colors.textMuted, fontSize: 14 }}>Generating banners with AI{uploadedImages.length > 0 ? " using your brand assets" : ""}...</p>
                   </div>
                 )}
                 {banners.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {banners.map((b, i) => (
-                      <div key={i} style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 12 }}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span style={{ fontSize: 12, color: colors.textMuted }}>{b.name} ({b.width}x{b.height})</span>
-                          <a href={b.dataUrl} download={`${brand.name}-${b.width}x${b.height}.png`} style={{ fontSize: 11, color: colors.accent, textDecoration: 'none' }}>Download</a>
+                    {banners.map((b, i) => {
+                      const sizeId = `${b.width}x${b.height}`;
+                      const isRegen = regenSize === sizeId;
+                      return (
+                        <div key={i} style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 12, opacity: isRegen ? 0.5 : 1 }}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span style={{ fontSize: 12, color: colors.textMuted }}>{b.name} ({sizeId})</span>
+                            <div className="flex gap-3">
+                              <button onClick={() => regenerateBanner(sizeId)} disabled={!!regenSize}
+                                style={{ fontSize: 11, color: 'rgba(99,102,241,0.8)', background: 'none', border: 'none', cursor: regenSize ? 'not-allowed' : 'pointer' }}>
+                                {isRegen ? "Regenerating..." : "🔄 Regenerate"}
+                              </button>
+                              <a href={b.dataUrl} download={`${brand.name}-${sizeId}.png`} style={{ fontSize: 11, color: colors.accent, textDecoration: 'none' }}>⬇ Download</a>
+                            </div>
+                          </div>
+                          <img src={b.dataUrl} alt={b.name} style={{ maxWidth: '100%', borderRadius: 6, border: `1px solid ${colors.border}` }} />
                         </div>
-                        <img src={b.dataUrl} alt={b.name} style={{ maxWidth: '100%', borderRadius: 6, border: `1px solid ${colors.border}` }} />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

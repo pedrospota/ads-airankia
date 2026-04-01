@@ -23,13 +23,13 @@ export interface BrandVisibility {
   avg_score: number;
 }
 
-// Fetch brands for a workspace
-export async function getBrands(workspaceId: string): Promise<Brand[]> {
+// Fetch brands for multiple workspaces
+export async function getBrands(workspaceIds: string[]): Promise<Brand[]> {
   const supabase = createSupabaseReadClient();
   const { data, error } = await supabase
     .from("brand_project")
     .select("id, name, industry, website, logo_url, workspace_id")
-    .eq("workspace_id", workspaceId)
+    .in("workspace_id", workspaceIds)
     .order("name");
 
   if (error) throw error;

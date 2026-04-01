@@ -12,23 +12,22 @@ export default async function BrandsPage() {
 
   if (!user) redirect("/login");
 
-  // Get workspace(s) for this user
+  // Get all workspaces for this user
   const { data: memberships } = await supabase
     .from("workspace_members")
     .select("workspace_id")
-    .eq("user_id", user.id)
-    .limit(1);
+    .eq("user_id", user.id);
 
-  const workspaceId = memberships?.[0]?.workspace_id;
+  const workspaceIds = memberships?.map((m) => m.workspace_id) ?? [];
 
   let brands: Awaited<ReturnType<typeof getBrands>> = [];
   let error: string | null = null;
 
-  if (!workspaceId) {
+  if (workspaceIds.length === 0) {
     error = "No workspace found for your account. Please set up a workspace in AI Rankia first.";
   } else {
     try {
-      brands = await getBrands(workspaceId);
+      brands = await getBrands(workspaceIds);
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load brands";
     }

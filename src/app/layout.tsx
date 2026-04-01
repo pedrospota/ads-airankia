@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,8 +17,11 @@ export const metadata: Metadata = {
   description:
     "Run display ads on the exact URLs that AI models cite. Capture buyers at peak intent.",
   icons: {
-    icon: "/favicon.png",
-    apple: "/apple-icon.png",
+    icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
   },
 };
 
@@ -29,14 +31,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark`}
-      // @ts-expect-error -- React 19 supports this prop
-      suppressHydrationMismatch
-    >
-      <body className="min-h-screen antialiased bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
-        <ThemeProvider>{children}</ThemeProvider>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark h-full`} suppressHydrationWarning>
+      <body className="h-full antialiased" style={{ background: '#0A0A0E', color: '#FAFAFA' }}>
+        {children}
       </body>
     </html>
   );

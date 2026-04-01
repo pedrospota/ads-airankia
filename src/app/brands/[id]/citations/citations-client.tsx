@@ -47,18 +47,34 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   useEffect(() => { setPage(0); }, [networkFilter]);
 
-  const gdnDomains = Object.values(adData).filter((a) => a.hasGdn && !a.networks.includes("YouTube")).length;
-  const ytDomains = Object.values(adData).filter((a) => a.networks.includes("YouTube")).length;
   const totalCitations = citations.reduce((s, c) => s + c.citation_count, 0);
-  const uniqueDomains = new Set(citations.map((c) => c.domain)).size;
+  const uniqueDomains = new Set(citations.map((c) => c.domain.replace(/^www\./, "").replace(/^m\./, ""))).size;
 
   const oldestCheck = useMemo(() => { const d = Object.values(adData).filter((a) => a.checkedAt).map((a) => new Date(a.checkedAt!).getTime()); return d.length ? new Date(Math.min(...d)) : null; }, [adData]);
 
-  // All targetable = GDN websites + YouTube
-  const targetableCitations = useMemo(() => citations.filter((c) => {
-    const d = c.domain.replace(/^www\./, "").replace(/^m\./, "");
-    return adData[d]?.hasGdn || adData["youtube.com"]?.hasGdn && (d === "youtube.com" || d === "youtu.be");
-  }), [citations, adData]);
+  // Targetable domains (unique domains that have GDN or YouTube)
+  const targetableDomainSet = useMemo(() => {
+    const s = new Set<string>();
+    citations.forEach((c) => {
+      const d = c.domain.replace(/^www\./, "").replace(/^m\./, "");
+      if (adData[d]?.hasGdn) s.add(d);
+    });
+    return s;
+  }, [citations, adData]);
+  const targetableDomainCount = targetableDomainSet.size;
+  const domainCoverage = uniqueDomains > 0 ? Math.round((targetableDomainCount / uniqueDomains) * 100) : 0;
+
+  // Breakdown: GDN vs YouTube domains
+  const gdnWebDomains = useMemo(() => {
+    const s = new Set<string>();
+    citations.forEach((c) => {
+      const d = c.domain.replace(/^www\./, "").replace(/^m\./, "");
+      const info = adData[d];
+      if (info?.hasGdn && !info.networks.includes("YouTube")) s.add(d);
+    });
+    return s.size;
+  }, [citations, adData]);
+  const ytDomainCount = targetableDomainSet.has("youtube.com") || targetableDomainSet.has("youtu.be") ? 1 : 0;
 
   const gdnCitations = useMemo(() => citations.filter((c) => adData[c.domain.replace(/^www\./, "").replace(/^m\./, "")]?.hasGdn), [citations, adData]);
 
@@ -94,8 +110,16 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {[{ l: "Total Citations", v: totalCitations.toLocaleString() }, { l: "Unique Domains", v: uniqueDomains.toString() }, { l: "Targetable", v: adLoading ? "..." : `${gdnCitations.length} URLs`, a: true }, { l: "Breakdown", v: adLoading ? "..." : `${gdnDomains} GDN + ${ytDomains > 0 ? ytDomains + " YT" : "0 YT"}` }]
-            .map((k) => (<div key={k.l} className="p-4 rounded-xl" style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}><p style={{ fontSize: 13, color: colors.textMuted }}>{k.l}</p><p className="font-bold mt-1" style={{ fontSize: k.a ? 16 : 24, color: k.a ? colors.accent : colors.text }}>{k.v}</p></div>))}
+          {[
+            { l: "Total Citations", v: totalCitations.toLocaleString(), sub: `${citations.length} unique URLs` },
+            { l: "Unique Domains", v: uniqueDomains.toString() },
+            { l: "Targetable Domains", v: adLoading ? "..." : `${targetableDomainCount}`, sub: adLoading ? "" : `${domainCoverage}% coverage`, a: true },
+            { l: "Targetable URLs", v: adLoading ? "..." : `${gdnCitations.length}`, sub: adLoading ? "" : `${citations.length > 0 ? Math.round((gdnCitations.length / citations.length) * 100) : 0}% · ${gdnWebDomains} GDN${ytDomainCount ? " · 1 YouTube" : ""}`, a: true },
+          ].map((k) => (<div key={k.l} className="p-4 rounded-xl" style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}>
+            <p style={{ fontSize: 13, color: colors.textMuted }}>{k.l}</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: k.a ? colors.accent : colors.text }}>{k.v}</p>
+            {k.sub && <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 2 }}>{k.sub}</p>}
+          </div>))}
         </div>
 
         {error && <div style={{ padding: 16, borderRadius: 8, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#F87171', marginBottom: 24 }}>{error}</div>}

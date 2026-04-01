@@ -185,43 +185,148 @@ function CampaignModal({ colors, brand, selectedCount, onClose, onCreate, creati
   colors: ReturnType<typeof useTheme>["colors"]; brand: { name: string; website: string | null }; selectedCount: number;
   onClose: () => void; onCreate: (n: string, l: string, b: number) => void; creating: boolean; result: { id: string; placementCount: number } | null;
 }) {
+  const [step, setStep] = useState<"settings" | "banners" | "done">(result ? "done" : "settings");
   const [name, setName] = useState(`${brand.name} - Citation Retargeting`);
   const [lp, setLp] = useState(brand.website || "");
   const [budget, setBudget] = useState(0);
+  const [banners, setBanners] = useState<{ width: number; height: number; name: string; dataUrl: string }[]>([]);
+  const [genBanners, setGenBanners] = useState(false);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  const [tagline, setTagline] = useState(`Discover ${brand.name}`);
+  const [cta, setCta] = useState("Learn More");
+  const [colorStyle, setColorStyle] = useState("professional dark with emerald accents");
+  const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set(["300x250", "728x90"]));
+
   const inp = { width: '100%' as const, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '10px 14px', fontSize: 13, color: colors.text, outline: 'none', boxSizing: 'border-box' as const };
   const lbl = { display: 'block' as const, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: colors.textMuted, marginBottom: 7, textTransform: 'uppercase' as const };
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={onClose} />
-      <div style={{ position: 'relative', background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 16, padding: 32, maxWidth: 480, width: '100%', boxShadow: '0 24px 48px rgba(0,0,0,0.4)' }}>
-        {result ? (
+  const SIZES = [
+    { id: "300x250", desc: "Medium Rectangle" }, { id: "728x90", desc: "Leaderboard" },
+    { id: "336x280", desc: "Large Rectangle" }, { id: "160x600", desc: "Skyscraper" }, { id: "320x50", desc: "Mobile" },
+  ];
+
+  async function generateBanners() {
+    setGenBanners(true); setBannerError(null);
+    try {
+      const r = await fetch("/api/banners", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandName: brand.name, brandWebsite: brand.website, tagline, ctaText: cta, colorScheme: colorStyle, sizes: [...selectedSizes] }) });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      setBanners(data.banners);
+    } catch (e) { setBannerError(e instanceof Error ? e.message : "Failed"); }
+    setGenBanners(false);
+  }
+
+  if (result) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={onClose} />
+        <div style={{ position: 'relative', background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 16, padding: 32, maxWidth: 480, width: '100%', boxShadow: '0 24px 48px rgba(0,0,0,0.4)' }}>
           <div className="text-center">
             <div style={{ width: 56, height: 56, borderRadius: 99, background: 'rgba(16,185,129,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>Campaign Created</h2>
-            <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 4 }}>{result.placementCount} URL placements saved</p>
-            <p style={{ fontSize: 12, color: colors.textFaint, marginBottom: 24 }}>Status: <strong style={{ color: '#FBBF24' }}>Draft</strong> — Saved but not yet live. Set budget and activate when ready.</p>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>Campaign Created in Google Ads</h2>
+            <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 4 }}>{result.placementCount} placements · {banners.length} banners</p>
+            <p style={{ fontSize: 12, color: colors.textFaint, marginBottom: 24 }}>Status: <strong style={{ color: '#FBBF24' }}>PAUSED</strong> — Activate in Google Ads when ready.</p>
             <button onClick={onClose} style={{ padding: '10px 24px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, border: 'none', cursor: 'pointer' }}>Done</button>
           </div>
-        ) : (
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', padding: 20 }}>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={onClose} />
+      <div style={{ position: 'relative', background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 16, padding: 32, maxWidth: 600, width: '100%', boxShadow: '0 24px 48px rgba(0,0,0,0.4)', maxHeight: '90vh', overflow: 'auto' }}>
+        {/* Step indicator */}
+        <div className="flex gap-2 mb-6">
+          {["Settings", "Banners"].map((s, i) => (
+            <div key={s} className="flex items-center gap-2">
+              <div style={{ width: 24, height: 24, borderRadius: 99, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: (i === 0 && step === "settings") || (i === 1 && step === "banners") ? colors.accent : colors.bg,
+                color: (i === 0 && step === "settings") || (i === 1 && step === "banners") ? '#000' : colors.textMuted,
+                border: `1px solid ${colors.border}`,
+              }}>{i + 1}</div>
+              <span style={{ fontSize: 13, color: (i === 0 && step === "settings") || (i === 1 && step === "banners") ? colors.text : colors.textMuted }}>{s}</span>
+              {i < 1 && <span style={{ color: colors.border, margin: '0 4px' }}>→</span>}
+            </div>
+          ))}
+        </div>
+
+        {step === "settings" && (
           <>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Create Campaign</h2>
-            <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 24 }}>{selectedCount} GDN placements for {brand.name}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Campaign Settings</h2>
+            <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>{selectedCount} placements for {brand.name}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div><label style={lbl}>Campaign Name</label><input value={name} onChange={(e) => setName(e.target.value)} style={inp} /></div>
               <div><label style={lbl}>Landing Page URL</label><input value={lp} onChange={(e) => setLp(e.target.value)} placeholder="https://yoursite.com" style={inp} /></div>
               <div>
-                <label style={lbl}>Daily Budget (USD) — $0 = paused, set later</label>
+                <label style={lbl}>Daily Budget (USD)</label>
                 <input type="number" min={0} step={1} value={budget} onChange={(e) => setBudget(Number(e.target.value))} style={inp} />
-                <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 4 }}>Campaign created PAUSED. You activate it when ready.</p>
+                <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 4 }}>Min $1. Campaign created PAUSED. Activate when ready.</p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={onClose} style={{ flex: 1, padding: 10, borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={() => onCreate(name, lp, budget)} disabled={creating || !name} style={{ flex: 1, padding: 10, borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, border: 'none', cursor: creating ? 'not-allowed' : 'pointer', opacity: creating ? 0.7 : 1 }}>
-                {creating ? "Creating..." : "Create Campaign"}
+              <button onClick={() => setStep("banners")} disabled={!name} style={{ flex: 1, padding: 10, borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, border: 'none', cursor: 'pointer' }}>
+                Next: Banners →
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === "banners" && (
+          <>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Generate Banners</h2>
+            <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 20 }}>AI-generated display ad creatives for {brand.name}</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div><label style={lbl}>Tagline</label><input value={tagline} onChange={(e) => setTagline(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Call to Action</label><input value={cta} onChange={(e) => setCta(e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Color / Style</label><input value={colorStyle} onChange={(e) => setColorStyle(e.target.value)} style={inp} /></div>
+              <div>
+                <label style={lbl}>Banner Sizes</label>
+                <div className="flex flex-wrap gap-2">
+                  {SIZES.map((s) => (
+                    <button key={s.id} onClick={() => setSelectedSizes((p) => { const n = new Set(p); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; })}
+                      style={{ padding: '5px 10px', borderRadius: 6, fontSize: 11, background: selectedSizes.has(s.id) ? 'rgba(16,185,129,0.15)' : 'transparent',
+                        border: `1px solid ${selectedSizes.has(s.id) ? 'rgba(16,185,129,0.4)' : colors.border}`, color: selectedSizes.has(s.id) ? colors.accent : colors.textMuted, cursor: 'pointer' }}>
+                      {s.id} <span style={{ opacity: 0.6 }}>{s.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button onClick={generateBanners} disabled={genBanners || selectedSizes.size === 0}
+                style={{ padding: 11, borderRadius: 8, background: 'rgba(99,102,241,0.8)', color: '#fff', fontWeight: 600, fontSize: 13, border: 'none',
+                  cursor: genBanners ? 'not-allowed' : 'pointer', opacity: genBanners ? 0.7 : 1 }}>
+                {genBanners ? `Generating ${selectedSizes.size} banner${selectedSizes.size > 1 ? 's' : ''}...` : `Generate ${selectedSizes.size} Banner${selectedSizes.size > 1 ? 's' : ''}`}
+              </button>
+
+              {bannerError && <p style={{ fontSize: 12, color: '#F87171', background: 'rgba(248,113,113,0.1)', padding: '8px 12px', borderRadius: 7 }}>{bannerError}</p>}
+
+              {banners.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {banners.map((b, i) => (
+                    <div key={i} style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 8 }}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span style={{ fontSize: 11, color: colors.textMuted }}>{b.name} ({b.width}x{b.height})</span>
+                        <a href={b.dataUrl} download={`${brand.name}-${b.width}x${b.height}.png`} style={{ fontSize: 10, color: colors.accent }}>Download</a>
+                      </div>
+                      <img src={b.dataUrl} alt={b.name} style={{ maxWidth: '100%', borderRadius: 4 }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setStep("settings")} style={{ flex: 1, padding: 10, borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 13, cursor: 'pointer' }}>← Back</button>
+              <button onClick={() => onCreate(name, lp, budget)} disabled={creating || !name}
+                style={{ flex: 1, padding: 10, borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, border: 'none', cursor: creating ? 'not-allowed' : 'pointer', opacity: creating ? 0.7 : 1 }}>
+                {creating ? "Creating..." : `Create Campaign${banners.length > 0 ? '' : ' (no banners)'}`}
               </button>
             </div>
           </>

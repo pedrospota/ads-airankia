@@ -1,5 +1,7 @@
 import { getCitationsForBrand, isGdnAvailable } from "@/lib/queries";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
+import { createSupabaseServerClient } from "@/lib/supabase-auth";
+import { redirect } from "next/navigation";
 import { CitationsClient } from "./citations-client";
 
 export default async function CitationsPage({
@@ -9,7 +11,14 @@ export default async function CitationsPage({
 }) {
   const { id: brandId } = await params;
 
-  const supabase = createSupabaseReadClient();
+  const authClient = await createSupabaseServerClient();
+  const { data: { user } } = await authClient.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: { session } } = await authClient.auth.getSession();
+  const accessToken = session?.access_token;
+
+  const supabase = createSupabaseReadClient(accessToken);
   const { data: brand } = await supabase
     .from("brand_project")
     .select("id, name, industry, website, logo_url")
@@ -28,7 +37,7 @@ export default async function CitationsPage({
   let error: string | null = null;
 
   try {
-    citations = await getCitationsForBrand(brandId);
+    citations = await getCitationsForBrand(brandId, accessToken);
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load citations";
   }

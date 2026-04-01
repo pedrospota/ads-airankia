@@ -12,8 +12,13 @@ export default async function BrandsPage() {
 
   if (!user) redirect("/login");
 
-  // Get all workspaces for this user
-  const { data: memberships } = await supabase
+  // Get the user's access token for RLS-protected queries
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = session?.access_token;
+
+  // Get all workspaces for this user (workspace_members has RLS)
+  const airankia = (await import("@/lib/supabase-server")).createSupabaseReadClient(accessToken);
+  const { data: memberships } = await airankia
     .from("workspace_members")
     .select("workspace_id")
     .eq("user_id", user.id);
@@ -27,7 +32,7 @@ export default async function BrandsPage() {
     error = "No workspace found for your account. Please set up a workspace in AI Rankia first.";
   } else {
     try {
-      brands = await getBrands(workspaceIds);
+      brands = await getBrands(workspaceIds, accessToken);
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load brands";
     }

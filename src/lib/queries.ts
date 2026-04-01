@@ -24,8 +24,8 @@ export interface BrandVisibility {
 }
 
 // Fetch brands for multiple workspaces
-export async function getBrands(workspaceIds: string[]): Promise<Brand[]> {
-  const supabase = createSupabaseReadClient();
+export async function getBrands(workspaceIds: string[], accessToken?: string): Promise<Brand[]> {
+  const supabase = createSupabaseReadClient(accessToken);
   const { data, error } = await supabase
     .from("brand_project")
     .select("id, name, industry, website, logo_url, workspace_id")
@@ -38,9 +38,10 @@ export async function getBrands(workspaceIds: string[]): Promise<Brand[]> {
 
 // Fetch aggregated citations for a brand
 export async function getCitationsForBrand(
-  brandId: string
+  brandId: string,
+  accessToken?: string
 ): Promise<CitationAggregation[]> {
-  const supabase = createSupabaseReadClient();
+  const supabase = createSupabaseReadClient(accessToken);
 
   // Get all query_run_results for prompts attached to this brand
   const { data: queries, error: qError } = await supabase

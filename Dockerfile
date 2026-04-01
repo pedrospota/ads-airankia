@@ -11,6 +11,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+RUN mkdir -p public
+
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_SUPABASE_URL=https://tnnguzekgtqbdbpankos.supabase.co
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder

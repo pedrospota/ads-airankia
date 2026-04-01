@@ -1,24 +1,37 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getBrands } from "@/lib/queries";
+import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { HeaderWrapper } from "./header-wrapper";
 
-const DEMO_WORKSPACE_ID = "REPLACE_WITH_WORKSPACE_ID";
+export default async function BrandsPage() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-export default async function BrandsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ workspace?: string }>;
-}) {
-  const params = await searchParams;
-  const workspaceId = params.workspace || DEMO_WORKSPACE_ID;
+  if (!user) redirect("/login");
+
+  // Get workspace(s) for this user
+  const { data: memberships } = await supabase
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", user.id)
+    .limit(1);
+
+  const workspaceId = memberships?.[0]?.workspace_id;
 
   let brands: Awaited<ReturnType<typeof getBrands>> = [];
   let error: string | null = null;
 
-  try {
-    brands = await getBrands(workspaceId);
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to load brands";
+  if (!workspaceId) {
+    error = "No workspace found for your account. Please set up a workspace in AI Rankia first.";
+  } else {
+    try {
+      brands = await getBrands(workspaceId);
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to load brands";
+    }
   }
 
   return (

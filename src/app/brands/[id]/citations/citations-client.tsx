@@ -106,7 +106,7 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
               <option value="all">All Sources ({citations.length})</option><option value="gdn">All Targetable ({gdnCitations.length})</option><option value="YouTube">YouTube Only</option><option value="no-ads">No Ads</option>
               {allNetworks.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
-            {!adLoading && gdnCount > 0 && <button onClick={selectAllTargetable} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>Select all targetable ({gdnCount})</button>}
+            {!adLoading && gdnCitations.length > 0 && <button onClick={selectAllTargetable} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>Select all targetable ({gdnCount})</button>}
             {selected.size > 0 && <button onClick={() => setSelected(new Set())} style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, cursor: 'pointer' }}>Clear ({selected.size})</button>}
             <span style={{ fontSize: 12, color: colors.textFaint }}>{filtered.length} results</span>
           </div>

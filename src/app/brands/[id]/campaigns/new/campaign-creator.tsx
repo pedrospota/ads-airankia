@@ -273,60 +273,87 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
           <div>
             <h1 className="text-2xl font-bold mb-2">Select Placements</h1>
             <p style={{ color: colors.textMuted, marginBottom: 8 }}>
-              {adLoading ? "Scanning..." : `${targetable.length} targetable URLs found. All pre-selected — deselect any you don't want.`}
+              {adLoading ? "Scanning citation URLs for ad inventory..." : `${targetable.length} targetable URLs out of ${citations.length} total. All pre-selected — deselect what you don't want.`}
             </p>
 
-            <div className="flex gap-3 mb-4">
-              <button onClick={() => setSelected(new Set(targetable.map((c) => c.url)))}
-                style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>
-                Select All ({targetable.length})
-              </button>
-              <button onClick={() => setSelected(new Set())}
-                style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, cursor: 'pointer' }}>
-                Deselect All
-              </button>
-              <span style={{ fontSize: 13, color: colors.accent, fontWeight: 600, alignSelf: 'center' }}>{selected.size} selected</span>
-            </div>
+            {adLoading && (
+              <div className="py-8 text-center animate-pulse" style={{ background: colors.bgCard, borderRadius: 12, marginBottom: 16 }}>
+                <p style={{ fontSize: 14, color: colors.textMuted }}>Checking ads.txt for {citations.length} citation domains...</p>
+                <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 4 }}>This may take a moment</p>
+              </div>
+            )}
 
-            <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${colors.border}`, maxHeight: 500, overflow: 'auto' }}>
-              <table className="w-full">
-                <thead style={{ position: 'sticky', top: 0 }}>
-                  <tr style={{ background: colors.bgCard, borderBottom: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 12 }} className="text-left">
-                    <th className="px-3 py-2 w-10"></th>
-                    <th className="px-3 py-2 font-medium">Domain</th>
-                    <th className="px-3 py-2 font-medium">URL</th>
-                    <th className="px-3 py-2 font-medium text-right">Citations</th>
-                    <th className="px-3 py-2 font-medium">Type</th>
-                  </tr>
-                </thead>
-                <tbody style={{ background: colors.bg }}>
-                  {targetable.map((c) => {
-                    const d = c.domain.replace(/^www\./, "").replace(/^m\./, "");
-                    const info = adData[d];
-                    const sel = selected.has(c.url);
-                    const isYT = info?.networks.includes("YouTube");
-                    return (
-                      <tr key={c.url} style={{ borderBottom: `1px solid ${colors.bgCard}`, background: sel ? 'rgba(16,185,129,0.04)' : undefined, opacity: sel ? 1 : 0.5 }}>
-                        <td className="px-3 py-2">
-                          <input type="checkbox" checked={sel} onChange={() => toggleUrl(c.url)}
-                            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: colors.accent }} />
-                        </td>
-                        <td className="px-3 py-2" style={{ fontSize: 12, fontWeight: 500 }}>{d}</td>
-                        <td className="px-3 py-2" style={{ fontSize: 11, color: colors.textMuted, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {c.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 50)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono" style={{ fontSize: 12 }}>{c.citation_count}</td>
-                        <td className="px-3 py-2">
-                          <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: isYT ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)', color: isYT ? '#EF4444' : '#10B981' }}>
-                            {isYT ? "YouTube" : "GDN"}
-                          </span>
-                        </td>
+            {!adLoading && (
+              <>
+                <div className="flex gap-3 mb-4">
+                  <button onClick={() => setSelected(new Set(targetable.map((c) => c.url)))}
+                    style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>
+                    Select All Targetable ({targetable.length})
+                  </button>
+                  <button onClick={() => setSelected(new Set())}
+                    style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, cursor: 'pointer' }}>
+                    Deselect All
+                  </button>
+                  <span style={{ fontSize: 13, color: colors.accent, fontWeight: 600, alignSelf: 'center' }}>{selected.size} selected</span>
+                </div>
+
+                <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${colors.border}`, maxHeight: 500, overflow: 'auto' }}>
+                  <table className="w-full">
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                      <tr style={{ background: colors.bgCard, borderBottom: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 12 }} className="text-left">
+                        <th className="px-3 py-2 w-10"></th>
+                        <th className="px-3 py-2 font-medium">Domain</th>
+                        <th className="px-3 py-2 font-medium">URL</th>
+                        <th className="px-3 py-2 font-medium text-right">Citations</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody style={{ background: colors.bg }}>
+                      {citations.map((c) => {
+                        const d = c.domain.replace(/^www\./, "").replace(/^m\./, "");
+                        const info = adData[d];
+                        const isTargetable = info?.hasGdn;
+                        const sel = selected.has(c.url);
+                        const isYT = info?.networks.includes("YouTube");
+                        return (
+                          <tr key={c.url} style={{ borderBottom: `1px solid ${colors.bgCard}`, background: sel ? 'rgba(16,185,129,0.04)' : undefined, opacity: isTargetable ? (sel ? 1 : 0.6) : 0.3 }}>
+                            <td className="px-3 py-2">
+                              {isTargetable ? (
+                                <input type="checkbox" checked={sel} onChange={() => toggleUrl(c.url)}
+                                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: colors.accent }} />
+                              ) : (
+                                <span style={{ width: 16, height: 16, display: 'block' }} />
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <img src={`https://www.google.com/s2/favicons?domain=${d}&sz=16`} alt="" width={16} height={16} style={{ borderRadius: 2 }} />
+                                <span style={{ fontSize: 12, fontWeight: 500 }}>{d}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2" style={{ fontSize: 11, color: colors.textMuted, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {c.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 50)}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono" style={{ fontSize: 12 }}>{c.citation_count}</td>
+                            <td className="px-3 py-2">
+                              {isTargetable ? (
+                                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: isYT ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)', color: isYT ? '#EF4444' : '#10B981' }}>
+                                  {isYT ? "YouTube" : "GDN"}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: 'rgba(161,161,170,0.1)', color: 'rgba(161,161,170,0.5)' }}>
+                                  Not targetable
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
 
             <div className="flex justify-between mt-8">
               <button onClick={() => setStep("brand")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Back</button>

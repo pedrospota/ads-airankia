@@ -96,11 +96,11 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
   return (
     <div className="min-h-screen">
       <Header breadcrumbs={[{ label: "Brands", href: "/brands" }, { label: brand.name }, { label: "Citations" }]}
-        action={selected.size > 0 ? (
-          <button onClick={() => setShowModal(true)} style={{ padding: '8px 16px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, border: 'none', cursor: 'pointer' }}>
-            Create Campaign ({selected.size} URLs)
-          </button>
-        ) : undefined} />
+        action={(
+          <a href={`/brands/${brand.id}/campaigns/new`} style={{ padding: '8px 16px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, textDecoration: 'none', display: 'inline-block' }}>
+            Create Campaign
+          </a>
+        )} />
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex items-center gap-4 mb-8">

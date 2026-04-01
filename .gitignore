@@ -2,8 +2,4 @@ node_modules/
 .next/
 .env.local
 .env
-public/file.svg
-public/globe.svg
-public/next.svg
-public/vercel.svg
-public/window.svg
+public/file.svg\npublic/globe.svg\npublic/next.svg\npublic/vercel.svg\npublic/window.svg

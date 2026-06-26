@@ -266,6 +266,7 @@ function buildUserPrompt(ctx: RunContext): string {
     b.budgetHintUsd !== undefined
       ? `- Respeta el presupuesto sugerido (${b.budgetHintUsd} USD/día) salvo que esté por debajo del mínimo.`
       : "- No hay pista de presupuesto: propón un diario razonable (~20-50 USD/día) y justifícalo.",
+    "- Si no hay pista de zona geográfica, dedúcela del dominio del sitio web y del idioma (por ejemplo, un dominio .es sugiere España) y di CLARAMENTE en objectiveSummary qué zona has asumido, para que el usuario pueda corregirla si hace falta.",
     "- Define 3-6 temas de intención única (STAG) bien acotados.",
     "- Usa MAXIMIZE_CONVERSIONS salvo justificación explícita en contra.",
     "- presenceOnly = true. countryCodes en ISO-2 mayúsculas.",

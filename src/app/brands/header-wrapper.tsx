@@ -3,5 +3,5 @@
 import { Header } from "@/components/header";
 
 export function HeaderWrapper() {
-  return <Header breadcrumbs={[{ label: "Brands" }]} />;
+  return <Header breadcrumbs={[{ label: "Marcas" }]} />;
 }

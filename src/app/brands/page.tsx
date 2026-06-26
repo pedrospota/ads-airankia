@@ -27,12 +27,12 @@ export default async function BrandsPage() {
   let error: string | null = null;
 
   if (workspaceIds.length === 0) {
-    error = "No workspace found for your account. Please set up a workspace in AI Rankia first.";
+    error = "No encontramos ningún espacio de trabajo en tu cuenta. Crea uno primero en AI Rankia.";
   } else {
     try {
       brands = await getBrands(workspaceIds, accessToken);
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load brands";
+      error = e instanceof Error ? e.message : "No pudimos cargar tus marcas. Recarga la página.";
     }
   }
 
@@ -42,9 +42,9 @@ export default async function BrandsPage() {
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">Your Brands</h1>
+          <h1 className="text-3xl font-bold">Tus marcas</h1>
           <p className="mt-2" style={{ opacity: 0.4 }}>
-            Select a brand to see its AI citation sources and start retargeting.
+            Elige una marca para empezar a crear tu campaña de anuncios.
           </p>
         </div>
 
@@ -58,9 +58,9 @@ export default async function BrandsPage() {
 
         {brands.length === 0 && !error && (
           <div className="text-center py-16" style={{ opacity: 0.4 }}>
-            <p className="text-lg">No brands found for this workspace.</p>
+            <p className="text-lg">Aún no tienes marcas.</p>
             <p className="text-sm mt-2">
-              Add brands in AI Rankia to start citation retargeting.
+              Añade marcas en AI Rankia para empezar a crear tus campañas.
             </p>
           </div>
         )}

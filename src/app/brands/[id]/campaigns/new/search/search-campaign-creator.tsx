@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -258,6 +259,21 @@ export function SearchCampaignCreator({
     };
   }, [abortStream]);
 
+  // ---- Resume a run after a reload -------------------------------------
+  // The run id lives in the URL (?run=…), so a refresh, an accidental
+  // back/forward, or sharing the link picks the campaign back up instead of
+  // dropping the user on a blank start card while the server keeps working.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const existing = new URLSearchParams(window.location.search).get("run");
+    if (!existing) return;
+    setRunId(existing);
+    openStream(existing);
+    void refreshState(existing);
+    // Run once on mount; openStream/refreshState are stable useCallbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- AUTO mode: auto-advance any step left awaiting approval -----------
   useEffect(() => {
     if (!runId || !state) return;
@@ -341,6 +357,10 @@ export function SearchCampaignCreator({
         throw new Error(data.error || "No se pudo crear la campaña. Inténtalo de nuevo.");
       }
       setRunId(data.runId);
+      // Keep the run id in the URL so a reload resumes instead of losing it.
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", `?run=${data.runId}`);
+      }
       // Open the live stream first, then kick the pipeline off.
       openStream(data.runId);
       await advance(data.runId, { action: "run_next" });
@@ -418,6 +438,25 @@ export function SearchCampaignCreator({
     setActivateResult(null);
     setActivating(false);
     setEnabling(false);
+    // Drop the ?run= id so a later reload doesn't resurrect the old run.
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }
+
+  // "Empezar de nuevo" throws away a campaign the AI already prepared, so make
+  // an accidental click (easy on mobile) ask first. Retrying a FAILED run has
+  // nothing to lose, so that path stays immediate.
+  function confirmReset() {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "¿Seguro que quieres empezar de cero? Se perderá la campaña que la IA ha preparado.",
+      )
+    ) {
+      return;
+    }
+    reset();
   }
 
   // -----------------------------------------------------------------------
@@ -433,7 +472,7 @@ export function SearchCampaignCreator({
     <div className="min-h-screen">
       <Header
         breadcrumbs={[
-          { label: "Brands", href: "/brands" },
+          { label: "Marcas", href: "/brands" },
           { label: brandName, href: `/brands/${brandId}/citations` },
           { label: "Campaña de Búsqueda" },
         ]}
@@ -451,8 +490,11 @@ export function SearchCampaignCreator({
 
             <div style={styles.card}>
               <div style={{ marginBottom: 18 }}>
-                <label style={styles.lbl}>Nombre de tu marca</label>
+                <label htmlFor="campaign-brand-name" style={styles.lbl}>
+                  Nombre de tu marca
+                </label>
                 <input
+                  id="campaign-brand-name"
                   value={brandName}
                   onChange={(e) => setBrandName(e.target.value)}
                   placeholder="Mi negocio"
@@ -470,7 +512,7 @@ export function SearchCampaignCreator({
                     marginBottom: 7,
                   }}
                 >
-                  <label style={{ ...styles.lbl, marginBottom: 0 }}>
+                  <label htmlFor="campaign-objective" style={{ ...styles.lbl, marginBottom: 0 }}>
                     ¿Qué quieres conseguir? (opcional)
                   </label>
                   <button
@@ -490,6 +532,7 @@ export function SearchCampaignCreator({
                   </button>
                 </div>
                 <textarea
+                  id="campaign-objective"
                   value={objectiveHint}
                   onChange={(e) => setObjectiveHint(e.target.value)}
                   rows={3}
@@ -497,17 +540,23 @@ export function SearchCampaignCreator({
                   style={{ ...styles.inp, resize: "vertical" }}
                 />
                 <p style={styles.hint}>
-                  Puedes dejarlo vacío: la IA lo propone por ti con la información
-                  de tu negocio. O pulsa “✨ Rellenar con IA”.
+                  No hace falta que rellenes nada: si lo dejas vacío, la IA decide
+                  el objetivo, la zona y el presupuesto, y te enseña su propuesta
+                  antes de activar. O pulsa “✨ Rellenar con IA”.
                 </p>
                 {suggestError && (
-                  <p style={{ ...styles.hint, color: "#ef4444" }}>{suggestError}</p>
+                  <p role="alert" style={{ ...styles.hint, color: "#ef4444" }}>
+                    {suggestError}
+                  </p>
                 )}
               </div>
 
               <div style={{ marginBottom: 22 }}>
-                <label style={styles.lbl}>Presupuesto al día (opcional)</label>
+                <label htmlFor="campaign-budget" style={styles.lbl}>
+                  Presupuesto al día (opcional)
+                </label>
                 <input
+                  id="campaign-budget"
                   type="number"
                   min={BUDGET.minDailyUsd}
                   step={1}
@@ -522,14 +571,21 @@ export function SearchCampaignCreator({
               </div>
 
               {/* MODE TOGGLE — big and visual */}
-              <label style={styles.lbl}>¿Cómo quieres hacerlo?</label>
-              <div style={{ display: "flex", gap: 12, marginTop: 8, marginBottom: 8 }}>
+              <div style={styles.lbl} id="campaign-mode-label">
+                ¿Cómo quieres hacerlo?
+              </div>
+              <div
+                role="group"
+                aria-labelledby="campaign-mode-label"
+                style={{ display: "flex", gap: 12, marginTop: 8, marginBottom: 8 }}
+              >
                 <ModeCard
                   active={mode === "auto"}
                   onClick={() => setMode("auto")}
                   emoji="🚀"
                   title="Automático (un clic)"
                   desc="Los 6 ayudantes lo hacen todo y te enseñan el resultado para activar."
+                  recommended
                   colors={colors}
                 />
                 <ModeCard
@@ -564,7 +620,7 @@ export function SearchCampaignCreator({
         {/* ---------------- RUN VIEW ---------------- */}
         {!showStart && (
           <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: "wrap" }}>
               <div>
                 <h1 className="text-2xl font-bold">{brandName}</h1>
                 <p style={{ color: colors.textMuted, fontSize: 13 }}>
@@ -573,10 +629,50 @@ export function SearchCampaignCreator({
                     : "Modo asistido — revisa cada paso."}
                 </p>
               </div>
-              <button onClick={reset} style={styles.ghostBtn}>
-                Empezar de nuevo
-              </button>
+              <div className="flex items-center" style={{ gap: 8 }}>
+                <Link
+                  href={`/brands/${brandId}/citations`}
+                  style={{ ...styles.ghostBtn, textDecoration: "none" }}
+                >
+                  ← Volver a la marca
+                </Link>
+                <button onClick={confirmReset} style={styles.ghostBtn}>
+                  Empezar de nuevo
+                </button>
+              </div>
             </div>
+
+            {/* First moments after starting: state is still null. Show a clear
+                "we're on it" banner so it never looks frozen. */}
+            {!state && !failed && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  ...styles.card,
+                  marginBottom: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <span
+                  className="animate-pulse"
+                  aria-hidden="true"
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 99,
+                    background: "#3B82F6",
+                    display: "inline-block",
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ fontSize: 13.5, color: colors.textMuted }}>
+                  Preparando tu campaña… esto tarda solo unos segundos.
+                </span>
+              </div>
+            )}
 
             {/* FAILED state */}
             {failed && (
@@ -699,6 +795,7 @@ function ModeCard({
   title,
   desc,
   colors,
+  recommended,
 }: {
   active: boolean;
   onClick: () => void;
@@ -706,12 +803,15 @@ function ModeCard({
   title: string;
   desc: string;
   colors: ReturnType<typeof useTheme>["colors"];
+  recommended?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       style={{
         flex: 1,
+        position: "relative",
         textAlign: "left",
         padding: 16,
         borderRadius: 12,
@@ -721,7 +821,29 @@ function ModeCard({
         transition: "all 0.15s",
       }}
     >
-      <div style={{ fontSize: 24, marginBottom: 6 }}>{emoji}</div>
+      {recommended && (
+        <span
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            fontSize: 9.5,
+            fontWeight: 700,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            padding: "2px 7px",
+            borderRadius: 99,
+            background: "rgba(16,185,129,0.15)",
+            color: colors.accent,
+            border: "1px solid rgba(16,185,129,0.3)",
+          }}
+        >
+          Recomendado
+        </span>
+      )}
+      <div style={{ fontSize: 24, marginBottom: 6 }} aria-hidden="true">
+        {emoji}
+      </div>
       <div
         style={{
           fontSize: 15,
@@ -760,8 +882,26 @@ function Timeline({
 
   const awaitingStep = state ? currentAwaitingStep(state) : null;
 
+  // A concise, screen-reader-only running commentary. We deliberately do NOT
+  // wrap the whole timeline in aria-live (the streamed token text would spam
+  // the reader); instead we announce just the current step and its state, so a
+  // blind user knows the campaign is advancing and never feels stuck.
+  const workingAgent = PIPELINE.find(
+    (a) => dotStateFor(stepByAgent.get(a)) === "working",
+  );
+  const liveStatusText = activationGate
+    ? "Tu campaña está lista. Revisa el resumen y actívala cuando quieras."
+    : state?.run.status === "failed"
+      ? "Hubo un problema al preparar la campaña."
+      : workingAgent
+        ? `Preparando: ${STEP_TITLE[workingAgent]}.`
+        : "Preparando tu campaña…";
+
   return (
     <div style={{ position: "relative" }}>
+      <span className="sr-only" role="status" aria-live="polite">
+        {liveStatusText}
+      </span>
       {PIPELINE.map((agent, i) => {
         const step = stepByAgent.get(agent);
         const dot = dotStateFor(step);
@@ -805,7 +945,9 @@ function Timeline({
             {/* Content */}
             <div style={{ flex: 1, paddingBottom: 22 }}>
               <div className="flex items-center gap-2">
-                <span style={{ fontSize: 15 }}>{AGENT_EMOJI[agent]}</span>
+                <span style={{ fontSize: 15 }} aria-hidden="true">
+                  {AGENT_EMOJI[agent]}
+                </span>
                 <span
                   style={{
                     fontSize: 15,
@@ -980,6 +1122,16 @@ function ApprovalBlock({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string>(() => prettyJson(out));
   const [parseError, setParseError] = useState<string | null>(null);
+  // Immediate feedback so a click on "Aceptar" never feels ignored.
+  const [accepting, setAccepting] = useState(false);
+
+  // Safety net: normally the block unmounts when the run advances, but if an
+  // accept ever fails silently we must not leave the button disabled forever.
+  useEffect(() => {
+    if (!accepting) return;
+    const t = setTimeout(() => setAccepting(false), 10000);
+    return () => clearTimeout(t);
+  }, [accepting]);
 
   function acceptPlanner() {
     if (!planner) {
@@ -1001,10 +1153,21 @@ function ApprovalBlock({
     try {
       const parsed = JSON.parse(draft);
       setParseError(null);
+      setAccepting(true);
       onAccept(step.id, parsed);
     } catch {
       setParseError("No pudimos leer los cambios. Revisa el formato.");
     }
+  }
+
+  // Single entry point for the "Aceptar" button: show the pending state, then
+  // hand off to the right accept path. The block unmounts once the server moves
+  // the run forward, so we never need to clear `accepting`.
+  function handleAccept() {
+    setAccepting(true);
+    if (editing) acceptEdited();
+    else if (isPlanner) acceptPlanner();
+    else onAccept(step.id);
   }
 
   return (
@@ -1016,8 +1179,11 @@ function ApprovalBlock({
       {isPlanner && planner && !editing && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
           <div>
-            <label style={styles.lbl}>Tu objetivo</label>
+            <label htmlFor="planner-objective" style={styles.lbl}>
+              Tu objetivo
+            </label>
             <textarea
+              id="planner-objective"
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
               rows={2}
@@ -1025,8 +1191,11 @@ function ApprovalBlock({
             />
           </div>
           <div>
-            <label style={styles.lbl}>Presupuesto al día ({CURRENCY})</label>
+            <label htmlFor="planner-budget" style={styles.lbl}>
+              Presupuesto al día ({CURRENCY})
+            </label>
             <input
+              id="planner-budget"
               type="number"
               min={BUDGET.minDailyUsd}
               step={1}
@@ -1055,27 +1224,21 @@ function ApprovalBlock({
 
       <div className="flex gap-3 items-center" style={{ flexWrap: "wrap" }}>
         <button
-          onClick={
-            editing ? acceptEdited : isPlanner ? acceptPlanner : () => onAccept(step.id)
-          }
-          style={styles.primaryBtn}
+          onClick={handleAccept}
+          disabled={accepting}
+          style={{
+            ...styles.primaryBtn,
+            opacity: accepting ? 0.7 : 1,
+            cursor: accepting ? "not-allowed" : "pointer",
+          }}
         >
-          Aceptar
+          {accepting ? "Aceptando…" : "Aceptar"}
         </button>
-        {!editing ? (
-          <button
-            onClick={() => {
-              setDraft(prettyJson(out));
-              setEditing(true);
-            }}
-            style={styles.linkBtn}
-          >
-            Ajustar
-          </button>
-        ) : (
-          <button onClick={() => setEditing(false)} style={styles.linkBtn}>
-            Cancelar ajustes
-          </button>
+        {!isPlanner && (
+          <span style={{ fontSize: 11.5, color: colors.textFaint }}>
+            ¿Quieres cambiarlo? Pulsa “Empezar de nuevo” y ajusta tus datos; la IA
+            lo rehará por ti.
+          </span>
         )}
         <span style={{ fontSize: 11, color: colors.textFaint }}>
           Nada se publica todavía.

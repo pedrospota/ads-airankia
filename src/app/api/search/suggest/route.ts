@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
   const readClient = createSupabaseReadClient(session?.access_token);
   const { data: brand } = await readClient
     .from("brand_project")
-    .select("id, name, industry, website")
+    .select("id, name, industry, website, description")
     .eq("id", body.brandId)
     .single();
 
@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
     `Nombre de la marca: ${brand.name ?? "(sin nombre)"}`,
     brand.industry ? `Sector / actividad: ${brand.industry}` : null,
     brand.website ? `Sitio web: ${brand.website}` : null,
+    brand.description ? `Descripción: ${brand.description}` : null,
   ]
     .filter(Boolean)
     .join("\n");

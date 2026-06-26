@@ -20,8 +20,8 @@ interface Banner { width: number; height: number; name: string; dataUrl: string;
 type Step = "brand" | "placements" | "creatives" | "review";
 
 const SIZES = [
-  { id: "300x250", desc: "Medium Rectangle" }, { id: "728x90", desc: "Leaderboard" },
-  { id: "336x280", desc: "Large Rectangle" }, { id: "160x600", desc: "Skyscraper" }, { id: "320x50", desc: "Mobile" },
+  { id: "300x250", desc: "Cuadrado mediano" }, { id: "728x90", desc: "Banner ancho" },
+  { id: "336x280", desc: "Cuadrado grande" }, { id: "160x600", desc: "Banner vertical alto" }, { id: "320x50", desc: "Banner para móvil" },
 ];
 
 export function CampaignCreator({ brand, citations }: { brand: Brand; citations: Citation[] }) {
@@ -41,14 +41,14 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Campaign settings
-  const [campaignName, setCampaignName] = useState(`${brand.name} - Citation Retargeting`);
+  const [campaignName, setCampaignName] = useState(`${brand.name} - Anuncios para tus clientes`);
   const [landingPage, setLandingPage] = useState(brand.website || "");
   const [dailyBudget, setDailyBudget] = useState(1);
 
   // Creatives
   const [banners, setBanners] = useState<Banner[]>([]);
   const [genBanners, setGenBanners] = useState(false);
-  const [cta, setCta] = useState("Learn More");
+  const [cta, setCta] = useState("Saber más");
   const [colorStyle, setColorStyle] = useState("");
   const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set(["300x250", "728x90"]));
   const [bannerError, setBannerError] = useState<string | null>(null);
@@ -74,7 +74,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
         .then((p) => {
           setProfile(p);
           setBrandDesc(p.description || `${brand.name} — ${brand.industry || ""}`);
-          setBrandTagline(p.title || `Discover ${brand.name}`);
+          setBrandTagline(p.title || `Descubre ${brand.name}`);
           if (p.colors?.length) setColorStyle(p.colors.slice(0, 3).join(", ") + " palette, professional");
           else setColorStyle("professional dark with brand colors");
         })
@@ -91,7 +91,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
           const dataUrl = reader.result as string;
           const [header, base64] = dataUrl.split(",");
           const mimeType = header.match(/data:([^;]+)/)?.[1] || "image/png";
-          setUploadedImages([{ base64, mimeType, preview: dataUrl, name: "Brand Logo" }]);
+          setUploadedImages([{ base64, mimeType, preview: dataUrl, name: "Logo de la marca" }]);
         };
         reader.readAsDataURL(blob);
       }).catch(() => {});
@@ -137,7 +137,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setBanners(data.banners);
-    } catch (e) { setBannerError(e instanceof Error ? e.message : "Failed"); }
+    } catch (e) { setBannerError(e instanceof Error ? e.message : "No se pudo crear. Inténtalo de nuevo."); }
     setGenBanners(false);
   }
 
@@ -151,7 +151,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
       if (data.banners?.[0]) {
         setBanners((prev) => prev.map((b) => `${b.width}x${b.height}` === sizeId ? data.banners[0] : b));
       }
-    } catch (e) { setBannerError(e instanceof Error ? e.message : "Regen failed"); }
+    } catch (e) { setBannerError(e instanceof Error ? e.message : "No se pudo crear de nuevo. Inténtalo otra vez."); }
     setRegenSize(null);
   }
 
@@ -180,7 +180,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setSavedCampaignId(data.campaign.id);
-    } catch (e) { setError(e instanceof Error ? e.message : "Save failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo guardar. Inténtalo de nuevo."); }
     setSaving(false);
   }
 
@@ -193,19 +193,19 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setPublishResult({ googleCampaignId: data.googleCampaignId, placementsAdded: data.placementsAdded });
-    } catch (e) { setError(e instanceof Error ? e.message : "Publish failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo publicar. Inténtalo de nuevo."); }
     setPublishing(false);
   }
 
   const steps: { key: Step; label: string }[] = [
-    { key: "brand", label: "Brand" }, { key: "placements", label: "Placements" },
-    { key: "creatives", label: "Creatives" }, { key: "review", label: "Review & Publish" },
+    { key: "brand", label: "Marca" }, { key: "placements", label: "Dónde aparecer" },
+    { key: "creatives", label: "Tus anuncios" }, { key: "review", label: "Revisar" },
   ];
   const stepIdx = steps.findIndex((s) => s.key === step);
 
   return (
     <div className="min-h-screen">
-      <Header breadcrumbs={[{ label: "Brands", href: "/brands" }, { label: brand.name, href: `/brands/${brand.id}/citations` }, { label: "New Campaign" }]} />
+      <Header breadcrumbs={[{ label: "Marcas", href: "/brands" }, { label: brand.name, href: `/brands/${brand.id}/citations` }, { label: "Nueva campaña" }]} />
 
       {/* Step bar */}
       <div style={{ borderBottom: `1px solid ${colors.border}`, padding: '12px 24px', background: colors.bgCard }}>
@@ -230,27 +230,27 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
         {/* STEP 1: Brand Analysis */}
         {step === "brand" && (
           <div>
-            <h1 className="text-2xl font-bold mb-2">Brand Analysis</h1>
-            <p style={{ color: colors.textMuted, marginBottom: 24 }}>We scraped {brand.website} to understand your brand. Confirm or edit.</p>
+            <h1 className="text-2xl font-bold mb-2">Tu marca</h1>
+            <p style={{ color: colors.textMuted, marginBottom: 24 }}>Hemos mirado {brand.website} para conocer tu marca. Revisa los datos y cámbialos si quieres.</p>
 
             {scraping ? (
-              <div className="py-12 text-center animate-pulse" style={{ color: colors.textMuted }}>Analyzing {brand.website}...</div>
+              <div className="py-12 text-center animate-pulse" style={{ color: colors.textMuted }}>Estamos mirando {brand.website}…</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Left: extracted data */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                   {(profile?.ogImage || profile?.logo || brand.logo_url) && (
                     <div>
-                      <label style={lbl}>Brand Image</label>
+                      <label style={lbl}>Imagen de la marca</label>
                       <img src={profile?.ogImage || profile?.logo || brand.logo_url || ""} alt={brand.name}
                         style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, border: `1px solid ${colors.border}` }} />
                     </div>
                   )}
-                  <div><label style={lbl}>Brand Name</label><p style={{ fontSize: 16, fontWeight: 600 }}>{brand.name}</p></div>
-                  <div><label style={lbl}>Industry</label><p style={{ fontSize: 14, color: colors.textMuted }}>{brand.industry}</p></div>
+                  <div><label style={lbl}>Nombre de la marca</label><p style={{ fontSize: 16, fontWeight: 600 }}>{brand.name}</p></div>
+                  <div><label style={lbl}>Sector</label><p style={{ fontSize: 14, color: colors.textMuted }}>{brand.industry}</p></div>
                   {profile?.colors && profile.colors.length > 0 && (
                     <div>
-                      <label style={lbl}>Detected Colors</label>
+                      <label style={lbl}>Colores detectados</label>
                       <div className="flex gap-2">{profile.colors.slice(0, 6).map((c) => (
                         <div key={c} style={{ width: 32, height: 32, borderRadius: 6, background: c, border: `1px solid ${colors.border}` }} title={c} />
                       ))}</div>
@@ -260,16 +260,16 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
 
                 {/* Right: editable fields */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div><label style={lbl}>Campaign Name</label><input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} style={inp} /></div>
-                  <div><label style={lbl}>Brand Description (used for ad copy)</label>
+                  <div><label style={lbl}>Nombre de la campaña</label><input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} style={inp} /></div>
+                  <div><label style={lbl}>Descripción de la marca (la usamos para el texto del anuncio)</label>
                     <textarea value={brandDesc} onChange={(e) => setBrandDesc(e.target.value)} rows={3}
                       style={{ ...inp, resize: 'vertical' as const }} /></div>
-                  <div><label style={lbl}>Tagline</label><input value={brandTagline} onChange={(e) => setBrandTagline(e.target.value)} style={inp} /></div>
-                  <div><label style={lbl}>Landing Page</label><input value={landingPage} onChange={(e) => setLandingPage(e.target.value)} style={inp} /></div>
+                  <div><label style={lbl}>Frase corta</label><input value={brandTagline} onChange={(e) => setBrandTagline(e.target.value)} style={inp} /></div>
+                  <div><label style={lbl}>Página de destino</label><input value={landingPage} onChange={(e) => setLandingPage(e.target.value)} style={inp} /></div>
                   <div>
-                    <label style={lbl}>Daily Budget (USD)</label>
+                    <label style={lbl}>Presupuesto diario (USD)</label>
                     <input type="number" min={1} step={1} value={dailyBudget} onChange={(e) => setDailyBudget(Number(e.target.value))} style={inp} />
-                    <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 4 }}>Campaign is created PAUSED. Activate when ready.</p>
+                    <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 4 }}>La campaña se crea en PAUSA. Ningún gasto hasta que tú la actives.</p>
                   </div>
                 </div>
               </div>
@@ -277,7 +277,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
 
             <div className="flex justify-end mt-8">
               <button onClick={() => setStep("placements")} style={{ padding: '10px 24px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: 'pointer' }}>
-                Next: Select Placements →
+                Siguiente: Elige dónde aparecer →
               </button>
             </div>
           </div>
@@ -286,15 +286,15 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
         {/* STEP 2: Placements */}
         {step === "placements" && (
           <div>
-            <h1 className="text-2xl font-bold mb-2">Select Placements</h1>
+            <h1 className="text-2xl font-bold mb-2">Elige dónde aparecer</h1>
             <p style={{ color: colors.textMuted, marginBottom: 8 }}>
-              {adLoading ? "Scanning citation URLs for ad inventory..." : `${targetable.length} targetable URLs out of ${citations.length} total. All pre-selected — deselect what you don't want.`}
+              {adLoading ? "Estamos viendo en qué webs podemos mostrar tus anuncios…" : `Podemos mostrar tus anuncios en ${targetable.length} de ${citations.length} webs. Ya las hemos marcado todas; quita las que no quieras.`}
             </p>
 
             {adLoading && (
               <div className="py-8 text-center animate-pulse" style={{ background: colors.bgCard, borderRadius: 12, marginBottom: 16 }}>
-                <p style={{ fontSize: 14, color: colors.textMuted }}>Checking ads.txt for {citations.length} citation domains...</p>
-                <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 4 }}>This may take a moment</p>
+                <p style={{ fontSize: 14, color: colors.textMuted }}>Estamos viendo en qué webs podemos mostrar tus anuncios…</p>
+                <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 4 }}>Puede tardar un momento</p>
               </div>
             )}
 
@@ -303,13 +303,13 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                 <div className="flex gap-3 mb-4">
                   <button onClick={() => setSelected(new Set(targetable.map((c) => c.url)))}
                     style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: colors.accent, cursor: 'pointer' }}>
-                    Select All Targetable ({targetable.length})
+                    Marcar todas las disponibles ({targetable.length})
                   </button>
                   <button onClick={() => setSelected(new Set())}
                     style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, cursor: 'pointer' }}>
-                    Deselect All
+                    Quitar todas
                   </button>
-                  <span style={{ fontSize: 13, color: colors.accent, fontWeight: 600, alignSelf: 'center' }}>{selected.size} selected</span>
+                  <span style={{ fontSize: 13, color: colors.accent, fontWeight: 600, alignSelf: 'center' }}>{selected.size} elegidas</span>
                 </div>
 
                 <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${colors.border}`, maxHeight: 500, overflow: 'auto' }}>
@@ -317,10 +317,10 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                     <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                       <tr style={{ background: colors.bgCard, borderBottom: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 12 }} className="text-left">
                         <th className="px-3 py-2 w-10"></th>
-                        <th className="px-3 py-2 font-medium">Domain</th>
-                        <th className="px-3 py-2 font-medium">URL</th>
-                        <th className="px-3 py-2 font-medium text-right">Citations</th>
-                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Web</th>
+                        <th className="px-3 py-2 font-medium">Dirección</th>
+                        <th className="px-3 py-2 font-medium text-right">Menciones</th>
+                        <th className="px-3 py-2 font-medium">Estado</th>
                       </tr>
                     </thead>
                     <tbody style={{ background: colors.bg }}>
@@ -353,11 +353,11 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                             <td className="px-3 py-2">
                               {isTargetable ? (
                                 <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: isYT ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)', color: isYT ? '#EF4444' : '#10B981' }}>
-                                  {isYT ? "YouTube" : "GDN"}
+                                  {isYT ? "YouTube" : "Disponible"}
                                 </span>
                               ) : (
                                 <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: 'rgba(161,161,170,0.1)', color: 'rgba(161,161,170,0.5)' }}>
-                                  Not targetable
+                                  No disponible aquí
                                 </span>
                               )}
                             </td>
@@ -371,10 +371,10 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
             )}
 
             <div className="flex justify-between mt-8">
-              <button onClick={() => setStep("brand")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Back</button>
+              <button onClick={() => setStep("brand")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Atrás</button>
               <button onClick={() => setStep("creatives")} disabled={selected.size === 0}
                 style={{ padding: '10px 24px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: selected.size === 0 ? 'not-allowed' : 'pointer', opacity: selected.size === 0 ? 0.5 : 1 }}>
-                Next: Create Ads →
+                Siguiente: Crear tus anuncios →
               </button>
             </div>
           </div>
@@ -383,18 +383,18 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
         {/* STEP 3: Creatives */}
         {step === "creatives" && (
           <div>
-            <h1 className="text-2xl font-bold mb-2">Create Ad Banners</h1>
-            <p style={{ color: colors.textMuted, marginBottom: 24 }}>Upload brand assets + AI generates professional display banners.</p>
+            <h1 className="text-2xl font-bold mb-2">Crea tus anuncios</h1>
+            <p style={{ color: colors.textMuted, marginBottom: 24 }}>Sube imágenes de tu marca y creamos por ti anuncios con buen aspecto.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Left: controls */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {/* Image upload */}
                 <div>
-                  <label style={lbl}>Brand Assets (logo, product images)</label>
+                  <label style={lbl}>Imágenes de tu marca (logo, fotos de producto)</label>
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 8, border: `2px dashed ${colors.border}`, cursor: 'pointer', color: colors.textMuted, fontSize: 13 }}>
                     <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{ display: 'none' }} />
-                    📎 Upload images (max 5)
+                    📎 Sube imágenes (hasta 5)
                   </label>
                   {uploadedImages.length > 0 && (
                     <div className="flex gap-2 mt-2 flex-wrap">
@@ -408,29 +408,30 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                     </div>
                   )}
                   <p style={{ fontSize: 10, color: colors.textFaint, marginTop: 4 }}>
-                    {uploadedImages.length > 0 ? `${uploadedImages.length} image${uploadedImages.length > 1 ? 's' : ''} — AI will incorporate these into banners` : "Upload your logo for better results"}
+                    {uploadedImages.length > 0 ? `${uploadedImages.length} imagen${uploadedImages.length > 1 ? 'es' : ''} — las usaremos en tus anuncios` : "Sube tu logo para un mejor resultado"}
                   </p>
                 </div>
 
-                <div><label style={lbl}>Tagline</label><input value={brandTagline} onChange={(e) => setBrandTagline(e.target.value)} style={inp} /></div>
-                <div><label style={lbl}>Call to Action</label><input value={cta} onChange={(e) => setCta(e.target.value)} style={inp} /></div>
-                <div><label style={lbl}>Color / Style</label><input value={colorStyle} onChange={(e) => setColorStyle(e.target.value)} style={inp} /></div>
+                <div><label style={lbl}>Frase corta</label><input value={brandTagline} onChange={(e) => setBrandTagline(e.target.value)} style={inp} /></div>
+                <div><label style={lbl}>Texto del botón</label><input value={cta} onChange={(e) => setCta(e.target.value)} style={inp} /></div>
+                <div><label style={lbl}>Colores y estilo</label><input value={colorStyle} onChange={(e) => setColorStyle(e.target.value)} style={inp} /></div>
                 <div>
-                  <label style={lbl}>Sizes</label>
+                  <label style={lbl}>Tamaños</label>
                   <div className="flex flex-wrap gap-2">
                     {SIZES.map((s) => (
                       <button key={s.id} onClick={() => setSelectedSizes((p) => { const n = new Set(p); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; })}
                         style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, background: selectedSizes.has(s.id) ? 'rgba(16,185,129,0.15)' : 'transparent',
                           border: `1px solid ${selectedSizes.has(s.id) ? 'rgba(16,185,129,0.4)' : colors.border}`, color: selectedSizes.has(s.id) ? colors.accent : colors.textMuted, cursor: 'pointer' }}>
-                        {s.id}
+                        {s.desc}
                       </button>
                     ))}
                   </div>
+                  <p style={{ fontSize: 10, color: colors.textFaint, marginTop: 6 }}>Elige los formatos donde quieres que se vea tu anuncio. Si tienes dudas, deja los que vienen marcados.</p>
                 </div>
                 <button onClick={generateBanners} disabled={genBanners || selectedSizes.size === 0}
                   style={{ padding: 11, borderRadius: 8, background: 'rgba(99,102,241,0.8)', color: '#fff', fontWeight: 600, fontSize: 13, border: 'none',
                     cursor: genBanners ? 'not-allowed' : 'pointer', opacity: genBanners ? 0.7 : 1 }}>
-                  {genBanners ? "Generating..." : `Generate ${selectedSizes.size} Banner${selectedSizes.size > 1 ? 's' : ''}`}
+                  {genBanners ? "Creando…" : `Crear ${selectedSizes.size} anuncio${selectedSizes.size > 1 ? 's' : ''}`}
                 </button>
                 {bannerError && <p style={{ fontSize: 12, color: '#F87171' }}>{bannerError}</p>}
               </div>
@@ -440,13 +441,13 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                 {banners.length === 0 && !genBanners && (
                   <div className="py-16 text-center" style={{ border: `2px dashed ${colors.border}`, borderRadius: 12 }}>
                     <p style={{ color: colors.textMuted, fontSize: 14 }}>
-                      {uploadedImages.length > 0 ? `${uploadedImages.length} images ready. Click Generate.` : "Upload brand assets and click Generate."}
+                      {uploadedImages.length > 0 ? `${uploadedImages.length} imágenes listas. Pulsa Crear.` : "Sube imágenes de tu marca y pulsa Crear."}
                     </p>
                   </div>
                 )}
                 {genBanners && (
                   <div className="py-16 text-center animate-pulse" style={{ border: `2px dashed ${colors.border}`, borderRadius: 12 }}>
-                    <p style={{ color: colors.textMuted, fontSize: 14 }}>Generating banners with AI{uploadedImages.length > 0 ? " using your brand assets" : ""}...</p>
+                    <p style={{ color: colors.textMuted, fontSize: 14 }}>Estamos creando tus anuncios{uploadedImages.length > 0 ? " con las imágenes de tu marca" : ""}…</p>
                   </div>
                 )}
                 {banners.length > 0 && (
@@ -454,16 +455,17 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                     {banners.map((b, i) => {
                       const sizeId = `${b.width}x${b.height}`;
                       const isRegen = regenSize === sizeId;
+                      const sizeLabel = SIZES.find((s) => s.id === sizeId)?.desc || b.name;
                       return (
                         <div key={i} style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 12, opacity: isRegen ? 0.5 : 1 }}>
                           <div className="flex items-center justify-between mb-2">
-                            <span style={{ fontSize: 12, color: colors.textMuted }}>{b.name} ({sizeId})</span>
+                            <span style={{ fontSize: 12, color: colors.textMuted }}>{sizeLabel}</span>
                             <div className="flex gap-3">
                               <button onClick={() => regenerateBanner(sizeId)} disabled={!!regenSize}
                                 style={{ fontSize: 11, color: 'rgba(99,102,241,0.8)', background: 'none', border: 'none', cursor: regenSize ? 'not-allowed' : 'pointer' }}>
-                                {isRegen ? "Regenerating..." : "🔄 Regenerate"}
+                                {isRegen ? "Creando de nuevo…" : "🔄 Crear otra vez"}
                               </button>
-                              <a href={b.dataUrl} download={`${brand.name}-${sizeId}.png`} style={{ fontSize: 11, color: colors.accent, textDecoration: 'none' }}>⬇ Download</a>
+                              <a href={b.dataUrl} download={`${brand.name}-${sizeId}.png`} style={{ fontSize: 11, color: colors.accent, textDecoration: 'none' }}>⬇ Descargar</a>
                             </div>
                           </div>
                           <img src={b.dataUrl} alt={b.name} style={{ maxWidth: '100%', borderRadius: 6, border: `1px solid ${colors.border}` }} />
@@ -476,10 +478,10 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
             </div>
 
             <div className="flex justify-between mt-8">
-              <button onClick={() => setStep("placements")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Back</button>
+              <button onClick={() => setStep("placements")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Atrás</button>
               <button onClick={() => setStep("review")}
                 style={{ padding: '10px 24px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: 'pointer' }}>
-                Next: Review →
+                Siguiente: Revisar →
               </button>
             </div>
           </div>
@@ -493,40 +495,40 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                 <div style={{ width: 72, height: 72, borderRadius: 99, background: 'rgba(16,185,129,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <h1 className="text-3xl font-bold mb-4">Published to Google Ads!</h1>
-                <p style={{ fontSize: 15, color: colors.textMuted, marginBottom: 8 }}>{publishResult.placementsAdded} placements added · {banners.length} banners generated</p>
-                <p style={{ fontSize: 13, color: colors.textFaint, marginBottom: 8 }}>Google Ads Campaign ID: {publishResult.googleCampaignId}</p>
-                <p style={{ fontSize: 14, color: '#FBBF24', fontWeight: 600, marginBottom: 24 }}>Status: PAUSED — Activate in Google Ads when ready</p>
+                <h1 className="text-3xl font-bold mb-4">¡Tu campaña está en Google Ads!</h1>
+                <p style={{ fontSize: 15, color: colors.textMuted, marginBottom: 8 }}>Tus anuncios pueden aparecer en {publishResult.placementsAdded} webs · {banners.length} anuncios creados</p>
+                <p style={{ fontSize: 13, color: colors.textFaint, marginBottom: 8 }}>Número de tu campaña en Google Ads: {publishResult.googleCampaignId}</p>
+                <p style={{ fontSize: 14, color: '#FBBF24', fontWeight: 600, marginBottom: 24 }}>Estado: EN PAUSA — actívala en Google Ads cuando quieras</p>
                 <button onClick={() => router.push(`/brands/${brand.id}/citations`)}
                   style={{ padding: '12px 32px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: 'pointer' }}>
-                  Back to Citations
+                  Volver a las menciones
                 </button>
               </div>
             ) : (
               <>
-                <h1 className="text-2xl font-bold mb-6">Review & Publish</h1>
+                <h1 className="text-2xl font-bold mb-6">Revisar</h1>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   <div style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 16 }}>
-                    <p style={{ ...lbl }}>Campaign</p>
+                    <p style={{ ...lbl }}>Campaña</p>
                     <p style={{ fontSize: 16, fontWeight: 600 }}>{campaignName}</p>
                     <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>{landingPage}</p>
                   </div>
                   <div style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 16 }}>
-                    <p style={{ ...lbl }}>Placements</p>
+                    <p style={{ ...lbl }}>Dónde aparecer</p>
                     <p style={{ fontSize: 28, fontWeight: 700 }}>{selected.size}</p>
-                    <p style={{ fontSize: 12, color: colors.textMuted }}>targetable URLs</p>
+                    <p style={{ fontSize: 12, color: colors.textMuted }}>webs elegidas</p>
                   </div>
                   <div style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 16 }}>
-                    <p style={{ ...lbl }}>Budget</p>
+                    <p style={{ ...lbl }}>Presupuesto</p>
                     <p style={{ fontSize: 28, fontWeight: 700 }}>${dailyBudget}</p>
-                    <p style={{ fontSize: 12, color: colors.textMuted }}>per day (paused)</p>
+                    <p style={{ fontSize: 12, color: colors.textMuted }}>al día (en pausa)</p>
                   </div>
                 </div>
 
                 {banners.length > 0 && (
                   <div className="mb-6">
-                    <p style={{ ...lbl, marginBottom: 12 }}>Banners ({banners.length})</p>
+                    <p style={{ ...lbl, marginBottom: 12 }}>Tus anuncios ({banners.length})</p>
                     <div className="flex gap-3 overflow-x-auto pb-2">
                       {banners.map((b, i) => (
                         <img key={i} src={b.dataUrl} alt={b.name} style={{ height: 100, borderRadius: 6, border: `1px solid ${colors.border}` }} />
@@ -536,27 +538,27 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
                 )}
 
                 <div style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 8, padding: 14, marginBottom: 24 }}>
-                  <p style={{ fontSize: 13, color: '#FBBF24' }}>Campaign will be created as <strong>PAUSED</strong> in Google Ads. Nothing will spend money until you activate it.</p>
+                  <p style={{ fontSize: 13, color: '#FBBF24' }}>Tu campaña se creará <strong>EN PAUSA</strong> en Google Ads. No se gastará nada hasta que tú la actives.</p>
                 </div>
 
                 {error && <p style={{ fontSize: 13, color: '#F87171', marginBottom: 16 }}>{error}</p>}
 
                 <div className="flex justify-between">
-                  <button onClick={() => setStep("creatives")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Back</button>
+                  <button onClick={() => setStep("creatives")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Atrás</button>
                   <div className="flex gap-3">
                     {!savedCampaignId ? (
                       <button onClick={saveDraft} disabled={saving}
                         style={{ padding: '10px 24px', borderRadius: 8, background: colors.bgCard, border: `1px solid ${colors.border}`, color: colors.text, fontWeight: 600, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
-                        {saving ? "Saving..." : "Save as Draft"}
+                        {saving ? "Guardando…" : "Guardar borrador"}
                       </button>
                     ) : (
-                      <span style={{ fontSize: 13, color: colors.accent, alignSelf: 'center' }}>✓ Draft saved</span>
+                      <span style={{ fontSize: 13, color: colors.accent, alignSelf: 'center' }}>✓ Borrador guardado</span>
                     )}
                     <button onClick={savedCampaignId ? publishToGoogleAds : async () => { await saveDraft(); }}
                       disabled={publishing || saving}
                       style={{ padding: '10px 24px', borderRadius: 8, background: savedCampaignId ? '#EF4444' : colors.accent, color: '#fff', fontWeight: 600, fontSize: 14, border: 'none',
                         cursor: publishing || saving ? 'not-allowed' : 'pointer', opacity: publishing || saving ? 0.7 : 1 }}>
-                      {publishing ? "Publishing..." : savedCampaignId ? "🚀 Publish to Google Ads" : "Save & Publish"}
+                      {publishing ? "Publicando…" : savedCampaignId ? "🚀 Publicar en Google Ads" : "Guardar y publicar"}
                     </button>
                   </div>
                 </div>

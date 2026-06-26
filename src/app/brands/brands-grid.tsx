@@ -34,8 +34,8 @@ export function BrandsGrid({ brands }: { brands: Brand[] }) {
             color: colors.text,
           }}
         >
-          <span style={{ fontWeight: 600, color: colors.accent }}>Modo Nuevo</span>
-          {" — elige una marca para lanzar una campaña con el nuevo sistema."}
+          <span style={{ fontWeight: 600, color: colors.accent }}>Modo guiado — crea una campaña paso a paso</span>
+          {" — elige una marca para empezar a crear tu campaña de anuncios."}
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -56,6 +56,7 @@ export function BrandsGrid({ brands }: { brands: Brand[] }) {
               />
             ) : (
               <div className="w-12 h-12 rounded-lg flex items-center justify-center font-bold text-lg"
+                aria-hidden="true"
                 style={{ background: colors.bg, color: colors.textFaint }}>
                 {brand.name.charAt(0)}
               </div>

@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
   const readClient = createSupabaseReadClient(session?.access_token);
   const { data: brand } = await readClient
     .from("brand_project")
-    .select("id, workspace_id, name, industry, website")
+    .select("id, workspace_id, name, industry, website, description")
     .eq("id", brandId)
     .single();
 
@@ -70,6 +70,9 @@ export async function POST(request: NextRequest) {
   }
   if (brand.industry && !fullSeed.industry) {
     fullSeed.industry = brand.industry;
+  }
+  if (brand.description && !fullSeed.description) {
+    fullSeed.description = brand.description;
   }
 
   const { runId } = await createRun({

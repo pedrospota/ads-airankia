@@ -33,11 +33,10 @@ import {
   type RunContext,
   type ActivatorOutput,
   type ActivatorMutationLogEntry,
-  type PlannedAdGroup,
-  type AdGroupAds,
   type PlannedKeyword,
   type BiddingStrategy,
 } from "@/lib/engine/types";
+import { buildSanitizedPlan } from "@/lib/engine/sanitize";
 
 const AGENT_ID = "activator" as const;
 const PROMPT_VERSION = "a6-activator@1";
@@ -149,6 +148,11 @@ async function mutate(
   });
   const data = (await resp.json()) as MutateResponse;
   if (data.error) throw new Error(JSON.stringify(data.error));
+  // Never treat a partially-applied batch as success — surface it so the run
+  // stops with a clear error instead of leaving a half-built campaign live.
+  if (data.partialFailureError) {
+    throw new Error(JSON.stringify(data.partialFailureError));
+  }
   return data;
 }
 
@@ -244,9 +248,25 @@ async function activate(
   const runId = ctx.run.id;
   const mutationLog: ActivatorMutationLogEntry[] = [];
 
-  // RSA lookup by ad-group name (A4 pairs to A3 by name).
-  const adsByGroup = new Map<string, AdGroupAds>();
-  for (const a of rsa.ads) adsByGroup.set(a.adGroupName, a);
+  // --- PRE-FLIGHT SANITIZE & VALIDATE (before ANY Google write) -------------
+  // Protects the budget: dedupes keywords, normalizes landing URLs to https,
+  // clamps RSAs to Google's limits, and drops any ad group that can't be built
+  // cleanly. If nothing survives, fail BEFORE creating a single live resource —
+  // so the account is never left with a half-built, money-spending campaign.
+  const plan = buildSanitizedPlan(structure, rsa, ctx.brand);
+  if (plan.adGroups.length === 0) {
+    throw new Error(
+      "No se puede publicar la campaña: ningún grupo de anuncios quedó completo (faltan palabras clave, anuncios o enlaces válidos). Revisa los pasos anteriores."
+    );
+  }
+  if (plan.skipped.length > 0) {
+    await helpers.emit("decision", {
+      agent: AGENT_ID,
+      summary: `Se omitieron ${plan.skipped.length} grupo(s) por datos incompletos: ${plan.skipped
+        .map((s) => `${s.name} (${s.reason})`)
+        .join("; ")}.`,
+    });
+  }
 
   // --- IDEMPOTENCY GUARD ----------------------------------------------------
   // runStep() only short-circuits on COMPLETED; a FAILED activator step is
@@ -405,7 +425,7 @@ async function activate(
   let negativesAdded = 0;
   let adsCreated = 0;
 
-  for (const group of structure.adGroups as PlannedAdGroup[]) {
+  for (const { group, ad: groupAds } of plan.adGroups) {
     const cpcMicros =
       group.defaultCpcUsd && group.defaultCpcUsd > 0
         ? String(Math.round(group.defaultCpcUsd * MICROS_PER_UNIT))
@@ -512,8 +532,7 @@ async function activate(
       );
     }
 
-    // RSA for this group.
-    const groupAds = adsByGroup.get(group.name);
+    // RSA for this group (always present & valid: the sanitizer guarantees it).
     if (groupAds) {
       const adResp = await mutate("adGroupAds", {
         operations: [
@@ -601,9 +620,9 @@ async function activate(
   }
 
   // --- (5) Campaign-level shared negatives ----------------------------------
-  if (structure.sharedNegatives.length > 0) {
+  if (plan.sharedNegatives.length > 0) {
     await mutate("campaignCriteria", {
-      operations: structure.sharedNegatives.map((nk) => ({
+      operations: plan.sharedNegatives.map((nk) => ({
         create: {
           campaign: campaignResourceName,
           negative: true,
@@ -611,7 +630,7 @@ async function activate(
         },
       })),
     });
-    negativesAdded += structure.sharedNegatives.length;
+    negativesAdded += plan.sharedNegatives.length;
     mutationLog.push(
       await logMutation(runId, campaignDbId, "addCampaignNegatives", "done")
     );

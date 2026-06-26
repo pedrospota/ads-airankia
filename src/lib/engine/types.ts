@@ -287,6 +287,10 @@ export interface ActivatorOutput {
   assetKinds: string[];
   /** True iff a planned Smart Bidding strategy was auto-downgraded to Maximize Clicks because the account measures no conversions. */
   conversionDowngradeApplied: boolean;
+  /** True iff the account already has an ENABLED conversion action (the campaign measures real results, not just clicks). Read-only reflection — the activator never auto-creates one. */
+  conversionTrackingEnabled: boolean;
+  /** Resource name of the conversion action the account measures with, if any (mirrored onto the campaign row for Optimize / Performance Max). */
+  conversionActionResourceName?: string;
   /** Activator ALWAYS leaves the campaign PAUSED. Enabling is a separate, explicit action. */
   status: "PAUSED";
   mutationLog: ActivatorMutationLogEntry[];
@@ -475,4 +479,6 @@ export interface ActivateResponse {
   googleAdsDeepLink?: string;
   /** True when bidding was auto-adjusted to clicks because no conversions are measured yet. */
   conversionDowngradeApplied?: boolean;
+  /** True when the account already measures conversions (an ENABLED conversion action exists). */
+  conversionTrackingEnabled?: boolean;
 }

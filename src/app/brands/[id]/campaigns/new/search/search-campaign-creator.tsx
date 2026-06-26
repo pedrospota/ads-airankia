@@ -942,7 +942,25 @@ export function SearchCampaignCreator({
                     </a>
                   </p>
                 )}
-                {activateResult.conversionDowngradeApplied && (
+                {activateResult.conversionTrackingEnabled ? (
+                  <div
+                    style={{
+                      textAlign: "left",
+                      margin: "0 auto 16px",
+                      maxWidth: 360,
+                      padding: 14,
+                      borderRadius: 10,
+                      background: "rgba(16,185,129,0.08)",
+                      border: "1px solid rgba(16,185,129,0.3)",
+                    }}
+                  >
+                    <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
+                      ✓ Tu campaña ya mide resultados de verdad (ventas o
+                      contactos), no solo visitas. La optimizaremos hacia lo que
+                      de verdad te importa.
+                    </p>
+                  </div>
+                ) : (
                   <div
                     style={{
                       textAlign: "left",
@@ -955,9 +973,11 @@ export function SearchCampaignCreator({
                     }}
                   >
                     <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
-                      Tu cuenta aún no mide ventas ni llamadas, así que pujamos por
-                      clics para que tu anuncio se vea desde el primer día. Cuando
-                      quieras medir resultados de verdad, te ayudo a configurarlo.
+                      Por ahora tu web todavía no mide resultados (ventas o
+                      contactos), así que pujamos por clics para que tu anuncio se
+                      vea desde el primer día. Más adelante podremos medir esos
+                      resultados y optimizar hacia ellos: lo dejaremos listo por
+                      ti, sin que tengas que tocar nada.
                     </p>
                   </div>
                 )}

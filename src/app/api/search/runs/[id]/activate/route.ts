@@ -134,6 +134,7 @@ export async function POST(
         ? `https://ads.google.com/aw/campaigns?campaignId=${gid}&__c=${cidNoHyphens}`
         : undefined,
       conversionDowngradeApplied: activatorOutput?.conversionDowngradeApplied ?? false,
+      conversionTrackingEnabled: activatorOutput?.conversionTrackingEnabled ?? false,
     };
     return NextResponse.json(response);
   } catch (e) {

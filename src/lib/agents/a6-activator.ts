@@ -231,6 +231,52 @@ async function accountHasEligibleConversions(): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Reflect (NOT create) whether the account already measures conversions, so the
+ * UI can tell the user the TRUTH ("ya mides conversiones") instead of guessing.
+ * Strictly READ-ONLY against Google: it reads the first ENABLED conversion
+ * action and, if one exists, stamps the campaign row with its resource name so
+ * downstream (Optimize / Performance Max) knows what it measures. Creating a
+ * conversion action is an explicit, account-level decision that lives behind the
+ * user — it is deliberately NOT done here.
+ *
+ * The returned `enabled` boolean is a fresh, build-time snapshot and is what
+ * drives the UI's honesty, so a stale campaign stamp can never make the UI lie.
+ *
+ * Best-effort: the WHOLE body is inside the outer try, so ANY failure (the
+ * Google read, OAuth, the DB write) returns {enabled:false} and NEVER throws
+ * into the activation flow. Measurement is an enhancement, never the critical
+ * path — the campaign is already safely created (PAUSED) before this runs.
+ */
+async function reflectConversionMeasurement(
+  campaignDbId: string
+): Promise<{ enabled: boolean; resourceName?: string }> {
+  try {
+    const rows = await search(
+      "SELECT conversion_action.resource_name " +
+        "FROM conversion_action WHERE conversion_action.status = 'ENABLED' LIMIT 1"
+    );
+    const ca = rows[0]?.conversionAction as { resourceName?: string } | undefined;
+    const resourceName = ca?.resourceName;
+    if (!resourceName) return { enabled: false };
+
+    // Stamp the campaign (adsDb only, never Supabase) so downstream knows what
+    // it measures. Idempotent on resume (deterministic value) and isolated in
+    // its own try/catch so a write failure can never flip `enabled` to false.
+    try {
+      await adsDb
+        .update(campaigns)
+        .set({ conversionActionResourceName: resourceName, updatedAt: new Date() })
+        .where(eq(campaigns.id, campaignDbId));
+    } catch {
+      // Best-effort stamp; the boolean below is what the UI needs.
+    }
+    return { enabled: true, resourceName };
+  } catch {
+    return { enabled: false };
+  }
+}
+
 /** Bidding strategies that need conversion measurement to work at all. */
 function isConversionStrategy(s: BiddingStrategy): boolean {
   return (
@@ -1168,6 +1214,11 @@ async function activate(
     plan.adGroups.reduce((n, { group }) => n + group.negativeKeywords.length, 0) +
     plan.sharedNegatives.length;
 
+  // Read-only: does this account already measure conversions? Stamps the
+  // campaign with the action it measures. Never creates anything, never throws —
+  // the campaign is already safely created above.
+  const measurement = await reflectConversionMeasurement(campaignDbId);
+
   const output: ActivatorOutput = {
     campaignResourceName,
     googleCampaignId,
@@ -1179,6 +1230,8 @@ async function activate(
     assetsLinked,
     assetKinds,
     conversionDowngradeApplied,
+    conversionTrackingEnabled: measurement.enabled,
+    conversionActionResourceName: measurement.resourceName,
     status: "PAUSED", // SAFETY: always paused.
     mutationLog,
   };

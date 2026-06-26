@@ -66,13 +66,14 @@ export async function POST(request: NextRequest) {
     data: { session },
   } = await authClient.auth.getSession();
   const readClient = createSupabaseReadClient(session?.access_token);
-  const { data: brand } = await readClient
+  const { data: brand, error: brandError } = await readClient
     .from("brand_project")
-    .select("id, name, industry, website, description")
+    .select("id, name, industry, website, description:business_entity_description")
     .eq("id", body.brandId)
     .single();
 
-  if (!brand) {
+  if (brandError || !brand) {
+    console.error("[search/suggest] brand lookup failed", brandError);
     return NextResponse.json({ error: "brand not found" }, { status: 404 });
   }
 

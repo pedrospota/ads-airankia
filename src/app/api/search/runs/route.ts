@@ -28,16 +28,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const { brandId, mode, seed } = body;
-  if (!brandId || !mode || !seed) {
+  const { brandId, seed } = body;
+  if (!brandId || !seed) {
     return NextResponse.json(
-      { error: "brandId, mode, and seed are required" },
+      { error: "brandId and seed are required" },
       { status: 400 }
     );
   }
-  if (mode !== "auto" && mode !== "assisted") {
-    return NextResponse.json({ error: "invalid mode" }, { status: 400 });
-  }
+  // The user is never forced to choose a run mode. Default to "auto" (the AI
+  // runs end to end). "assisted" is an explicit opt-in for step-by-step review;
+  // any other/missing value falls back to "auto" instead of erroring.
+  const mode: "auto" | "assisted" =
+    body.mode === "assisted" ? "assisted" : "auto";
 
   // Resolve workspaceId from the brand (Supabase, read-only) so the run is
   // scoped to the right workspace + user.

@@ -401,12 +401,19 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
               </>
             )}
 
-            <div className="flex justify-between mt-8">
-              <button onClick={() => setStep("brand")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Atrás</button>
-              <button onClick={() => setStep("creatives")} disabled={selected.size === 0}
-                style={{ padding: '10px 24px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: selected.size === 0 ? 'not-allowed' : 'pointer', opacity: selected.size === 0 ? 0.5 : 1 }}>
-                Siguiente: Crear tus anuncios →
-              </button>
+            <div className="flex flex-col items-stretch gap-3 mt-8">
+              {!adLoading && selected.size === 0 && (
+                <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'right' }}>
+                  No has marcado ninguna web. No pasa nada: Google elegirá automáticamente dónde mostrar tus anuncios. Si lo prefieres, marca arriba las webs concretas donde quieres aparecer.
+                </p>
+              )}
+              <div className="flex justify-between">
+                <button onClick={() => setStep("brand")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Atrás</button>
+                <button onClick={() => setStep("creatives")}
+                  style={{ padding: '10px 24px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: 'pointer' }}>
+                  Siguiente: Crear tus anuncios →
+                </button>
+              </div>
             </div>
           </div>
         )}

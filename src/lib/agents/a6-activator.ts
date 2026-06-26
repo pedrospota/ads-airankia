@@ -35,6 +35,7 @@ import {
   type ActivatorMutationLogEntry,
   type PlannedKeyword,
   type BiddingStrategy,
+  type KeywordResearchOutput,
 } from "@/lib/engine/types";
 import { buildSanitizedPlan } from "@/lib/engine/sanitize";
 
@@ -58,29 +59,47 @@ const REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN ?? "";
 const BASE = `https://googleads.googleapis.com/v19/customers/${CUSTOMER_ID}`;
 
 // ISO-3166 alpha-2 -> Google Ads geoTargetConstant id (country level).
+// Google's country-level geoTargetConstant id == 2000 + the ISO-3166-1 numeric
+// code (verified: ES=724→2724, MX=484→2484, US=840→2840, GB=826→2826, ...). We
+// keep an explicit, auditable table (rather than computing) so every value can
+// be reviewed, and we cover every realistic market so a planner's country pick
+// is NEVER silently dropped (which would leave the campaign targeting the whole
+// world — a spend risk). See the fail-closed guard in activate().
 const GEO_TARGET_CONSTANTS: Record<string, string> = {
-  ES: "2724",
-  MX: "2484",
-  AR: "2032",
-  CO: "2170",
-  CL: "2152",
-  PE: "2604",
-  US: "2840",
-  GB: "2826",
-  FR: "2250",
-  DE: "2276",
-  IT: "2380",
-  PT: "2620",
+  // — Iberia & the Spanish-speaking Americas (primary markets) —
+  ES: "2724", PT: "2620",
+  MX: "2484", AR: "2032", CO: "2170", CL: "2152", PE: "2604",
+  VE: "2862", EC: "2218", BO: "2068", PY: "2600", UY: "2858",
+  CR: "2188", PA: "2591", DO: "2214", GT: "2320", HN: "2340",
+  SV: "2222", NI: "2558", PR: "2630", CU: "2192",
+  // — North America —
+  US: "2840", CA: "2124",
+  // — Brazil —
+  BR: "2076",
+  // — Western & Northern Europe —
+  GB: "2826", IE: "2372", FR: "2250", DE: "2276", IT: "2380",
+  NL: "2528", BE: "2056", LU: "2442", CH: "2756", AT: "2040",
+  DK: "2208", SE: "2752", NO: "2578", FI: "2246", IS: "2352",
+  // — Central, Eastern & Southern Europe —
+  PL: "2616", CZ: "2203", SK: "2703", HU: "2348", RO: "2642",
+  BG: "2100", GR: "2300", HR: "2191", SI: "2705", RS: "2688",
+  EE: "2233", LV: "2428", LT: "2440", UA: "2804", TR: "2792",
+  // — Asia-Pacific —
+  AU: "2036", NZ: "2554", JP: "2392", CN: "2156", IN: "2356",
+  KR: "2410", SG: "2702", HK: "2344", PH: "2608", ID: "2360",
+  MY: "2458", TH: "2764", VN: "2704",
+  // — Middle East & Africa —
+  AE: "2784", SA: "2682", IL: "2376", EG: "2818", MA: "2504",
+  ZA: "2710",
 };
 
-// ISO language code -> Google Ads languageConstant id.
+// ISO language code -> Google Ads languageConstant id (well-known stable ids).
 const LANGUAGE_CONSTANTS: Record<string, string> = {
-  es: "1003",
-  en: "1000",
-  fr: "1002",
-  de: "1001",
-  it: "1004",
-  pt: "1014",
+  en: "1000", de: "1001", fr: "1002", es: "1003", it: "1004",
+  ja: "1005", da: "1009", nl: "1010", fi: "1011", ko: "1012",
+  no: "1013", nb: "1013", pt: "1014", sv: "1015",
+  cs: "1021", el: "1022", hu: "1024", pl: "1030", ru: "1031",
+  ro: "1032",
 };
 
 let cachedAccessToken: { token: string; expires: number } | null = null;
@@ -192,7 +211,11 @@ function biddingPayload(
           targetRoas && targetRoas > 0 ? { targetRoas } : {},
       };
     default:
-      return { manualCpc: { enhancedCpcEnabled: false } };
+      // Unknown/unsupported value: fall to MAXIMIZE_CLICKS (targetSpend), the
+      // safest default for a fresh account — it reliably drives traffic without
+      // needing conversion history. NEVER silently fall to MANUAL_CPC, which a
+      // non-expert would have to manage by hand.
+      return { targetSpend: {} };
   }
 }
 
@@ -202,6 +225,34 @@ function biddingPayload(
 
 function matchTypeEnum(mt: PlannedKeyword["matchType"]): string {
   return mt; // EXACT | PHRASE | BROAD are the v19 KeywordMatchType values
+}
+
+// ----------------------------------------------------------------------------
+// Opening CPC for an ad group. Prefer the architect's chosen CPC; otherwise
+// derive it from A2's REAL top-of-page bid estimates for this group's keywords
+// (median); otherwise a market-realistic floor. Under Smart Bidding this value
+// is ignored, but under MANUAL_CPC a flat $0.10 sits far below market and the
+// ads would simply never show — so we never open below ~$0.40.
+// ----------------------------------------------------------------------------
+
+function resolveCpcMicros(
+  group: { defaultCpcUsd?: number; keywords: PlannedKeyword[] },
+  keywordEstimates: KeywordResearchOutput | undefined
+): string {
+  if (group.defaultCpcUsd && group.defaultCpcUsd > 0) {
+    return String(Math.round(group.defaultCpcUsd * MICROS_PER_UNIT));
+  }
+  const texts = new Set(group.keywords.map((k) => k.text.toLowerCase()));
+  const bids = (keywordEstimates?.keywords ?? [])
+    .filter((k) => texts.has(k.text.toLowerCase()))
+    .map((k) => k.topOfPageBidLowMicros)
+    .filter((n): n is number => typeof n === "number" && n > 0)
+    .sort((a, b) => a - b);
+  if (bids.length > 0) {
+    const median = bids[Math.floor((bids.length - 1) / 2)];
+    return String(Math.max(median, 400000));
+  }
+  return "400000"; // $0.40 realistic floor (was a flat $0.10 that won't show).
 }
 
 // ----------------------------------------------------------------------------
@@ -267,6 +318,30 @@ async function activate(
         .join("; ")}.`,
     });
   }
+
+  // --- PRE-FLIGHT GEO (resolve target locations BEFORE any Google write) -----
+  // The planner picks countryCodes; map each to a Google geoTargetConstant id.
+  // FAIL CLOSED: if NOT ONE location resolves, stop here with a clear message
+  // instead of creating a campaign with no location criterion — which Google
+  // treats as "the whole world" and would put the budget at risk. Stopping is
+  // always safer than silently targeting everywhere.
+  const geoTargetIds = Array.from(
+    new Set(
+      (planner.geo.countryCodes ?? [])
+        .map((c) => GEO_TARGET_CONSTANTS[(c ?? "").toUpperCase()])
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  if (geoTargetIds.length === 0) {
+    throw new Error(
+      "No pudimos determinar la zona geográfica de la campaña, así que la hemos detenido para no mostrar tus anuncios en todo el mundo y gastar de más. Revisa la ubicación en el paso del estratega."
+    );
+  }
+  // presenceOnly (planner decides; default true): show ads to people PHYSICALLY
+  // in the target area, not merely those interested in it. Honoured below via
+  // the campaign's geoTargetTypeSetting (Google's account default would
+  // otherwise be PRESENCE_OR_INTEREST — the opposite of what we promise).
+  const presenceOnly = planner.geo.presenceOnly !== false;
 
   // --- IDEMPOTENCY GUARD ----------------------------------------------------
   // runStep() only short-circuits on COMPLETED; a FAILED activator step is
@@ -345,6 +420,16 @@ async function activate(
               targetContentNetwork: false,
               targetPartnerSearchNetwork: false,
             },
+            // Honour presenceOnly: PRESENCE = only people IN the area. This is
+            // the field the planner's presenceOnly decision maps onto; without
+            // it Google defaults to PRESENCE_OR_INTEREST (paying for out-of-area
+            // interest traffic), the opposite of what we tell the user.
+            geoTargetTypeSetting: {
+              positiveGeoTargetType: presenceOnly
+                ? "PRESENCE"
+                : "PRESENCE_OR_INTEREST",
+              negativeGeoTargetType: "PRESENCE",
+            },
             ...biddingPayload(
               structure.biddingStrategy ?? planner.biddingStrategy,
               planner.targetCpaUsd,
@@ -388,18 +473,17 @@ async function activate(
     .where(eq(campaigns.id, campaignDbId));
 
   // --- (3) Geo + language criteria (campaign-level) -------------------------
-  const geoOps = (planner.geo.countryCodes ?? [])
-    .map((c) => GEO_TARGET_CONSTANTS[c?.toUpperCase()])
-    .filter((id): id is string => Boolean(id))
-    .map((id) => ({
-      create: {
-        campaign: campaignResourceName,
-        location: { geoTargetConstant: `geoTargetConstants/${id}` },
-      },
-    }));
+  // geoTargetIds was resolved AND validated as non-empty in pre-flight, so we
+  // never reach here with zero locations (which would mean worldwide targeting).
+  const geoOps = geoTargetIds.map((id) => ({
+    create: {
+      campaign: campaignResourceName,
+      location: { geoTargetConstant: `geoTargetConstants/${id}` },
+    },
+  }));
 
   const langId =
-    LANGUAGE_CONSTANTS[planner.geo.languageCode?.toLowerCase()] ??
+    LANGUAGE_CONSTANTS[(planner.geo.languageCode ?? "").toLowerCase()] ??
     LANGUAGE_CONSTANTS.es;
   const langOp = {
     create: {
@@ -410,7 +494,7 @@ async function activate(
 
   // Skip on resume: these campaign-level criteria were already created on the
   // first attempt and would duplicate against the reused campaign.
-  if (!resuming && (geoOps.length > 0 || langOp)) {
+  if (!resuming) {
     await mutate("campaignCriteria", {
       operations: [...geoOps, langOp],
     });
@@ -426,10 +510,7 @@ async function activate(
   let adsCreated = 0;
 
   for (const { group, ad: groupAds } of plan.adGroups) {
-    const cpcMicros =
-      group.defaultCpcUsd && group.defaultCpcUsd > 0
-        ? String(Math.round(group.defaultCpcUsd * MICROS_PER_UNIT))
-        : "100000"; // $0.10 fallback
+    const cpcMicros = resolveCpcMicros(group, ctx.keywords);
 
     const agResp = await mutate("adGroups", {
       operations: [

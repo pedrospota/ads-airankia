@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
 
@@ -104,7 +106,47 @@ function formatDate(iso: string | null): string {
 
 export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps) {
   const { colors } = useTheme();
+  const router = useRouter();
   const newHref = `/brands/${brandId}/campaigns/new/search`;
+
+  // Which campaign (by run id) is currently being discarded.
+  const [discardingId, setDiscardingId] = useState<string | null>(null);
+
+  // Discard / undo: safe at any time because Search campaigns are created
+  // PAUSED and never spend. Removes it from Google (if it got there) and drops
+  // it from this list. The end user is the one clicking, so this is the only
+  // place that touches their account from the dashboard.
+  async function discard(runId: string) {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Vamos a eliminar esta campaña de tu cuenta de Google Ads.\n\nNo se ha gastado nada (estaba en pausa) y podrás crear otra cuando quieras.\n\n¿Seguro que quieres descartarla?",
+      )
+    ) {
+      return;
+    }
+    setDiscardingId(runId);
+    try {
+      const r = await fetch(`/api/search/runs/${runId}/discard`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = (await r.json()) as { ok?: boolean; error?: string };
+      if (!r.ok || !data.ok) {
+        throw new Error(data.error || "No se pudo descartar la campaña.");
+      }
+      router.refresh();
+    } catch (e) {
+      if (typeof window !== "undefined") {
+        window.alert(
+          e instanceof Error ? e.message : "No se pudo descartar la campaña.",
+        );
+      }
+    } finally {
+      setDiscardingId(null);
+    }
+  }
 
   return (
     <div className="min-h-screen">
@@ -300,6 +342,31 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                       >
                         Ver en Google Ads ↗
                       </a>
+                    )}
+                    {item.runId && item.campaignStatus !== "active" && (
+                      <button
+                        onClick={() => discard(item.runId!)}
+                        disabled={discardingId === item.runId}
+                        style={{
+                          marginLeft: "auto",
+                          padding: "8px 12px",
+                          borderRadius: 9,
+                          background: "transparent",
+                          border: "none",
+                          color: colors.textFaint,
+                          fontWeight: 600,
+                          fontSize: 12.5,
+                          textDecoration: "underline",
+                          cursor:
+                            discardingId === item.runId
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        {discardingId === item.runId
+                          ? "Descartando…"
+                          : "Descartar"}
+                      </button>
                     )}
                   </div>
                 </div>

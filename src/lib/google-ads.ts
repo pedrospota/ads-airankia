@@ -178,8 +178,9 @@ export async function addPlacements(adGroupId: string, domains: string[]): Promi
   return { success, failed };
 }
 
-// Pause or enable a campaign
-export async function setCampaignStatus(campaignId: string, status: "PAUSED" | "ENABLED"): Promise<void> {
+// Pause, enable, or remove a campaign. REMOVED is a soft-delete in Google Ads:
+// the campaign is taken down (it can never spend again) but stays queryable.
+export async function setCampaignStatus(campaignId: string, status: "PAUSED" | "ENABLED" | "REMOVED"): Promise<void> {
   const token = await getAccessToken();
   const resp = await fetch(`${BASE}/campaigns:mutate`, {
     method: "POST",

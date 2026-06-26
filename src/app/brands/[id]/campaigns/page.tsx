@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
 import { adsDb } from "@/lib/ads-db";
 import { campaigns, agentRuns, agentSteps } from "@/lib/schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { CampaignsDashboard, type CampaignListItem } from "./campaigns-dashboard";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,9 @@ export default async function CampaignsPage({
       and(
         eq(campaigns.brandId, brandId),
         eq(campaigns.userId, user.id),
-        eq(campaigns.campaignType, "search")
+        eq(campaigns.campaignType, "search"),
+        // Discarded campaigns are removed from the user's list entirely.
+        ne(campaigns.status, "removed")
       )
     )
     .orderBy(desc(campaigns.createdAt));

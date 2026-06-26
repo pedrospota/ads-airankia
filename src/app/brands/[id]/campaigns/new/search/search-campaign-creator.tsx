@@ -94,6 +94,7 @@ export function SearchCampaignCreator({
   const [liveLog, setLiveLog] = useState<Partial<Record<AgentId, string>>>({});
   const [activating, setActivating] = useState(false);
   const [enabling, setEnabling] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [activateResult, setActivateResult] = useState<ActivateResponse | null>(null);
   // When the user (in Asistido) presses "que la IA termine el resto", we flip
   // this on so the auto-advance effect drives every remaining step to the
@@ -500,6 +501,38 @@ export function SearchCampaignCreator({
     }
   }
 
+  // ---- Discard / undo (remove a just-created campaign from Google) -------
+  // Safe at any time: the campaign is PAUSED, so it has never spent. After
+  // removing it from Google we wipe the local run and let the user start fresh.
+  async function discardCampaign() {
+    if (!runId) return;
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        "Vamos a eliminar esta campaña de tu cuenta de Google Ads.\n\nNo se ha gastado nada (estaba en pausa) y podrás crear otra cuando quieras.\n\n¿Seguro que quieres descartarla?",
+      );
+      if (!ok) return;
+    }
+    setDiscarding(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/search/runs/${runId}/discard`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = (await r.json()) as { ok?: boolean; error?: string };
+      if (!r.ok || !data.ok) {
+        throw new Error(data.error || "No se pudo descartar la campaña.");
+      }
+      // Clean slate — the discarded run is gone; let them start over.
+      reset();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo descartar.");
+    } finally {
+      setDiscarding(false);
+    }
+  }
+
   // ---- Full reset / retry ------------------------------------------------
   function reset() {
     abortStream();
@@ -511,6 +544,7 @@ export function SearchCampaignCreator({
     setActivateResult(null);
     setActivating(false);
     setEnabling(false);
+    setDiscarding(false);
     setAutoFinish(false);
     // Drop the ?run= id so a later reload doesn't resurrect the old run.
     if (typeof window !== "undefined") {
@@ -905,15 +939,34 @@ export function SearchCampaignCreator({
                     </p>
                     <button
                       onClick={enableCampaign}
-                      disabled={enabling}
+                      disabled={enabling || discarding}
                       style={{
                         ...styles.secondaryBtn,
-                        opacity: enabling ? 0.7 : 1,
-                        cursor: enabling ? "not-allowed" : "pointer",
+                        opacity: enabling || discarding ? 0.7 : 1,
+                        cursor: enabling || discarding ? "not-allowed" : "pointer",
                       }}
                     >
                       {enabling ? "Poniendo en marcha…" : "Ponerla en marcha"}
                     </button>
+                    <div style={{ marginTop: 14 }}>
+                      <button
+                        onClick={discardCampaign}
+                        disabled={discarding || enabling}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: colors.textFaint,
+                          fontSize: 12.5,
+                          textDecoration: "underline",
+                          cursor: discarding || enabling ? "not-allowed" : "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        {discarding
+                          ? "Descartando…"
+                          : "Descartar esta campaña (la elimina de Google Ads)"}
+                      </button>
+                    </div>
                   </>
                 )}
                 {enabledNow && (

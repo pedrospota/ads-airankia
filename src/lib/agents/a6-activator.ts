@@ -157,19 +157,35 @@ interface MutateResponse {
 /** POST a `${endpoint}:mutate` body and return the typed response. */
 async function mutate(
   endpoint: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  opts?: { tolerateDuplicates?: boolean }
 ): Promise<MutateResponse> {
   const token = await getAccessToken();
+  // tolerateDuplicates: for NON-CRITICAL, naturally-idempotent batches (negative
+  // keywords) the caller opts into per-operation tolerance. We request
+  // partialFailure so VALID operations still apply, and we DON'T throw on the
+  // resulting per-operation errors — a criterion that already exists from a
+  // prior attempt is exactly what we want to ignore. This is what makes
+  // re-sending negatives on a resume safe even when the ledger key changed
+  // across a deploy (the negatives have no durable DB id to gate on).
+  const finalBody = opts?.tolerateDuplicates
+    ? { ...body, partialFailure: true }
+    : body;
   const resp = await fetch(`${BASE}/${endpoint}:mutate`, {
     method: "POST",
     headers: authHeaders(token),
-    body: JSON.stringify(body),
+    body: JSON.stringify(finalBody),
   });
   const data = (await resp.json()) as MutateResponse;
+  // A top-level error is always fatal (auth, malformed request, the whole batch
+  // rejected): surface it.
   if (data.error) throw new Error(JSON.stringify(data.error));
-  // Never treat a partially-applied batch as success — surface it so the run
-  // stops with a clear error instead of leaving a half-built campaign live.
-  if (data.partialFailureError) {
+  // For a NORMAL mutate, never treat a partially-applied batch as success —
+  // surface it so the run stops with a clear error instead of leaving a
+  // half-built campaign live. For a tolerant mutate we deliberately swallow
+  // per-operation failures (campaign stays PAUSED; negatives are an
+  // optimization, never a delivery gate).
+  if (data.partialFailureError && !opts?.tolerateDuplicates) {
     throw new Error(JSON.stringify(data.partialFailureError));
   }
   return data;
@@ -434,18 +450,58 @@ async function activate(
   // otherwise be PRESENCE_OR_INTEREST — the opposite of what we promise).
   const presenceOnly = planner.geo.presenceOnly !== false;
 
-  // --- IDEMPOTENCY GUARD ----------------------------------------------------
-  // runStep() only short-circuits on COMPLETED; a FAILED activator step is
-  // re-run from scratch. If a previous attempt already created the budget +
-  // campaign in Google (googleCampaignId persisted), NEVER create a second one.
-  // Resume from the existing campaign instead of duplicating live resources.
+  // --- IDEMPOTENCY / RESUME -------------------------------------------------
+  // runStep() only short-circuits a COMPLETED step; a FAILED activator step is
+  // re-run from scratch. Google does NOT dedupe by name, so a naive re-run would
+  // create DUPLICATE ad groups / keywords / ads, and the old "skip everything if
+  // a campaign exists" guard could skip GEO on a mid-build failure (= worldwide
+  // targeting, a real overspend risk). We make EVERY Google write idempotent:
+  // each successful write is recorded in the google_mutations ledger under a
+  // stable per-resource key, and on a retry we SKIP and REUSE whatever already
+  // succeeded. Durable DB ids (googleAdgroupId / googleAdId / keyword
+  // status='live') are a SECOND signal, so even a run that failed under older
+  // code (before these keys existed) resumes without duplicating.
   const [existing] = await adsDb
     .select({ googleCampaignId: campaigns.googleCampaignId })
     .from(campaigns)
     .where(eq(campaigns.id, campaignDbId))
     .limit(1);
   const priorCampaignId = existing?.googleCampaignId ?? null;
-  const resuming = priorCampaignId != null;
+
+  const priorMutations = await adsDb
+    .select({
+      operation: googleMutations.operation,
+      resourceName: googleMutations.resourceName,
+    })
+    .from(googleMutations)
+    .where(
+      and(
+        eq(googleMutations.runId, runId),
+        eq(googleMutations.status, "done")
+      )
+    );
+  const doneOps = new Map<string, string | null>();
+  for (const m of priorMutations) {
+    if (!doneOps.has(m.operation)) {
+      doneOps.set(m.operation, m.resourceName ?? null);
+    }
+  }
+  const isDone = (op: string): boolean => doneOps.has(op);
+  const doneRN = (op: string): string => doneOps.get(op) ?? "";
+  // Record a REUSED resource in the in-memory log without re-writing the ledger.
+  const noteReused = (operation: string, resourceName?: string): void => {
+    mutationLog.push({
+      operation,
+      resourceName,
+      status: "done",
+      detail: "reanudado",
+    });
+  };
+
+  // The campaign already exists from a prior attempt iff the ledger recorded the
+  // create OR the draft row already carries a googleCampaignId.
+  const campaignAlreadyCreated =
+    isDone("createCampaign") || priorCampaignId != null;
 
   // --- CONVERSION-AWARE BIDDING (decided automatically, no user input) -------
   // The planner may pick a Smart Bidding strategy (Maximize Conversions, tCPA,
@@ -460,7 +516,7 @@ async function activate(
     structure.biddingStrategy ?? planner.biddingStrategy;
   let effectiveStrategy: BiddingStrategy = plannedStrategy;
   let conversionDowngradeApplied = false;
-  if (!resuming && isConversionStrategy(plannedStrategy)) {
+  if (!campaignAlreadyCreated && isConversionStrategy(plannedStrategy)) {
     // On a read error, KEEP the planner's choice (default true): we must never
     // silently downgrade a real advertiser's account that DOES measure
     // conversions just because a single read hiccuped. The downgrade exists
@@ -487,7 +543,13 @@ async function activate(
   );
 
   let budgetResourceName = "";
-  if (!resuming) {
+  if (isDone("createBudget")) {
+    // Reuse the budget from a prior attempt — never create a second one (that
+    // would orphan the first). A campaign that failed AFTER its budget was
+    // created relinks to that same budget on resume.
+    budgetResourceName = doneRN("createBudget");
+    noteReused("createBudget", budgetResourceName);
+  } else {
     const budgetResp = await mutate("campaignBudgets", {
       operations: [
         {
@@ -514,20 +576,18 @@ async function activate(
   // --- (2) Campaign (Search, ALWAYS PAUSED) ---------------------------------
   let campaignResourceName: string;
   let googleCampaignId: string;
-  if (resuming) {
+  if (campaignAlreadyCreated) {
     // A campaign already exists in Google from a prior attempt — reuse it.
-    googleCampaignId = String(priorCampaignId);
-    campaignResourceName = `customers/${CUSTOMER_ID}/campaigns/${googleCampaignId}`;
-    mutationLog.push(
-      await logMutation(
-        runId,
-        campaignDbId,
-        "createCampaign",
-        "done",
-        campaignResourceName,
-        "resumed: existing googleCampaignId"
-      )
-    );
+    // Prefer the persisted googleCampaignId; fall back to the ledger's resource
+    // name if the row never got persisted (older failed run).
+    googleCampaignId =
+      priorCampaignId != null
+        ? String(priorCampaignId)
+        : idFromResourceName(doneRN("createCampaign"));
+    campaignResourceName =
+      doneRN("createCampaign") ||
+      `customers/${CUSTOMER_ID}/campaigns/${googleCampaignId}`;
+    noteReused("createCampaign", campaignResourceName);
   } else {
     const campaignResp = await mutate("campaigns", {
       operations: [
@@ -575,30 +635,36 @@ async function activate(
     );
   }
 
-  // Persist campaign google ids + bidding onto the existing draft row.
+  // Persist campaign google ids onto the existing draft row. On a FIRST create
+  // we also persist the EFFECTIVE bidding actually created in Google (may differ
+  // from the planner's pick if we downgraded for a no-conversion account). On
+  // resume we DON'T touch bidding — the live campaign already has whatever the
+  // first attempt set, and we never re-read or change a live strategy.
   await adsDb
     .update(campaigns)
     .set({
       googleCampaignId: googleCampaignId ? Number(googleCampaignId) : null,
       googleAccountId: CUSTOMER_ID,
-      // Persist the EFFECTIVE strategy actually created in Google (may differ
-      // from the planner's pick if we downgraded for a no-conversion account).
-      biddingStrategy: effectiveStrategy,
-      // A target CPA/ROAS only makes sense under a conversion strategy; if we
-      // downgraded to Maximize Clicks, store null so the UI never shows a
-      // phantom target that isn't actually in effect.
-      targetCpaMicros:
-        isConversionStrategy(effectiveStrategy) &&
-        planner.targetCpaUsd &&
-        planner.targetCpaUsd > 0
-          ? Math.round(planner.targetCpaUsd * MICROS_PER_UNIT)
-          : null,
-      targetRoas:
-        isConversionStrategy(effectiveStrategy) &&
-        planner.targetRoas &&
-        planner.targetRoas > 0
-          ? String(planner.targetRoas)
-          : null,
+      ...(campaignAlreadyCreated
+        ? {}
+        : {
+            biddingStrategy: effectiveStrategy,
+            // A target CPA/ROAS only makes sense under a conversion strategy; if
+            // we downgraded to Maximize Clicks, store null so the UI never shows
+            // a phantom target that isn't actually in effect.
+            targetCpaMicros:
+              isConversionStrategy(effectiveStrategy) &&
+              planner.targetCpaUsd &&
+              planner.targetCpaUsd > 0
+                ? Math.round(planner.targetCpaUsd * MICROS_PER_UNIT)
+                : null,
+            targetRoas:
+              isConversionStrategy(effectiveStrategy) &&
+              planner.targetRoas &&
+              planner.targetRoas > 0
+                ? String(planner.targetRoas)
+                : null,
+          }),
       status: "paused",
       updatedAt: new Date(),
     })
@@ -624,65 +690,82 @@ async function activate(
     },
   };
 
-  // Skip on resume: these campaign-level criteria were already created on the
-  // first attempt and would duplicate against the reused campaign.
-  if (!resuming) {
+  // Create geo+language criteria unless THIS specific write already succeeded.
+  // CRITICAL: gating on "campaign exists" (the old behaviour) skipped geo
+  // whenever the campaign was reused — so a failure AFTER campaign-create but
+  // BEFORE geo left the campaign targeting the WHOLE WORLD on every retry. Gate
+  // on the criteria write itself so geo is ALWAYS applied exactly once.
+  if (!isDone("addCampaignCriteria")) {
     await mutate("campaignCriteria", {
       operations: [...geoOps, langOp],
     });
     mutationLog.push(
       await logMutation(runId, campaignDbId, "addCampaignCriteria", "done")
     );
+  } else {
+    noteReused("addCampaignCriteria");
   }
 
   // --- (4) Ad groups + keywords + negatives + RSAs --------------------------
+  // EVERY write below is idempotent. Each logical resource has a stable ledger
+  // key (e.g. "createAdGroup:<name>") and, where possible, a durable DB id as a
+  // second signal. On a retry we SKIP and REUSE whatever already succeeded, so a
+  // mid-build failure can never produce a duplicate ad group, keyword set, or ad.
   const adGroupResults: ActivatorOutput["adGroups"] = [];
-  let keywordsAdded = 0;
-  let negativesAdded = 0;
-  let adsCreated = 0;
 
   for (const { group, ad: groupAds } of plan.adGroups) {
-    const cpcMicros = resolveCpcMicros(group, ctx.keywords);
-
-    const agResp = await mutate("adGroups", {
-      operations: [
-        {
-          create: {
-            name: group.name,
-            campaign: campaignResourceName,
-            type: "SEARCH_STANDARD",
-            status: "ENABLED", // ad group enabled; the CAMPAIGN gates delivery (PAUSED)
-            cpcBidMicros: cpcMicros,
-          },
-        },
-      ],
-    });
-    const agResourceName = agResp.results?.[0]?.resourceName ?? "";
-    const agId = idFromResourceName(agResourceName);
-    adGroupResults.push({
-      name: group.name,
-      resourceName: agResourceName,
-      id: agId,
-    });
-    mutationLog.push(
-      await logMutation(
-        runId,
-        campaignDbId,
-        "createAdGroup",
-        "done",
-        agResourceName
-      )
-    );
-
-    // Find the existing draft ad_group row by (campaign, name) and update ids.
+    // Find the existing draft ad_group row first (A3 created exactly one per
+    // name). Its googleAdgroupId is a resume signal even if the ledger is empty.
     const [agRow] = await adsDb
-      .select({ id: adGroups.id })
+      .select({ id: adGroups.id, googleAdgroupId: adGroups.googleAdgroupId })
       .from(adGroups)
       .where(
         and(eq(adGroups.campaignId, campaignDbId), eq(adGroups.name, group.name))
       )
       .limit(1);
     const adGroupDbId = agRow?.id ?? null;
+
+    const agKey = `createAdGroup:${group.name}`;
+    const agAlready = isDone(agKey) || agRow?.googleAdgroupId != null;
+
+    let agResourceName: string;
+    let agId: string;
+    if (agAlready) {
+      agId =
+        agRow?.googleAdgroupId != null
+          ? String(agRow.googleAdgroupId)
+          : idFromResourceName(doneRN(agKey));
+      agResourceName =
+        doneRN(agKey) || `customers/${CUSTOMER_ID}/adGroups/${agId}`;
+      noteReused(agKey, agResourceName);
+    } else {
+      const cpcMicros = resolveCpcMicros(group, ctx.keywords);
+      const agResp = await mutate("adGroups", {
+        operations: [
+          {
+            create: {
+              name: group.name,
+              campaign: campaignResourceName,
+              type: "SEARCH_STANDARD",
+              status: "ENABLED", // ad group enabled; the CAMPAIGN gates delivery (PAUSED)
+              cpcBidMicros: cpcMicros,
+            },
+          },
+        ],
+      });
+      agResourceName = agResp.results?.[0]?.resourceName ?? "";
+      agId = idFromResourceName(agResourceName);
+      mutationLog.push(
+        await logMutation(runId, campaignDbId, agKey, "done", agResourceName)
+      );
+    }
+
+    adGroupResults.push({
+      name: group.name,
+      resourceName: agResourceName,
+      id: agId,
+    });
+
     if (adGroupDbId) {
       await adsDb
         .update(adGroups)
@@ -694,9 +777,22 @@ async function activate(
         .where(eq(adGroups.id, adGroupDbId));
     }
 
-    // Positive keywords for this group.
-    if (group.keywords.length > 0) {
-      const kwResp = await mutate("adGroupCriteria", {
+    // Positive keywords for this group. Skip if already added on a prior attempt
+    // (ledger key OR any keyword row for this group already marked live).
+    const kwKey = `addKeywords:${group.name}`;
+    let kwAlready = isDone(kwKey);
+    if (!kwAlready && adGroupDbId) {
+      const [liveKw] = await adsDb
+        .select({ id: keywords.id })
+        .from(keywords)
+        .where(
+          and(eq(keywords.adGroupId, adGroupDbId), eq(keywords.status, "live"))
+        )
+        .limit(1);
+      kwAlready = Boolean(liveKw);
+    }
+    if (group.keywords.length > 0 && !kwAlready) {
+      await mutate("adGroupCriteria", {
         operations: group.keywords.map((kw) => ({
           create: {
             adGroup: agResourceName,
@@ -705,10 +801,8 @@ async function activate(
           },
         })),
       });
-      const created = kwResp.results?.length ?? group.keywords.length;
-      keywordsAdded += created;
       mutationLog.push(
-        await logMutation(runId, campaignDbId, "addKeywords", "done")
+        await logMutation(runId, campaignDbId, kwKey, "done")
       );
 
       // Mark the matching keyword rows as live (by ad_group + text + matchType).
@@ -726,108 +820,121 @@ async function activate(
             );
         }
       }
+    } else if (group.keywords.length > 0) {
+      noteReused(kwKey);
     }
 
-    // Ad-group-level negative keywords.
-    if (group.negativeKeywords.length > 0) {
-      await mutate("adGroupCriteria", {
-        operations: group.negativeKeywords.map((nk) => ({
-          create: {
-            adGroup: agResourceName,
-            negative: true,
-            keyword: { text: nk.text, matchType: matchTypeEnum(nk.matchType) },
-          },
-        })),
-      });
-      negativesAdded += group.negativeKeywords.length;
-      mutationLog.push(
-        await logMutation(runId, campaignDbId, "addAdGroupNegatives", "done")
+    // Ad-group-level negative keywords. Ledger-gated, and tolerant of duplicates
+    // so a cross-deploy resume (where the ledger key changed and negatives have
+    // no durable DB id) can re-send them without a hard duplicate error.
+    const negKey = `addAdGroupNegatives:${group.name}`;
+    if (group.negativeKeywords.length > 0 && !isDone(negKey)) {
+      await mutate(
+        "adGroupCriteria",
+        {
+          operations: group.negativeKeywords.map((nk) => ({
+            create: {
+              adGroup: agResourceName,
+              negative: true,
+              keyword: { text: nk.text, matchType: matchTypeEnum(nk.matchType) },
+            },
+          })),
+        },
+        { tolerateDuplicates: true }
       );
+      mutationLog.push(
+        await logMutation(runId, campaignDbId, negKey, "done")
+      );
+    } else if (group.negativeKeywords.length > 0) {
+      noteReused(negKey);
     }
 
     // RSA for this group (always present & valid: the sanitizer guarantees it).
+    // Skip if already created (ledger key OR the group's search_ads row already
+    // carries a googleAdId).
     if (groupAds) {
-      const adResp = await mutate("adGroupAds", {
-        operations: [
-          {
-            create: {
-              adGroup: agResourceName,
-              // Ad ENABLED on purpose. The CAMPAIGN (created PAUSED above) is the
-              // ONLY delivery gate. If the ad were PAUSED, /enable — which flips
-              // just the campaign to ENABLED — would leave every ad paused and the
-              // campaign would serve ZERO ads with no error. Enabling the ad here
-              // is safe: nothing serves until the user enables the campaign.
-              status: "ENABLED",
-              ad: {
-                finalUrls: [groupAds.finalUrl],
-                responsiveSearchAd: {
-                  headlines: groupAds.headlines.map((h) => ({
-                    text: h.text,
-                    ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}),
-                  })),
-                  descriptions: groupAds.descriptions.map((d) => ({
-                    text: d.text,
-                    ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}),
-                  })),
-                  ...(groupAds.path1 ? { path1: groupAds.path1 } : {}),
-                  ...(groupAds.path2 ? { path2: groupAds.path2 } : {}),
+      const adKey = `createAd:${group.name}`;
+      const [existingAd] = adGroupDbId
+        ? await adsDb
+            .select({ id: searchAds.id, googleAdId: searchAds.googleAdId })
+            .from(searchAds)
+            .where(
+              and(
+                eq(searchAds.adGroupId, adGroupDbId),
+                eq(searchAds.campaignId, campaignDbId)
+              )
+            )
+            .limit(1)
+        : [];
+      const adAlready = isDone(adKey) || existingAd?.googleAdId != null;
+      if (!adAlready) {
+        const adResp = await mutate("adGroupAds", {
+          operations: [
+            {
+              create: {
+                adGroup: agResourceName,
+                // Ad ENABLED on purpose. The CAMPAIGN (created PAUSED above) is
+                // the ONLY delivery gate. If the ad were PAUSED, /enable — which
+                // flips just the campaign to ENABLED — would leave every ad
+                // paused and the campaign would serve ZERO ads with no error.
+                // Enabling the ad here is safe: nothing serves until the user
+                // enables the campaign.
+                status: "ENABLED",
+                ad: {
+                  finalUrls: [groupAds.finalUrl],
+                  responsiveSearchAd: {
+                    headlines: groupAds.headlines.map((h) => ({
+                      text: h.text,
+                      ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}),
+                    })),
+                    descriptions: groupAds.descriptions.map((d) => ({
+                      text: d.text,
+                      ...(d.pinnedField ? { pinnedField: d.pinnedField } : {}),
+                    })),
+                    ...(groupAds.path1 ? { path1: groupAds.path1 } : {}),
+                    ...(groupAds.path2 ? { path2: groupAds.path2 } : {}),
+                  },
                 },
               },
             },
-          },
-        ],
-      });
-      const adResourceName = adResp.results?.[0]?.resourceName ?? "";
-      adsCreated += 1;
-      mutationLog.push(
-        await logMutation(
-          runId,
-          campaignDbId,
-          "createAd",
-          "done",
-          adResourceName
-        )
-      );
+          ],
+        });
+        const adResourceName = adResp.results?.[0]?.resourceName ?? "";
+        mutationLog.push(
+          await logMutation(runId, campaignDbId, adKey, "done", adResourceName)
+        );
 
-      // adGroupAds resource name is "customers/X/adGroupAds/{adGroupId}~{adId}".
-      const adId = idFromResourceName(adResourceName).split("~").pop() ?? "";
-      if (adGroupDbId) {
-        // A4 already persisted exactly one draft search_ads row per ad group
-        // (it OWNS ad copy). Update that row to live instead of inserting a
-        // second one — otherwise every ad group ends with two rows.
-        const [existingAd] = await adsDb
-          .select({ id: searchAds.id })
-          .from(searchAds)
-          .where(
-            and(
-              eq(searchAds.adGroupId, adGroupDbId),
-              eq(searchAds.campaignId, campaignDbId)
-            )
-          )
-          .limit(1);
-
-        if (existingAd) {
-          await adsDb
-            .update(searchAds)
-            .set({
+        // adGroupAds resource name is "customers/X/adGroupAds/{adGroupId}~{adId}".
+        const adId = idFromResourceName(adResourceName).split("~").pop() ?? "";
+        if (adGroupDbId) {
+          // A4 already persisted exactly one draft search_ads row per ad group
+          // (it OWNS ad copy). Update that row to live instead of inserting a
+          // second one — otherwise every ad group ends with two rows.
+          if (existingAd) {
+            await adsDb
+              .update(searchAds)
+              .set({
+                googleAdId: adId ? Number(adId) : null,
+                status: "live",
+                updatedAt: new Date(),
+              })
+              .where(eq(searchAds.id, existingAd.id));
+          } else {
+            await adsDb.insert(searchAds).values({
+              adGroupId: adGroupDbId,
+              campaignId: campaignDbId,
+              headlines: groupAds.headlines as unknown as object,
+              descriptions: groupAds.descriptions as unknown as object,
+              finalUrls: [groupAds.finalUrl],
+              path1: groupAds.path1 ?? null,
+              path2: groupAds.path2 ?? null,
               googleAdId: adId ? Number(adId) : null,
               status: "live",
-              updatedAt: new Date(),
-            })
-            .where(eq(searchAds.id, existingAd.id));
-        } else {
-          await adsDb.insert(searchAds).values({
-            adGroupId: adGroupDbId,
-            campaignId: campaignDbId,
-            headlines: groupAds.headlines as unknown as object,
-            descriptions: groupAds.descriptions as unknown as object,
-            finalUrls: [groupAds.finalUrl],
-            path1: groupAds.path1 ?? null,
-            path2: groupAds.path2 ?? null,
-            googleAdId: adId ? Number(adId) : null,
-            status: "live",
-          });
+            });
+          }
         }
+      } else {
+        noteReused(adKey);
       }
     }
 
@@ -838,20 +945,27 @@ async function activate(
   }
 
   // --- (5) Campaign-level shared negatives ----------------------------------
-  if (plan.sharedNegatives.length > 0) {
-    await mutate("campaignCriteria", {
-      operations: plan.sharedNegatives.map((nk) => ({
-        create: {
-          campaign: campaignResourceName,
-          negative: true,
-          keyword: { text: nk.text, matchType: matchTypeEnum(nk.matchType) },
-        },
-      })),
-    });
-    negativesAdded += plan.sharedNegatives.length;
+  // Ledger-gated; tolerant of duplicates for the same reason as ad-group
+  // negatives (idempotent, non-critical, no durable DB id to gate on).
+  if (plan.sharedNegatives.length > 0 && !isDone("addCampaignNegatives")) {
+    await mutate(
+      "campaignCriteria",
+      {
+        operations: plan.sharedNegatives.map((nk) => ({
+          create: {
+            campaign: campaignResourceName,
+            negative: true,
+            keyword: { text: nk.text, matchType: matchTypeEnum(nk.matchType) },
+          },
+        })),
+      },
+      { tolerateDuplicates: true }
+    );
     mutationLog.push(
       await logMutation(runId, campaignDbId, "addCampaignNegatives", "done")
     );
+  } else if (plan.sharedNegatives.length > 0) {
+    noteReused("addCampaignNegatives");
   }
 
   // --- (6) Assets / extensions (sitelinks, callouts, structured snippets) ----
@@ -864,7 +978,13 @@ async function activate(
   // ad-group names) so no new, unverified claims are ever introduced.
   let assetsLinked = 0;
   const assetKinds: string[] = [];
-  if (!resuming) {
+  // Assets are the LAST Google writes and each type is isolated in its own
+  // try/catch (they never throw), so a resume only reaches here when they were
+  // not yet created on an earlier attempt. Each type is still ledger-gated below
+  // so a partial asset pass can never duplicate on retry. (Gating the WHOLE
+  // section on "campaign exists" would permanently skip assets on every resumed
+  // build — the same class of bug as the worldwide-geo one above.)
+  {
     // Sitelinks — one per ad group (Google shows them with >=2). Link text =
     // ad-group name; description1/2 = the group's RSA descriptions (both or
     // neither, per Google's rule); final URL = the group's landing page.
@@ -887,7 +1007,7 @@ async function activate(
       }
       sitelinkBodies.push({ finalUrls: [ad.finalUrl], sitelinkAsset });
     }
-    if (sitelinkBodies.length >= 2) {
+    if (sitelinkBodies.length >= 2 && !isDone("addSitelinks")) {
       try {
         const n = await createLinkedAssets(
           campaignResourceName,
@@ -897,6 +1017,9 @@ async function activate(
         if (n > 0) {
           assetsLinked += n;
           assetKinds.push("enlaces a tu web");
+          mutationLog.push(
+            await logMutation(runId, campaignDbId, "addSitelinks", "done")
+          );
         }
       } catch (e) {
         mutationLog.push(
@@ -928,7 +1051,7 @@ async function activate(
       }
       if (calloutBodies.length >= 6) break;
     }
-    if (calloutBodies.length >= 2) {
+    if (calloutBodies.length >= 2 && !isDone("addCallouts")) {
       try {
         const n = await createLinkedAssets(
           campaignResourceName,
@@ -938,6 +1061,9 @@ async function activate(
         if (n > 0) {
           assetsLinked += n;
           assetKinds.push("textos destacados");
+          mutationLog.push(
+            await logMutation(runId, campaignDbId, "addCallouts", "done")
+          );
         }
       } catch (e) {
         mutationLog.push(
@@ -957,7 +1083,7 @@ async function activate(
     // ad-group names as the service/category list (Google needs >=3 values).
     const snippetHeader =
       SNIPPET_HEADERS[(planner.geo.languageCode ?? "es").toLowerCase()] ?? null;
-    if (snippetHeader) {
+    if (snippetHeader && !isDone("addStructuredSnippet")) {
       const snippetSeen = new Set<string>();
       const snippetValues: string[] = [];
       for (const { group } of plan.adGroups) {
@@ -986,6 +1112,14 @@ async function activate(
           if (n > 0) {
             assetsLinked += n;
             assetKinds.push("lista de servicios");
+            mutationLog.push(
+              await logMutation(
+                runId,
+                campaignDbId,
+                "addStructuredSnippet",
+                "done"
+              )
+            );
           }
         } catch (e) {
           mutationLog.push(
@@ -1021,6 +1155,18 @@ async function activate(
       });
     }
   }
+
+  // Final totals are derived from the SANITIZED PLAN, not incremented as we go,
+  // so the success summary is correct whether the campaign was built in one pass
+  // or finished across a resume (where some groups were reused, not re-created).
+  const keywordsAdded = plan.adGroups.reduce(
+    (n, { group }) => n + group.keywords.length,
+    0
+  );
+  const adsCreated = plan.adGroups.filter(({ ad }) => Boolean(ad)).length;
+  const negativesAdded =
+    plan.adGroups.reduce((n, { group }) => n + group.negativeKeywords.length, 0) +
+    plan.sharedNegatives.length;
 
   const output: ActivatorOutput = {
     campaignResourceName,

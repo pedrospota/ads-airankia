@@ -135,6 +135,9 @@ export async function POST(
         : undefined,
       conversionDowngradeApplied: activatorOutput?.conversionDowngradeApplied ?? false,
       conversionTrackingEnabled: activatorOutput?.conversionTrackingEnabled ?? false,
+      objective: activatorOutput?.objective,
+      biddingRung: activatorOutput?.biddingRung,
+      optimizedObjectiveLabels: activatorOutput?.optimizedObjectiveLabels ?? [],
     };
     return NextResponse.json(response);
   } catch (e) {

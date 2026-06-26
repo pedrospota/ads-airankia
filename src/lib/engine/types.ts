@@ -291,6 +291,17 @@ export interface ActivatorOutput {
   conversionTrackingEnabled: boolean;
   /** Resource name of the conversion action the account measures with, if any (mirrored onto the campaign row for Optimize / Performance Max). */
   conversionActionResourceName?: string;
+  /** Objective the system auto-derived from the account's REAL conversion signal (the user is never asked to pick one). */
+  objective?: ObjectiveType;
+  /**
+   * Bidding "rung" the account currently supports, decided from account data:
+   *   R3 = mide resultados con datos suficientes → optimizamos para conseguir más;
+   *   R2 = mide pero aún sin historial → buscamos visitas y subimos solos al haber datos;
+   *   R1 = no mide nada todavía → buscamos visitas.
+   */
+  biddingRung?: "R1" | "R2" | "R3";
+  /** Friendly Spanish labels of the conversion action(s) we optimize toward (e.g. ["registros","contactos"]), for honest UI. */
+  optimizedObjectiveLabels?: string[];
   /** Activator ALWAYS leaves the campaign PAUSED. Enabling is a separate, explicit action. */
   status: "PAUSED";
   mutationLog: ActivatorMutationLogEntry[];
@@ -481,4 +492,10 @@ export interface ActivateResponse {
   conversionDowngradeApplied?: boolean;
   /** True when the account already measures conversions (an ENABLED conversion action exists). */
   conversionTrackingEnabled?: boolean;
+  /** Objective the system auto-derived from the account (the user never picks one). */
+  objective?: ObjectiveType;
+  /** Bidding rung the account currently supports (R3 results / R2 measuring / R1 no-measurement). */
+  biddingRung?: "R1" | "R2" | "R3";
+  /** Friendly Spanish labels of what we optimize toward, for honest UI copy. */
+  optimizedObjectiveLabels?: string[];
 }

@@ -942,45 +942,100 @@ export function SearchCampaignCreator({
                     </a>
                   </p>
                 )}
-                {activateResult.conversionTrackingEnabled ? (
-                  <div
-                    style={{
-                      textAlign: "left",
-                      margin: "0 auto 16px",
-                      maxWidth: 360,
-                      padding: 14,
-                      borderRadius: 10,
-                      background: "rgba(16,185,129,0.08)",
-                      border: "1px solid rgba(16,185,129,0.3)",
-                    }}
-                  >
-                    <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
-                      ✓ Tu campaña ya mide resultados de verdad (ventas o
-                      contactos), no solo visitas. La optimizaremos hacia lo que
-                      de verdad te importa.
-                    </p>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      textAlign: "left",
-                      margin: "0 auto 16px",
-                      maxWidth: 360,
-                      padding: 14,
-                      borderRadius: 10,
-                      background: "rgba(251,191,36,0.08)",
-                      border: "1px solid rgba(251,191,36,0.3)",
-                    }}
-                  >
-                    <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
-                      Por ahora tu web todavía no mide resultados (ventas o
-                      contactos), así que pujamos por clics para que tu anuncio se
-                      vea desde el primer día. Más adelante podremos medir esos
-                      resultados y optimizar hacia ellos: lo dejaremos listo por
-                      ti, sin que tengas que tocar nada.
-                    </p>
-                  </div>
-                )}
+                {(() => {
+                  // Honest, plain-Spanish status per the rung the account landed
+                  // on (decided automatically — the user never picked anything).
+                  const boxBase = {
+                    textAlign: "left" as const,
+                    margin: "0 auto 16px",
+                    maxWidth: 360,
+                    padding: 14,
+                    borderRadius: 10,
+                  };
+                  const greenBox = {
+                    ...boxBase,
+                    background: "rgba(16,185,129,0.08)",
+                    border: "1px solid rgba(16,185,129,0.3)",
+                  };
+                  const amberBox = {
+                    ...boxBase,
+                    background: "rgba(251,191,36,0.08)",
+                    border: "1px solid rgba(251,191,36,0.3)",
+                  };
+                  const textStyle = {
+                    fontSize: 13,
+                    color: colors.textMuted,
+                    lineHeight: 1.5,
+                  };
+                  const rung = activateResult.biddingRung;
+                  const labels = activateResult.optimizedObjectiveLabels ?? [];
+                  const what = labels.length > 0 ? labels.join(" y ") : "tus resultados";
+
+                  if (rung === "R3") {
+                    return (
+                      <div style={greenBox}>
+                        <p style={textStyle}>
+                          ✓ Tu campaña ya busca clientes, no solo visitas. Tu
+                          cuenta mide bien {what} —cosas que de verdad ocurren— y
+                          le hemos dicho a Google que dé prioridad a conseguir
+                          más. Lo que mides pero aún no ha pasado nunca lo
+                          añadiremos solos en cuanto empiece a ocurrir. No tienes
+                          que tocar nada.
+                        </p>
+                      </div>
+                    );
+                  }
+                  if (rung === "R2") {
+                    return (
+                      <div style={amberBox}>
+                        <p style={textStyle}>
+                          Tu cuenta ya está preparada para medir resultados, pero
+                          todavía no hay datos suficientes para optimizar con
+                          seguridad. Mientras tanto, tu campaña consigue el máximo
+                          de visitas de calidad con tu presupuesto y seguimos
+                          contando cada resultado. En cuanto haya datos,
+                          cambiaremos solos a buscar clientes. No tienes que hacer
+                          nada.
+                        </p>
+                      </div>
+                    );
+                  }
+                  if (rung === "R1") {
+                    return (
+                      <div style={amberBox}>
+                        <p style={textStyle}>
+                          Tu cuenta todavía no mide ningún resultado (registros,
+                          ventas, contactos...), así que aún no podemos optimizar
+                          para conseguir clientes. Por ahora tu campaña consigue
+                          el máximo de visitas de calidad con tu presupuesto.
+                          Cuando empieces a medir, pasará sola a buscar clientes.
+                          No tienes que decidir nada.
+                        </p>
+                      </div>
+                    );
+                  }
+                  // Fallback for runs created before the rung existed: original
+                  // binary copy, so already-activated campaigns never break.
+                  return activateResult.conversionTrackingEnabled ? (
+                    <div style={greenBox}>
+                      <p style={textStyle}>
+                        ✓ Tu campaña ya mide resultados de verdad (ventas o
+                        contactos), no solo visitas. La optimizaremos hacia lo que
+                        de verdad te importa.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={amberBox}>
+                      <p style={textStyle}>
+                        Por ahora tu web todavía no mide resultados (ventas o
+                        contactos), así que pujamos por clics para que tu anuncio
+                        se vea desde el primer día. Más adelante podremos medir
+                        esos resultados y optimizar hacia ellos: lo dejaremos
+                        listo por ti, sin que tengas que tocar nada.
+                      </p>
+                    </div>
+                  );
+                })()}
                 {pausedDone && (
                   <>
                     <p

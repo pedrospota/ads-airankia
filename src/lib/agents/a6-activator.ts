@@ -22,6 +22,7 @@ import {
   keywords,
   searchAds,
   googleMutations,
+  biddingLadderEvents,
 } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import {
@@ -34,7 +35,9 @@ import {
   type ActivatorOutput,
   type ActivatorMutationLogEntry,
   type PlannedKeyword,
+  type PlannerOutput,
   type BiddingStrategy,
+  type ObjectiveType,
   type KeywordResearchOutput,
 } from "@/lib/engine/types";
 import { buildSanitizedPlan } from "@/lib/engine/sanitize";
@@ -285,6 +288,315 @@ function isConversionStrategy(s: BiddingStrategy): boolean {
     s === "MAXIMIZE_CONVERSION_VALUE" ||
     s === "TARGET_ROAS"
   );
+}
+
+// ----------------------------------------------------------------------------
+// AUTONOMOUS OBJECTIVE / STRATEGY SELECTION  (the user is NEVER asked anything)
+// ----------------------------------------------------------------------------
+// When a campaign is created, we read ONLY this account (read-only) and decide,
+// by ourselves, the bidding strategy + which conversion objective(s) to optimize
+// toward. There is NO question, NO form, NO single forced objective — the account
+// can have SEVERAL objectives at once and we optimize toward all that truly fire.
+//
+// THREE RUNGS (decided from data, never from a guess):
+//   R3 RESULTS      → the account measures result(s) that ACTUALLY happen with
+//                     enough signal → Smart Bidding toward conseguir más (count or
+//                     value based, tCPA/tROAS only if the planner supplied a target).
+//   R2 MEASURING    → measurement is configured but no usable history yet (every
+//                     enabled action has 0 conversions in 90d) → Maximize Clicks;
+//                     the ladder upgrades to R3 by itself once data arrives.
+//   R1 NO-MEASURE   → zero enabled conversion actions → Maximize Clicks.
+//
+// The planner's biddingStrategy is only a HINT; the account-derived rung wins. We
+// NEVER keep a Smart Bidding strategy the account cannot support. The WHOLE thing
+// is fail-safe: the campaign is already created PAUSED, so on ANY read failure we
+// degrade to a safe Maximize Clicks default and never throw into activation, and
+// never invent R3 without confirmed signal.
+// ----------------------------------------------------------------------------
+
+/** >=1 real conversion in 90 days = the action actually fires (fixes the old
+ *  "pick the first ENABLED action" bug, which could optimize toward a dead one). */
+const SIGNAL_MIN = 1;
+/** Conversions/30d needed to climb to R3 on the auto-upgrade ladder (follow-up). */
+export const RUNG_GATE_30D = 15;
+
+interface DetectedAction {
+  resourceName: string;
+  name: string;
+  category: string;
+  conv90d: number;
+  hasValue: boolean;
+}
+
+/** YYYY-MM-DD for a GAQL date literal. GAQL has NO LAST_90_DAYS literal, so the
+ *  90-day window is expressed as an explicit BETWEEN range computed here. */
+function gaqlDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+interface ObjectiveDetection {
+  rung: "R1" | "R2" | "R3";
+  effectiveStrategy: BiddingStrategy;
+  objective: ObjectiveType;
+  /** The conversion action(s) we optimize toward — can be several at once. */
+  optimizedSet: DetectedAction[];
+  /** Highest-volume action of the set, stamped for Optimize / Performance Max. */
+  primaryResourceName?: string;
+  hasValue: boolean;
+  conversionTrackingEnabled: boolean;
+  /** True when a read failed and we fell back to a safe default. */
+  degraded: boolean;
+  rationale: string;
+}
+
+/** Map a Google conversion-action category to our coarse objective union. */
+function objectiveFromCategory(category: string): ObjectiveType {
+  switch (category) {
+    case "PURCHASE":
+    case "ADD_TO_CART":
+    case "BEGIN_CHECKOUT":
+      return "sales";
+    case "PHONE_CALL_LEAD":
+    case "PHONE_CALL":
+      return "calls";
+    default:
+      // SUBMIT_LEAD_FORM, SIGNUP, CONTACT, BOOK_APPOINTMENT, REQUEST_QUOTE,
+      // DEFAULT, ... → treated as "leads" (a captured prospect).
+      return "leads";
+  }
+}
+
+/** Plain-Spanish label for a conversion category (honest UI; no jargon). */
+function friendlyEsLabel(category: string): string {
+  switch (category) {
+    case "PURCHASE":
+      return "compras";
+    case "ADD_TO_CART":
+      return "carritos";
+    case "BEGIN_CHECKOUT":
+      return "pagos iniciados";
+    case "SIGNUP":
+      return "registros";
+    case "SUBMIT_LEAD_FORM":
+      return "formularios";
+    case "CONTACT":
+      return "contactos";
+    case "PHONE_CALL_LEAD":
+    case "PHONE_CALL":
+      return "llamadas";
+    case "BOOK_APPOINTMENT":
+      return "reservas";
+    case "REQUEST_QUOTE":
+      return "presupuestos";
+    case "DEFAULT":
+      return "contactos";
+    default:
+      return "resultados";
+  }
+}
+
+function uniqueLabels(set: DetectedAction[]): string[] {
+  return Array.from(new Set(set.map((a) => friendlyEsLabel(a.category))));
+}
+
+/** R1 — the account measures nothing yet. Safe Maximize Clicks. */
+function rung1(degraded = false): ObjectiveDetection {
+  return {
+    rung: "R1",
+    effectiveStrategy: "MAXIMIZE_CLICKS",
+    objective: "traffic",
+    optimizedSet: [],
+    hasValue: false,
+    conversionTrackingEnabled: false,
+    degraded,
+    rationale:
+      "Tu cuenta todavía no mide resultados, así que buscamos el máximo de visitas de calidad con tu presupuesto. En cuanto empieces a medir, la campaña pasará sola a buscar clientes.",
+  };
+}
+
+/** R2 — measurement exists but no usable history yet. Safe Maximize Clicks. */
+function rung2(
+  conversionTrackingEnabled: boolean,
+  primaryResourceName: string | undefined,
+  degraded: boolean
+): ObjectiveDetection {
+  return {
+    rung: "R2",
+    effectiveStrategy: "MAXIMIZE_CLICKS",
+    objective: "traffic",
+    optimizedSet: [],
+    primaryResourceName,
+    hasValue: false,
+    conversionTrackingEnabled,
+    degraded,
+    rationale:
+      "Tu cuenta ya está preparada para medir resultados, pero todavía no hay datos suficientes para optimizar con seguridad. Mientras tanto buscamos el máximo de visitas de calidad y seguimos contando cada resultado; cuando haya datos, cambiaremos solos a buscar clientes.",
+  };
+}
+
+/**
+ * Decide the bidding strategy + conversion objective(s) for a FRESH campaign by
+ * inspecting ONLY this account. Pure READ-ONLY. NEVER asks anyone. NEVER throws
+ * (the campaign is already created PAUSED, so the worst case is a safe default).
+ */
+async function detectAccountObjective(
+  planner: PlannerOutput
+): Promise<ObjectiveDetection> {
+  // READ A — enabled conversion action DEFINITIONS (cheap; no metrics here).
+  let defRows: Record<string, unknown>[];
+  try {
+    defRows = await search(
+      "SELECT conversion_action.resource_name, conversion_action.name, " +
+        "conversion_action.category, conversion_action.type, conversion_action.status, " +
+        "conversion_action.primary_for_goal, conversion_action.include_in_conversions_metric, " +
+        "conversion_action.counting_type, conversion_action.value_settings.default_value, " +
+        "conversion_action.value_settings.always_use_default_value " +
+        "FROM conversion_action WHERE conversion_action.status = 'ENABLED'"
+    );
+  } catch {
+    // Even the cheap definitions read failed. Use the existing LIMIT-1 probe to
+    // tell measurement-exists from not, and degrade — never invent R3.
+    const measures = await accountHasEligibleConversions().catch(() => false);
+    return measures ? rung2(true, undefined, true) : rung1(true);
+  }
+
+  const enabled = defRows
+    .map((r) => {
+      const ca = (r.conversionAction ?? {}) as Record<string, unknown>;
+      const vs = (ca.valueSettings ?? {}) as Record<string, unknown>;
+      return {
+        resourceName: String(ca.resourceName ?? ""),
+        name: String(ca.name ?? ""),
+        category: String(ca.category ?? "DEFAULT"),
+        includeInConversions: ca.includeInConversionsMetric === true,
+        hasValueDefault: Number(vs.defaultValue ?? 0) > 0,
+      };
+    })
+    .filter((a) => a.resourceName.length > 0);
+
+  if (enabled.length === 0) {
+    // R1 — zero ENABLED conversion actions. No measurement at all.
+    return rung1(false);
+  }
+
+  // READ B — per-action signal over 90 days. Metrics live on a metrics-bearing
+  // resource segmented by segments.conversion_action (NOT on conversion_action,
+  // which exposes no metrics). A read failure here, with READ A having succeeded,
+  // means "we KNOW measurement exists but can't confirm history" → safe R2.
+  const sigByAction = new Map<string, { conv: number; value: number }>();
+  try {
+    const today = new Date();
+    const since = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const sigRows = await search(
+      "SELECT segments.conversion_action, segments.conversion_action_category, " +
+        "metrics.conversions, metrics.all_conversions, metrics.conversions_value " +
+        `FROM customer WHERE segments.date BETWEEN '${gaqlDate(since)}' AND '${gaqlDate(today)}' ` +
+        "AND metrics.conversions > 0"
+    );
+    for (const r of sigRows) {
+      const seg = (r.segments ?? {}) as { conversionAction?: string };
+      const m = (r.metrics ?? {}) as {
+        conversions?: number | string;
+        conversionsValue?: number | string;
+      };
+      const rn = seg.conversionAction;
+      if (!rn) continue;
+      const prev = sigByAction.get(rn) ?? { conv: 0, value: 0 };
+      sigByAction.set(rn, {
+        conv: prev.conv + Number(m.conversions ?? 0),
+        value: prev.value + Number(m.conversionsValue ?? 0),
+      });
+    }
+  } catch {
+    return rung2(true, enabled[0]?.resourceName, true);
+  }
+
+  // READ C — account conversion goals, used ONLY to PREFER goal categories when
+  // several actions have signal. Optional: any failure just disables preference.
+  const goalCategories = new Set<string>();
+  try {
+    const goalRows = await search(
+      "SELECT customer_conversion_goal.category, customer_conversion_goal.origin " +
+        "FROM customer_conversion_goal"
+    );
+    for (const r of goalRows) {
+      const g = (r.customerConversionGoal ?? {}) as { category?: string };
+      if (g.category) goalCategories.add(g.category);
+    }
+  } catch {
+    // Ignore — goal preference is an enhancement, never required.
+  }
+
+  // STEP 0 — JOIN + SIGNAL FILTER: keep ONLY actions that count toward conversions
+  // AND actually fired (>= SIGNAL_MIN in 90d). This excludes configured-but-dead
+  // actions (e.g. a PURCHASE that has never happened) from optimization.
+  const signalBearing: DetectedAction[] = enabled
+    .filter((a) => a.includeInConversions)
+    .map((a) => {
+      const sig = sigByAction.get(a.resourceName);
+      const conv90d = sig?.conv ?? 0;
+      const value90d = sig?.value ?? 0;
+      return {
+        resourceName: a.resourceName,
+        name: a.name,
+        category: a.category,
+        conv90d,
+        hasValue: a.hasValueDefault || value90d > 0,
+      };
+    })
+    .filter((a) => a.conv90d >= SIGNAL_MIN);
+
+  if (signalBearing.length === 0) {
+    // R2 — measurement configured but nothing has fired yet. Keep clicks; the
+    // ladder upgrades to R3 by itself once a real result starts happening.
+    return rung2(true, undefined, false);
+  }
+
+  // STEP 1 — OPTIMIZED SET (multi-objective): prefer the account's declared goal
+  // categories when at least one signal-bearing action matches; else optimize
+  // toward ALL signal-bearing actions. Several objectives at once is the norm.
+  let optimizedSet = signalBearing;
+  if (goalCategories.size > 0) {
+    const preferred = signalBearing.filter((a) => goalCategories.has(a.category));
+    if (preferred.length > 0) optimizedSet = preferred;
+  }
+
+  // STEP 2 — VALUE vs COUNT: only steer to value-based Smart Bidding when EVERY
+  // optimized action carries a value (else value bidding has nothing to maximize).
+  const hasValue = optimizedSet.every((a) => a.hasValue);
+
+  // STEP 3 — STRATEGY (no user input). Planner targets are honored only as the
+  // tCPA/tROAS refinement of the account-derived family.
+  let effectiveStrategy: BiddingStrategy;
+  if (hasValue) {
+    effectiveStrategy =
+      planner.targetRoas && planner.targetRoas > 0
+        ? "TARGET_ROAS"
+        : "MAXIMIZE_CONVERSION_VALUE";
+  } else {
+    effectiveStrategy =
+      planner.targetCpaUsd && planner.targetCpaUsd > 0
+        ? "TARGET_CPA"
+        : "MAXIMIZE_CONVERSIONS";
+  }
+
+  const dominant = [...optimizedSet].sort((a, b) => b.conv90d - a.conv90d)[0];
+  const labels = uniqueLabels(optimizedSet);
+  const rationale =
+    `Tu cuenta ya mide ${labels.join(" y ")} con datos suficientes, así que ` +
+    "optimizamos la campaña para conseguir más de eso automáticamente, sin que tengas que elegir nada.";
+
+  return {
+    rung: "R3",
+    effectiveStrategy,
+    objective: objectiveFromCategory(dominant.category),
+    optimizedSet,
+    primaryResourceName: dominant.resourceName,
+    hasValue,
+    conversionTrackingEnabled: true,
+    degraded: false,
+    rationale,
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -549,36 +861,33 @@ async function activate(
   const campaignAlreadyCreated =
     isDone("createCampaign") || priorCampaignId != null;
 
-  // --- CONVERSION-AWARE BIDDING (decided automatically, no user input) -------
-  // The planner may pick a Smart Bidding strategy (Maximize Conversions, tCPA,
-  // Maximize Conversion Value, tROAS). Those ONLY work if the account measures
-  // conversions; on a fresh account with none, such a campaign barely serves
-  // and the user's budget would do nothing. So on a FIRST create we ask Google
-  // whether any conversion is tracked; if not, we downgrade to Maximize Clicks
-  // (targetSpend), which reliably drives traffic with no conversion history,
-  // and we explain the choice in plain Spanish. On resume we keep whatever the
-  // existing campaign already uses (we never re-read or change a live strategy).
+  // --- AUTONOMOUS OBJECTIVE + BIDDING (decided automatically, no user input) --
+  // On a FIRST create we read ONLY this account and decide, by ourselves, the
+  // bidding strategy and which conversion objective(s) to optimize toward —
+  // supporting SEVERAL at once. The planner's biddingStrategy is just a hint; the
+  // account-derived rung (R3 results / R2 measuring / R1 no-measurement) wins and
+  // we never keep a Smart Bidding strategy the account cannot support. The whole
+  // detection is fail-safe (never throws; the campaign is already created PAUSED).
+  // On resume we keep whatever the existing campaign already uses (we never re-read
+  // or change a live strategy, and we never write a second ladder event).
   const plannedStrategy: BiddingStrategy =
     structure.biddingStrategy ?? planner.biddingStrategy;
   let effectiveStrategy: BiddingStrategy = plannedStrategy;
   let conversionDowngradeApplied = false;
-  if (!campaignAlreadyCreated && isConversionStrategy(plannedStrategy)) {
-    // On a read error, KEEP the planner's choice (default true): we must never
-    // silently downgrade a real advertiser's account that DOES measure
-    // conversions just because a single read hiccuped. The downgrade exists
-    // only to RESCUE an account we positively confirm has zero conversions.
-    const hasConversions = await accountHasEligibleConversions().catch(
-      () => true
-    );
-    if (!hasConversions) {
-      effectiveStrategy = "MAXIMIZE_CLICKS";
-      conversionDowngradeApplied = true;
-      await helpers.emit("decision", {
-        agent: AGENT_ID,
-        summary:
-          "Tu cuenta todavía no mide conversiones, así que hemos elegido una puja que consigue el máximo de visitas con tu presupuesto. Cuando empieces a medir conversiones podremos optimizar para conseguir clientes, no solo visitas.",
-      });
-    }
+  let detection: ObjectiveDetection | null = null;
+  if (!campaignAlreadyCreated) {
+    detection = await detectAccountObjective(planner);
+    effectiveStrategy = detection.effectiveStrategy;
+    // "Downgrade" only means: the planner WANTED a conversion strategy but the
+    // account can't support one yet (R2/R1). At R3 both are conversion strategies
+    // so this stays false.
+    conversionDowngradeApplied =
+      isConversionStrategy(plannedStrategy) &&
+      !isConversionStrategy(effectiveStrategy);
+    await helpers.emit("decision", {
+      agent: AGENT_ID,
+      summary: detection.rationale,
+    });
   }
 
   // --- (1) Budget -----------------------------------------------------------
@@ -695,6 +1004,9 @@ async function activate(
         ? {}
         : {
             biddingStrategy: effectiveStrategy,
+            // Stamp the single highest-volume action we optimize toward (null at
+            // R2/R1) so downstream Optimize / Performance Max knows the anchor.
+            conversionActionResourceName: detection?.primaryResourceName ?? null,
             // A target CPA/ROAS only makes sense under a conversion strategy; if
             // we downgraded to Maximize Clicks, store null so the UI never shows
             // a phantom target that isn't actually in effect.
@@ -715,6 +1027,33 @@ async function activate(
       updatedAt: new Date(),
     })
     .where(eq(campaigns.id, campaignDbId));
+
+  // Audit: record ONE bidding-ladder event for this FIRST create, so the rung the
+  // account landed on (and WHY) is traceable and the future auto-upgrade ladder has
+  // a starting point. Best-effort and isolated — never blocks activation, and never
+  // written on resume (detection is null there → no duplicate row).
+  if (detection && !campaignAlreadyCreated) {
+    try {
+      await adsDb.insert(biddingLadderEvents).values({
+        campaignId: campaignDbId,
+        fromRung: null,
+        toRung: detection.rung,
+        fromStrategy: plannedStrategy,
+        toStrategy: effectiveStrategy,
+        triggerMetric: "initial",
+        triggerValue: detection.optimizedSet.length
+          ? String(
+              detection.optimizedSet.reduce((n, a) => n + a.conv90d, 0)
+            )
+          : null,
+        conv30d: null,
+        decidedBy: "code",
+        rationale: detection.rationale,
+      });
+    } catch {
+      // Audit row is best-effort; the campaign is already created safely.
+    }
+  }
 
   // --- (3) Geo + language criteria (campaign-level) -------------------------
   // geoTargetIds was resolved AND validated as non-empty in pre-flight, so we
@@ -1214,10 +1553,17 @@ async function activate(
     plan.adGroups.reduce((n, { group }) => n + group.negativeKeywords.length, 0) +
     plan.sharedNegatives.length;
 
-  // Read-only: does this account already measure conversions? Stamps the
-  // campaign with the action it measures. Never creates anything, never throws —
-  // the campaign is already safely created above.
-  const measurement = await reflectConversionMeasurement(campaignDbId);
+  // Conversion-measurement reflection for the UI. On a FIRST create we already
+  // computed it inside detectAccountObjective (one read pass — no second hit to
+  // Google). On resume (detection===null) we do the cheap reflection read so the
+  // UI still tells the truth and the campaign stays stamped. Never creates
+  // anything, never throws — the campaign is already safely created above.
+  const measurement = detection
+    ? {
+        enabled: detection.conversionTrackingEnabled,
+        resourceName: detection.primaryResourceName,
+      }
+    : await reflectConversionMeasurement(campaignDbId);
 
   const output: ActivatorOutput = {
     campaignResourceName,
@@ -1232,6 +1578,11 @@ async function activate(
     conversionDowngradeApplied,
     conversionTrackingEnabled: measurement.enabled,
     conversionActionResourceName: measurement.resourceName,
+    objective: detection?.objective,
+    biddingRung: detection?.rung,
+    optimizedObjectiveLabels: detection
+      ? uniqueLabels(detection.optimizedSet)
+      : undefined,
     status: "PAUSED", // SAFETY: always paused.
     mutationLog,
   };

@@ -236,6 +236,87 @@ function buildUserPrompt(ctx: RunContext): string {
 }
 
 // ----------------------------------------------------------------------------
+// Landing-page reachability check (real HTTP, NON-BLOCKING)
+// ----------------------------------------------------------------------------
+// The LLM can only verify a URL is well-formed (https + absolute). It cannot
+// know whether the page actually LOADS. A typo'd or dead landing page is the
+// number-one silent way to waste budget, so here we actually FETCH each distinct
+// landing URL. SAFETY: this NEVER blocks. Anything wrong is a 'warn' only — a
+// transient blip, a slow server or a bot-blocked page must not stop a campaign.
+// The verdict is decided by the LLM and is never changed here.
+
+const LANDING_CHECK_TIMEOUT_MS = 6000;
+const LANDING_CHECK_MAX_URLS = 12;
+
+function collectLandingUrls(ctx: RunContext): string[] {
+  const raw: string[] = [];
+  for (const ad of ctx.rsa?.ads ?? []) {
+    if (ad.finalUrl) raw.push(ad.finalUrl);
+  }
+  for (const g of ctx.structure?.adGroups ?? []) {
+    if (g.landingPageUrl) raw.push(g.landingPageUrl);
+  }
+  if (ctx.brand?.landingPageUrl) raw.push(ctx.brand.landingPageUrl);
+
+  // Dedupe (case-insensitive), keep only absolute https URLs, cap the count.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of raw) {
+    const url = (u ?? "").trim();
+    if (!url.toLowerCase().startsWith("https://")) continue;
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(url);
+    if (out.length >= LANDING_CHECK_MAX_URLS) break;
+  }
+  return out;
+}
+
+type LandingProblem = { url: string; reason: string };
+
+async function checkOneLanding(
+  url: string,
+  parentSignal?: AbortSignal
+): Promise<LandingProblem | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    LANDING_CHECK_TIMEOUT_MS
+  );
+  const onParentAbort = () => controller.abort();
+  parentSignal?.addEventListener("abort", onParentAbort);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; AirankiaBot/1.0; +https://ads.airankia.com)",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+    if (res.status === 404 || res.status === 410) {
+      return { url, reason: "no existe (página no encontrada)" };
+    }
+    if (res.status >= 500) {
+      return { url, reason: `el servidor devolvió un error (${res.status})` };
+    }
+    // 2xx, 3xx and "gated" 4xx (401/403/405/429…) → the page exists.
+    return null;
+  } catch {
+    // Network error, DNS failure, timeout or abort.
+    if (parentSignal?.aborted) return null; // run cancelled — don't warn.
+    return { url, reason: "no respondió a tiempo o no se pudo abrir" };
+  } finally {
+    clearTimeout(timeout);
+    parentSignal?.removeEventListener("abort", onParentAbort);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Agent definition
 // ----------------------------------------------------------------------------
 
@@ -274,6 +355,48 @@ const a5PolicyQa: AgentDefinition<QAOutput> = {
     }
 
     const output = result.data;
+
+    // --- Landing-page reachability (real HTTP, NON-BLOCKING warn) -----------
+    // Adds 'warn' issues + a checklist line only. NEVER changes the verdict.
+    try {
+      const landingUrls = collectLandingUrls(ctx);
+      if (landingUrls.length > 0 && !helpers.signal?.aborted) {
+        const results = await Promise.all(
+          landingUrls.map((u) => checkOneLanding(u, helpers.signal))
+        );
+        const problems = results.filter(
+          (r): r is LandingProblem => r != null
+        );
+        const okCount = landingUrls.length - problems.length;
+        output.checklist.push({
+          name: "Páginas de destino accesibles",
+          ok: problems.length === 0,
+          detail:
+            problems.length === 0
+              ? `${landingUrls.length} página(s) abren correctamente.`
+              : `${okCount} de ${landingUrls.length} abren bien; ${problems.length} con avisos.`,
+        });
+        for (const p of problems) {
+          output.issues.push({
+            severity: "warn",
+            area: "landing_page",
+            message: `La página ${p.url} ${p.reason}. Si el enlace está mal o caído, quien haga clic no verá tu oferta y gastarías sin resultado.`,
+            suggestion:
+              "Abre el enlace en tu navegador. Si no carga, corrige la dirección de la página de destino antes de poner la campaña en marcha.",
+            locator: "landingPageUrl",
+          });
+        }
+        if (problems.length > 0) {
+          await helpers.emit("decision", {
+            agent: AGENT_ID,
+            summary: `Aviso: ${problems.length} página(s) de destino no respondieron bien al comprobarlas. La campaña se puede crear igualmente, pero conviene revisar el enlace.`,
+          });
+        }
+      }
+    } catch {
+      // Best-effort only: if the whole check fails, skip it silently so it can
+      // NEVER block or break QA.
+    }
 
     const blockers = output.issues.filter((i) => i.severity === "block").length;
     const fixes = output.issues.filter((i) => i.severity === "fix").length;

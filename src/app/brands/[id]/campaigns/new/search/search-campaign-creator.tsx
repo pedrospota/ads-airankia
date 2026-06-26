@@ -803,6 +803,84 @@ export function SearchCampaignCreator({
                     ID de Google Ads: {activateResult.googleCampaignId}
                   </p>
                 )}
+                {activateResult.summary && (
+                  <div
+                    style={{
+                      textAlign: "left",
+                      margin: "8px auto 16px",
+                      maxWidth: 360,
+                      padding: 14,
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.03)",
+                      border: `1px solid ${colors.border}`,
+                    }}
+                  >
+                    <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                      Esto es lo que creamos en tu campaña:
+                    </p>
+                    <ul
+                      style={{
+                        fontSize: 13,
+                        color: colors.textMuted,
+                        lineHeight: 1.7,
+                        paddingLeft: 18,
+                        margin: 0,
+                      }}
+                    >
+                      <li>{activateResult.summary.adGroupsCount} grupos de anuncios</li>
+                      <li>{activateResult.summary.keywordsCount} palabras clave</li>
+                      <li>
+                        {activateResult.summary.negativesCount} palabras clave
+                        negativas (para no gastar de más)
+                      </li>
+                      <li>{activateResult.summary.adsCount} anuncios</li>
+                      {activateResult.summary.assetsCount > 0 && (
+                        <li>
+                          {activateResult.summary.assetsCount} extensiones
+                          {activateResult.summary.assetKinds.length > 0
+                            ? ` (${activateResult.summary.assetKinds.join(", ")})`
+                            : ""}
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+                {activateResult.googleAdsDeepLink && (
+                  <p style={{ marginBottom: 16 }}>
+                    <a
+                      href={activateResult.googleAdsDeepLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        fontSize: 13,
+                        color: colors.accent,
+                        fontWeight: 600,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Ver en Google Ads ↗
+                    </a>
+                  </p>
+                )}
+                {activateResult.conversionDowngradeApplied && (
+                  <div
+                    style={{
+                      textAlign: "left",
+                      margin: "0 auto 16px",
+                      maxWidth: 360,
+                      padding: 14,
+                      borderRadius: 10,
+                      background: "rgba(251,191,36,0.08)",
+                      border: "1px solid rgba(251,191,36,0.3)",
+                    }}
+                  >
+                    <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
+                      Tu cuenta aún no mide ventas ni llamadas, así que pujamos por
+                      clics para que tu anuncio se vea desde el primer día. Cuando
+                      quieras medir resultados de verdad, te ayudo a configurarlo.
+                    </p>
+                  </div>
+                )}
                 {pausedDone && (
                   <>
                     <p
@@ -845,6 +923,32 @@ export function SearchCampaignCreator({
                     </p>
                   </>
                 )}
+                <div
+                  style={{
+                    textAlign: "left",
+                    margin: "20px auto 0",
+                    maxWidth: 360,
+                    paddingTop: 16,
+                    borderTop: `1px solid ${colors.border}`,
+                  }}
+                >
+                  <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    Próximos pasos:
+                  </p>
+                  <ul
+                    style={{
+                      fontSize: 13,
+                      color: colors.textMuted,
+                      lineHeight: 1.7,
+                      paddingLeft: 18,
+                      margin: 0,
+                    }}
+                  >
+                    <li>⏱️ Revisa tus primeros clics en 24-48 horas.</li>
+                    <li>📊 Fíjate en si te llegan clientes de calidad.</li>
+                    <li>🔧 Si hace falta, ajusta tus palabras clave o el presupuesto.</li>
+                  </ul>
+                </div>
               </div>
             )}
 

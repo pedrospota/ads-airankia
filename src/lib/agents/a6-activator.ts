@@ -459,6 +459,7 @@ async function activate(
   const plannedStrategy: BiddingStrategy =
     structure.biddingStrategy ?? planner.biddingStrategy;
   let effectiveStrategy: BiddingStrategy = plannedStrategy;
+  let conversionDowngradeApplied = false;
   if (!resuming && isConversionStrategy(plannedStrategy)) {
     // On a read error, KEEP the planner's choice (default true): we must never
     // silently downgrade a real advertiser's account that DOES measure
@@ -469,6 +470,7 @@ async function activate(
     );
     if (!hasConversions) {
       effectiveStrategy = "MAXIMIZE_CLICKS";
+      conversionDowngradeApplied = true;
       await helpers.emit("decision", {
         agent: AGENT_ID,
         summary:
@@ -860,10 +862,9 @@ async function activate(
   // already safely created above). Skipped on resume to avoid duplicates. We
   // reuse ONLY copy that already passed Policy-QA (RSA headlines/descriptions,
   // ad-group names) so no new, unverified claims are ever introduced.
+  let assetsLinked = 0;
+  const assetKinds: string[] = [];
   if (!resuming) {
-    let assetsLinked = 0;
-    const addedKinds: string[] = [];
-
     // Sitelinks — one per ad group (Google shows them with >=2). Link text =
     // ad-group name; description1/2 = the group's RSA descriptions (both or
     // neither, per Google's rule); final URL = the group's landing page.
@@ -895,7 +896,7 @@ async function activate(
         );
         if (n > 0) {
           assetsLinked += n;
-          addedKinds.push("enlaces a tu web");
+          assetKinds.push("enlaces a tu web");
         }
       } catch (e) {
         mutationLog.push(
@@ -936,7 +937,7 @@ async function activate(
         );
         if (n > 0) {
           assetsLinked += n;
-          addedKinds.push("textos destacados");
+          assetKinds.push("textos destacados");
         }
       } catch (e) {
         mutationLog.push(
@@ -984,7 +985,7 @@ async function activate(
           );
           if (n > 0) {
             assetsLinked += n;
-            addedKinds.push("lista de servicios");
+            assetKinds.push("lista de servicios");
           }
         } catch (e) {
           mutationLog.push(
@@ -1009,12 +1010,12 @@ async function activate(
           "addAssets",
           "done",
           undefined,
-          `${assetsLinked} extensiones (${addedKinds.join(", ")})`
+          `${assetsLinked} extensiones (${assetKinds.join(", ")})`
         )
       );
       await helpers.emit("decision", {
         agent: AGENT_ID,
-        summary: `Añadimos extensiones automáticas (${addedKinds.join(
+        summary: `Añadimos extensiones automáticas (${assetKinds.join(
           ", "
         )}) para que tu anuncio sea más completo y de mayor calidad, sin que tengas que hacer nada.`,
       });
@@ -1029,6 +1030,9 @@ async function activate(
     keywordsAdded,
     negativesAdded,
     adsCreated,
+    assetsLinked,
+    assetKinds,
+    conversionDowngradeApplied,
     status: "PAUSED", // SAFETY: always paused.
     mutationLog,
   };

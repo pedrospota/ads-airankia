@@ -4,11 +4,14 @@ import { agentRuns } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { runActivatorStep } from "@/lib/engine/orchestrator";
-import type { ActivateResponse } from "@/lib/engine/types";
+import type { ActivateResponse, ActivatorOutput } from "@/lib/engine/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+// Same account id the activator mutates against (hyphens stripped for the URL).
+const CUSTOMER_ID = process.env.GOOGLE_ADS_ACCOUNT_ID || "3531706003";
 
 // POST: Explicit "Activar". Pushes the campaign to Google ALWAYS PAUSED.
 // This does NOT enable the campaign — enabling lives behind /enable only.
@@ -57,10 +60,30 @@ export async function POST(
       return NextResponse.json(response, { status: 500 });
     }
 
+    // Surface "what was really created" so the user is never left with a black box.
+    const activatorStep = state.steps.find((s) => s.agent === "activator");
+    const activatorOutput = (activatorStep?.output ?? null) as ActivatorOutput | null;
+    const gid = state.run.googleCampaignId ?? undefined;
+    const cidNoHyphens = CUSTOMER_ID.replace(/-/g, "");
+
     const response: ActivateResponse = {
       ok: true,
-      googleCampaignId: state.run.googleCampaignId ?? undefined,
+      googleCampaignId: gid,
       enabled: false, // left PAUSED — recommended default
+      summary: activatorOutput
+        ? {
+            adGroupsCount: activatorOutput.adGroups?.length ?? 0,
+            keywordsCount: activatorOutput.keywordsAdded ?? 0,
+            negativesCount: activatorOutput.negativesAdded ?? 0,
+            adsCount: activatorOutput.adsCreated ?? 0,
+            assetsCount: activatorOutput.assetsLinked ?? 0,
+            assetKinds: activatorOutput.assetKinds ?? [],
+          }
+        : undefined,
+      googleAdsDeepLink: gid
+        ? `https://ads.google.com/aw/campaigns?campaignId=${gid}&__c=${cidNoHyphens}`
+        : undefined,
+      conversionDowngradeApplied: activatorOutput?.conversionDowngradeApplied ?? false,
     };
     return NextResponse.json(response);
   } catch (e) {

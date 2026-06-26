@@ -281,6 +281,12 @@ export interface ActivatorOutput {
   keywordsAdded: number;
   negativesAdded: number;
   adsCreated: number;
+  /** Extensions/assets linked to the campaign (sitelinks/callouts/structured snippets). */
+  assetsLinked: number;
+  /** Friendly Spanish labels of the extension kinds added (e.g. "enlaces a tu web"). */
+  assetKinds: string[];
+  /** True iff a planned Smart Bidding strategy was auto-downgraded to Maximize Clicks because the account measures no conversions. */
+  conversionDowngradeApplied: boolean;
   /** Activator ALWAYS leaves the campaign PAUSED. Enabling is a separate, explicit action. */
   status: "PAUSED";
   mutationLog: ActivatorMutationLogEntry[];
@@ -456,4 +462,17 @@ export interface ActivateResponse {
   googleCampaignId?: string;
   enabled: boolean; // false = left PAUSED (default & recommended)
   error?: string;
+  /** What was really created in Google Ads (so the user isn't left with a black box). */
+  summary?: {
+    adGroupsCount: number;
+    keywordsCount: number;
+    negativesCount: number;
+    adsCount: number;
+    assetsCount: number;
+    assetKinds: string[];
+  };
+  /** Deep link to view the created campaign in the Google Ads UI. */
+  googleAdsDeepLink?: string;
+  /** True when bidding was auto-adjusted to clicks because no conversions are measured yet. */
+  conversionDowngradeApplied?: boolean;
 }

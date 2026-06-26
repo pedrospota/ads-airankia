@@ -468,6 +468,15 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
       agent: "keyword_researcher",
       summary: `${output.keywords.length} keywords · ${output.negatives.length} negativas · ${metricsLabel}.`,
     });
+    if (metricsSource === "llm_estimate") {
+      await helpers.emit("decision", {
+        agent: "keyword_researcher",
+        summary:
+          plannerIdeas.length === 0
+            ? "Google no devolvió datos de búsquedas esta vez, así que usamos nuestras propias estimaciones. Las cifras son aproximadas y se ajustarán solas con datos reales en cuanto la campaña empiece a mostrarse."
+            : "Algunas palabras clave no tienen datos exactos de Google, así que para esas usamos nuestras propias estimaciones. Las cifras se ajustarán solas cuando la campaña empiece a mostrarse.",
+      });
+    }
     await helpers.emit("artifact", { output });
 
     return {

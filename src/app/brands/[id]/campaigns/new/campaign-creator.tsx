@@ -171,7 +171,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
     e.target.value = "";
   }
 
-  async function saveDraft() {
+  async function saveDraft(): Promise<string | null> {
     setSaving(true); setError(null);
     try {
       const urls = selectedUrls.map((c) => ({ url: c.url, domain: c.domain.replace(/^www\./, "").replace(/^m\./, "") }));
@@ -180,8 +180,39 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setSavedCampaignId(data.campaign.id);
+      setSaving(false);
+      return data.campaign.id as string;
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo guardar. Inténtalo de nuevo."); }
     setSaving(false);
+    return null;
+  }
+
+  // ONE-CLICK create: save the draft (if needed) and publish it to Google Ads
+  // in a single action. The campaign is always created PAUSED, so nothing is
+  // spent until the user activates it inside Google Ads. This replaces the old
+  // 3-button "guardar / guardar y publicar / publicar" cluster with one clear
+  // step, while saveDraft/publishToGoogleAds stay available underneath.
+  async function createCampaignPaused() {
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        "Vamos a crear tu campaña en tu cuenta de Google Ads.\n\nQuedará EN PAUSA, así que todavía NO se gasta nada: tú decides cuándo activarla dentro de Google Ads.\n\n¿Continuamos?",
+      );
+      if (!ok) return;
+    }
+    setPublishing(true); setError(null);
+    try {
+      let id = savedCampaignId;
+      if (!id) {
+        id = await saveDraft();
+        if (!id) { setPublishing(false); return; }
+      }
+      const r = await fetch("/api/campaigns/publish", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: id }) });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      setPublishResult({ googleCampaignId: data.googleCampaignId, placementsAdded: data.placementsAdded });
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudo crear la campaña. Inténtalo de nuevo."); }
+    setPublishing(false);
   }
 
   async function publishToGoogleAds() {
@@ -543,24 +574,13 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
 
                 {error && <p style={{ fontSize: 13, color: '#F87171', marginBottom: 16 }}>{error}</p>}
 
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center" style={{ gap: 12, flexWrap: 'wrap' }}>
                   <button onClick={() => setStep("creatives")} style={{ padding: '10px 24px', borderRadius: 8, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, cursor: 'pointer' }}>← Atrás</button>
-                  <div className="flex gap-3">
-                    {!savedCampaignId ? (
-                      <button onClick={saveDraft} disabled={saving}
-                        style={{ padding: '10px 24px', borderRadius: 8, background: colors.bgCard, border: `1px solid ${colors.border}`, color: colors.text, fontWeight: 600, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
-                        {saving ? "Guardando…" : "Guardar borrador"}
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: 13, color: colors.accent, alignSelf: 'center' }}>✓ Borrador guardado</span>
-                    )}
-                    <button onClick={savedCampaignId ? publishToGoogleAds : async () => { await saveDraft(); }}
-                      disabled={publishing || saving}
-                      style={{ padding: '10px 24px', borderRadius: 8, background: savedCampaignId ? '#EF4444' : colors.accent, color: '#fff', fontWeight: 600, fontSize: 14, border: 'none',
-                        cursor: publishing || saving ? 'not-allowed' : 'pointer', opacity: publishing || saving ? 0.7 : 1 }}>
-                      {publishing ? "Publicando…" : savedCampaignId ? "🚀 Publicar en Google Ads" : "Guardar y publicar"}
-                    </button>
-                  </div>
+                  <button onClick={createCampaignPaused} disabled={publishing || saving}
+                    style={{ padding: '13px 30px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 700, fontSize: 15, border: 'none',
+                      cursor: publishing || saving ? 'not-allowed' : 'pointer', opacity: publishing || saving ? 0.7 : 1 }}>
+                    {publishing || saving ? "Creando tu campaña…" : "Crear mi campaña (en pausa)"}
+                  </button>
                 </div>
               </>
             )}

@@ -94,6 +94,11 @@ export function SearchCampaignCreator({
   const [activating, setActivating] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [activateResult, setActivateResult] = useState<ActivateResponse | null>(null);
+  // When the user (in Asistido) presses "que la IA termine el resto", we flip
+  // this on so the auto-advance effect drives every remaining step to the
+  // activation gate — exactly like Automático, but decided mid-run. It never
+  // crosses the activation gate (that stays the user's one deliberate click).
+  const [autoFinish, setAutoFinish] = useState(false);
   // ---- AI auto-fill (start card) ----------------------------------------
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
@@ -278,7 +283,9 @@ export function SearchCampaignCreator({
   useEffect(() => {
     if (!runId || !state) return;
     if (state.run.status !== "awaiting_approval") return;
-    if (state.run.mode !== "auto") return;
+    // Drive the pipeline automatically when the run was created in Automático,
+    // OR when the user pressed "que la IA termine el resto" mid-run (autoFinish).
+    if (state.run.mode !== "auto" && !autoFinish) return;
     // Don't auto-advance the activation gate — that's the user's one click.
     if (isActivationGate(state)) return;
 
@@ -287,7 +294,7 @@ export function SearchCampaignCreator({
     if (advancedRef.current.has(step.id)) return;
     advancedRef.current.add(step.id);
     void advance(runId, { stepId: step.id, action: "accept" });
-  }, [runId, state, advance]);
+  }, [runId, state, advance, autoFinish]);
 
   // ---- AI auto-fill: draft objective + budget from the business context --
   async function requestSuggestion() {
@@ -332,6 +339,7 @@ export function SearchCampaignCreator({
     setSuggestError(null);
     setStarting(true);
     advancedRef.current = new Set();
+    setAutoFinish(false);
     suggestAbortRef.current?.abort();
     setLiveLog({});
     setActivateResult(null);
@@ -379,9 +387,26 @@ export function SearchCampaignCreator({
     await advance(runId, { stepId, action: "accept", userOverride });
   }
 
+  // ---- Accept this step AND let the AI finish the rest (Asistido) ---------
+  // Flip autoFinish on so the auto-advance effect carries the remaining steps
+  // up to (but not through) the activation gate, then accept the current step.
+  async function acceptAndFinishStep(stepId: string, userOverride?: unknown) {
+    setAutoFinish(true);
+    await acceptStep(stepId, userOverride);
+  }
+
   // ---- Activation chokepoint (the ONE place a run gets activated) --------
   async function activateCampaign() {
     if (!runId) return;
+    // Safety barrier before the first real write to Google Ads. It stays in
+    // PAUSE (no spend yet), but we still confirm so a click is never an
+    // accident — especially for someone doing this for the first time.
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        "Vamos a crear tu campaña en tu cuenta de Google Ads.\n\nQuedará EN PAUSA, así que todavía NO se gasta nada: tú decides cuándo ponerla en marcha.\n\n¿Continuamos?",
+      );
+      if (!ok) return;
+    }
     setActivating(true);
     setError(null);
     try {
@@ -406,6 +431,14 @@ export function SearchCampaignCreator({
   // ---- Enable a paused campaign (guarded /enable) ------------------------
   async function enableCampaign() {
     if (!runId) return;
+    // The real money barrier: enabling starts showing ads and spending budget.
+    // Always confirm before crossing it.
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        "Tu campaña pasará a estar ACTIVA: empezará a mostrarse en Google y a gastar como mucho tu presupuesto del día.\n\n¿Seguro que quieres ponerla en marcha ahora?",
+      );
+      if (!ok) return;
+    }
     setEnabling(true);
     setError(null);
     try {
@@ -438,6 +471,7 @@ export function SearchCampaignCreator({
     setActivateResult(null);
     setActivating(false);
     setEnabling(false);
+    setAutoFinish(false);
     // Drop the ?run= id so a later reload doesn't resurrect the old run.
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", window.location.pathname);
@@ -696,6 +730,8 @@ export function SearchCampaignCreator({
               colors={colors}
               styles={styles}
               onAccept={acceptStep}
+              onAcceptAndFinish={acceptAndFinishStep}
+              autoFinish={autoFinish}
               activationGate={activationGate}
             />
 
@@ -867,6 +903,8 @@ function Timeline({
   colors,
   styles,
   onAccept,
+  onAcceptAndFinish,
+  autoFinish,
   activationGate,
 }: {
   state: RunStateDTO | null;
@@ -874,6 +912,8 @@ function Timeline({
   colors: ReturnType<typeof useTheme>["colors"];
   styles: Styles;
   onAccept: (stepId: string, userOverride?: unknown) => void;
+  onAcceptAndFinish: (stepId: string, userOverride?: unknown) => void;
+  autoFinish: boolean;
   activationGate: boolean;
 }) {
   // Build a row per pipeline agent, merged with whatever the server reports.
@@ -913,6 +953,7 @@ function Timeline({
           !!awaitingStep &&
           awaitingStep.agent === agent &&
           state?.run.mode === "assisted" &&
+          !autoFinish &&
           !activationGate;
 
         return (
@@ -981,6 +1022,7 @@ function Timeline({
                   colors={colors}
                   styles={styles}
                   onAccept={onAccept}
+                  onAcceptAndFinish={onAcceptAndFinish}
                 />
               )}
             </div>
@@ -1100,11 +1142,13 @@ function ApprovalBlock({
   colors,
   styles,
   onAccept,
+  onAcceptAndFinish,
 }: {
   step: StepDTO;
   colors: ReturnType<typeof useTheme>["colors"];
   styles: Styles;
   onAccept: (stepId: string, userOverride?: unknown) => void;
+  onAcceptAndFinish: (stepId: string, userOverride?: unknown) => void;
 }) {
   const out = (step.userOverride ?? step.output) as unknown;
 
@@ -1133,41 +1177,52 @@ function ApprovalBlock({
     return () => clearTimeout(t);
   }, [accepting]);
 
-  function acceptPlanner() {
-    if (!planner) {
-      onAccept(step.id);
+  // Resolve whatever the user accepts (plain output, planner override, or an
+  // edited draft) and hand it to `cb` — which is either onAccept (advance one
+  // step) or onAcceptAndFinish (let the AI carry the rest). Same logic, two
+  // destinations, so the buttons can never drift apart.
+  function runAccept(cb: (stepId: string, userOverride?: unknown) => void) {
+    setAccepting(true);
+    if (editing) {
+      try {
+        const parsed = JSON.parse(draft);
+        setParseError(null);
+        cb(step.id, parsed);
+      } catch {
+        setParseError("No pudimos leer los cambios. Revisa el formato.");
+        setAccepting(false);
+      }
       return;
     }
-    const override: PlannerOutput = {
-      ...planner,
-      objectiveSummary: objective.trim() || planner.objectiveSummary,
-      budget: {
-        ...planner.budget,
-        dailyUsd: parseBudget(budget) ?? planner.budget.dailyUsd,
-      },
-    };
-    onAccept(step.id, override);
-  }
-
-  function acceptEdited() {
-    try {
-      const parsed = JSON.parse(draft);
-      setParseError(null);
-      setAccepting(true);
-      onAccept(step.id, parsed);
-    } catch {
-      setParseError("No pudimos leer los cambios. Revisa el formato.");
+    if (isPlanner) {
+      if (!planner) {
+        cb(step.id);
+        return;
+      }
+      const override: PlannerOutput = {
+        ...planner,
+        objectiveSummary: objective.trim() || planner.objectiveSummary,
+        budget: {
+          ...planner.budget,
+          dailyUsd: parseBudget(budget) ?? planner.budget.dailyUsd,
+        },
+      };
+      cb(step.id, override);
+      return;
     }
+    cb(step.id);
   }
 
-  // Single entry point for the "Aceptar" button: show the pending state, then
-  // hand off to the right accept path. The block unmounts once the server moves
-  // the run forward, so we never need to clear `accepting`.
+  // The "Aceptar" button: advance just this one step. The block unmounts once
+  // the server moves the run forward, so we never need to clear `accepting`.
   function handleAccept() {
-    setAccepting(true);
-    if (editing) acceptEdited();
-    else if (isPlanner) acceptPlanner();
-    else onAccept(step.id);
+    runAccept(onAccept);
+  }
+
+  // The "…y que la IA termine el resto" button: accept this step and let the
+  // AI drive every remaining step up to the final activation review.
+  function handleAcceptAndFinish() {
+    runAccept(onAcceptAndFinish);
   }
 
   return (
@@ -1232,16 +1287,30 @@ function ApprovalBlock({
             cursor: accepting ? "not-allowed" : "pointer",
           }}
         >
-          {accepting ? "Aceptando…" : "Aceptar"}
+          {accepting ? "Aceptando…" : "Aceptar y continuar"}
         </button>
+        <button
+          onClick={handleAcceptAndFinish}
+          disabled={accepting}
+          style={{
+            ...styles.secondaryBtn,
+            opacity: accepting ? 0.7 : 1,
+            cursor: accepting ? "not-allowed" : "pointer",
+          }}
+        >
+          ✨ Acepta y que la IA termine el resto
+        </button>
+      </div>
+      <div style={{ marginTop: 8 }}>
         {!isPlanner && (
           <span style={{ fontSize: 11.5, color: colors.textFaint }}>
             ¿Quieres cambiarlo? Pulsa “Empezar de nuevo” y ajusta tus datos; la IA
-            lo rehará por ti.
+            lo rehará por ti.{" "}
           </span>
         )}
         <span style={{ fontSize: 11, color: colors.textFaint }}>
-          Nada se publica todavía.
+          Nada se publica todavía. Con “que la IA termine” preparará todo y se
+          detendrá en el último paso para que tú decidas si activarla.
         </span>
       </div>
     </div>

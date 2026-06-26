@@ -98,11 +98,8 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
       <Header breadcrumbs={[{ label: "Brands", href: "/brands" }, { label: brand.name }, { label: "Citations" }]}
         action={(
           <div className="flex items-center gap-3">
-            <a href={`/brands/${brand.id}/campaigns/new/search`} style={{ fontSize: 12, color: colors.textMuted, textDecoration: 'none' }}>
-              Probar campaña de Búsqueda (beta)
-            </a>
-            <a href={`/brands/${brand.id}/campaigns/new`} style={{ padding: '8px 16px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, textDecoration: 'none', display: 'inline-block' }}>
-              Create Campaign
+            <a href={`/brands/${brand.id}/campaigns/new/choose`} style={{ padding: '8px 16px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, textDecoration: 'none', display: 'inline-block' }}>
+              Crear campaña
             </a>
           </div>
         )} />

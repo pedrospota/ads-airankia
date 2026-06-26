@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adsDb } from "@/lib/ads-db";
-import { agentRuns } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { agentRuns, agentSteps } from "@/lib/schema";
+import { and, eq } from "drizzle-orm";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { runActivatorStep } from "@/lib/engine/orchestrator";
-import type { ActivateResponse, ActivatorOutput } from "@/lib/engine/types";
+import type {
+  ActivateResponse,
+  ActivatorOutput,
+  StructureOutput,
+} from "@/lib/engine/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +50,52 @@ export async function POST(
       { ok: false, enabled: false, error: "forbidden" } satisfies ActivateResponse,
       { status: 403 }
     );
+  }
+
+  // Optional rename: the user may give the campaign a friendlier name before
+  // it's created in Google. We store it as a sticky override on the structure
+  // step; the Activator reads it through the run context (ctx.structure), so no
+  // other layer needs to change. Blank/identical = keep the AI's chosen name.
+  // This never blocks activation — any failure here is swallowed silently.
+  let nameOverride = "";
+  try {
+    const body = (await request.json()) as { campaignNameOverride?: unknown };
+    if (typeof body?.campaignNameOverride === "string") {
+      nameOverride = body.campaignNameOverride.trim().slice(0, 120);
+    }
+  } catch {
+    nameOverride = "";
+  }
+
+  if (nameOverride) {
+    try {
+      const [structureStep] = await adsDb
+        .select()
+        .from(agentSteps)
+        .where(
+          and(
+            eq(agentSteps.runId, id),
+            eq(agentSteps.agent, "structure_architect")
+          )
+        )
+        .limit(1);
+      const effective = (structureStep?.userOverride ??
+        structureStep?.output) as StructureOutput | null;
+      if (
+        structureStep &&
+        effective &&
+        effective.campaignName !== nameOverride
+      ) {
+        await adsDb
+          .update(agentSteps)
+          .set({
+            userOverride: { ...effective, campaignName: nameOverride },
+          })
+          .where(eq(agentSteps.id, structureStep.id));
+      }
+    } catch {
+      // Best-effort: if the override can't be written, fall back to the AI name.
+    }
   }
 
   try {

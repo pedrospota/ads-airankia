@@ -431,7 +431,9 @@ export function SearchCampaignCreator({
   }
 
   // ---- Activation chokepoint (the ONE place a run gets activated) --------
-  async function activateCampaign() {
+  // `campaignNameOverride` is the (optional) friendlier name the user typed in
+  // the review screen; blank/unchanged means keep the AI's chosen name.
+  async function activateCampaign(campaignNameOverride?: string) {
     if (!runId) return;
     // Safety barrier before the first real write to Google Ads. It stays in
     // PAUSE (no spend yet), but we still confirm so a click is never an
@@ -449,6 +451,9 @@ export function SearchCampaignCreator({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          campaignNameOverride ? { campaignNameOverride } : {},
+        ),
       });
       const data = (await r.json()) as ActivateResponse;
       if (!r.ok || data.error) {
@@ -1474,7 +1479,7 @@ function ActivationReview({
   colors: ReturnType<typeof useTheme>["colors"];
   styles: Styles;
   activating: boolean;
-  onActivate: () => void;
+  onActivate: (campaignNameOverride?: string) => void;
   onReset: () => void;
 }) {
   const structure = readStep<StructureOutput>(state, "structure_architect");
@@ -1489,6 +1494,14 @@ function ActivationReview({
     0;
   const sampleAd: AdGroupAds | undefined = rsa?.ads?.[0];
   const campaignName = structure?.campaignName ?? `${state.run.id.slice(0, 6)}`;
+
+  // The user may rename the campaign before it's created (optional — it comes
+  // pre-filled with the name the AI already chose, so doing nothing is fine).
+  const [editedName, setEditedName] = useState(campaignName);
+  const trimmedName = editedName.trim();
+  // Only send an override when it's non-empty and actually different.
+  const nameToSend =
+    trimmedName && trimmedName !== campaignName ? trimmedName : undefined;
 
   const qa = readStep<QAOutput>(state, "policy_qa");
   const blockingIssues = (qa?.issues ?? []).filter((i) => i.severity === "block");
@@ -1553,8 +1566,36 @@ function ActivationReview({
         Este es el resumen de tu campaña. Revísalo y actívala cuando quieras.
       </p>
 
+      {/* Editable campaign name — pre-filled with the AI's choice. */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={styles.lbl} htmlFor="campaign-name">
+          Nombre de la campaña
+        </label>
+        <input
+          id="campaign-name"
+          type="text"
+          value={editedName}
+          onChange={(e) => setEditedName(e.target.value)}
+          maxLength={120}
+          placeholder={campaignName}
+          style={{
+            width: "100%",
+            padding: "11px 14px",
+            borderRadius: 10,
+            background: colors.bg,
+            border: `1px solid ${colors.border}`,
+            color: colors.text,
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        />
+        <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6 }}>
+          Le pusimos este nombre por ti. Puedes cambiarlo o dejarlo como está —
+          es solo para que la reconozcas; tus clientes no lo ven.
+        </p>
+      </div>
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <Stat label="Campaña" value={campaignName} colors={colors} wide />
         <Stat label="Grupos de anuncios" value={String(adGroupCount)} colors={colors} />
         <Stat label="Palabras clave" value={String(keywordCount)} colors={colors} />
         {planner?.budget?.dailyUsd != null && (
@@ -1616,7 +1657,7 @@ function ActivationReview({
       )}
 
       <button
-        onClick={onActivate}
+        onClick={() => onActivate(nameToSend)}
         disabled={activating}
         style={{
           ...styles.primaryBtn,

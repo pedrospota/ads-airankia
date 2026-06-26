@@ -98,6 +98,8 @@ export interface BrandSeed {
   /** Where the ads will point. Defaults to brandWebsite if absent. */
   landingPageUrl?: string;
   description?: string;
+  /** Sector / actividad del negocio, tomado de la ficha de marca. */
+  industry?: string;
   /** Plain-language goal the user typed, optional ("quiero más reservas"). */
   objectiveHint?: string;
   geoHint?: string;

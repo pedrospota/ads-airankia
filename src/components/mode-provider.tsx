@@ -15,7 +15,7 @@ const ModeContext = createContext<ModeContextValue | undefined>(undefined);
 const STORAGE_KEY = "ads-mode";
 
 export function ModeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<AppMode>("clasico");
+  const [mode, setModeState] = useState<AppMode>("nuevo");
 
   // Hydrate from localStorage after mount (mirrors ThemeProvider).
   useEffect(() => {

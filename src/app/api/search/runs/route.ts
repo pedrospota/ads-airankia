@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
   const readClient = createSupabaseReadClient(session?.access_token);
   const { data: brand } = await readClient
     .from("brand_project")
-    .select("id, workspace_id")
+    .select("id, workspace_id, name, industry, website")
     .eq("id", brandId)
     .single();
 
@@ -55,8 +55,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "brand not found" }, { status: 404 });
   }
 
-  // The seed carries the brand identity for downstream agents.
-  const fullSeed: BrandSeed = { ...seed, brandId };
+  // Enrich the seed with the full business context we already have on file, so
+  // the pipeline plans with real information (name, website, sector) instead of
+  // only whatever the user typed. User-typed hints (objective, budget) always
+  // win; brand identity is filled from the database where the user left a gap.
+  const fullSeed: BrandSeed = {
+    ...seed,
+    brandId,
+    brandName: (seed.brandName?.trim() || brand.name || "").trim(),
+  };
+  if (!fullSeed.brandWebsite && brand.website) {
+    fullSeed.brandWebsite = brand.website;
+    fullSeed.landingPageUrl = fullSeed.landingPageUrl ?? brand.website;
+  }
+  if (brand.industry && !fullSeed.industry) {
+    fullSeed.industry = brand.industry;
+  }
 
   const { runId } = await createRun({
     brandId,

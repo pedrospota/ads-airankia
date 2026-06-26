@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
 import {
-  AGENT_TITLES,
   BUDGET,
   PIPELINE,
   type ActivateResponse,
@@ -40,6 +39,16 @@ const AGENT_EMOJI: Record<AgentId, string> = {
   rsa_copywriter: "✍️",
   policy_qa: "✅",
   activator: "🚀",
+};
+
+// Short, friendly step titles for the timeline — no jargon, no anglicismos.
+const STEP_TITLE: Record<AgentId, string> = {
+  planner: "Tu plan",
+  keyword_researcher: "Lo que busca tu cliente",
+  structure_architect: "Organización de los anuncios",
+  rsa_copywriter: "Tus anuncios",
+  policy_qa: "Revisión final",
+  activator: "Crear en Google Ads",
 };
 
 type DotState = "pending" | "working" | "done" | "failed";
@@ -79,11 +88,16 @@ export function SearchCampaignCreator({
   const [activating, setActivating] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [activateResult, setActivateResult] = useState<ActivateResponse | null>(null);
+  // ---- AI auto-fill (start card) ----------------------------------------
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   // The single AbortController guarding the SSE reader. Never leak it.
   const abortRef = useRef<AbortController | null>(null);
   // Track which step we already auto-advanced, so we POST /advance once per step.
   const advancedRef = useRef<Set<string>>(new Set());
+  // Guards the one-shot "rellenar con IA" fetch on the start card.
+  const suggestAbortRef = useRef<AbortController | null>(null);
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -233,7 +247,10 @@ export function SearchCampaignCreator({
 
   // ---- Cleanup on unmount: NEVER leak the reader -------------------------
   useEffect(() => {
-    return () => abortStream();
+    return () => {
+      abortStream();
+      suggestAbortRef.current?.abort();
+    };
   }, [abortStream]);
 
   // ---- AUTO mode: auto-advance any step left awaiting approval -----------
@@ -251,11 +268,50 @@ export function SearchCampaignCreator({
     void advance(runId, { stepId: step.id, action: "accept" });
   }, [runId, state, advance]);
 
+  // ---- AI auto-fill: draft objective + budget from the business context --
+  async function requestSuggestion() {
+    setSuggestError(null);
+    setSuggesting(true);
+    suggestAbortRef.current?.abort();
+    const controller = new AbortController();
+    suggestAbortRef.current = controller;
+    try {
+      const r = await fetch("/api/search/suggest", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandId }),
+        signal: controller.signal,
+      });
+      const data = (await r.json()) as {
+        objective?: string;
+        budgetDailyUsd?: number;
+        error?: string;
+      };
+      if (!r.ok || data.error) {
+        throw new Error(
+          data.error || "No pudimos rellenarlo con IA. Inténtalo de nuevo.",
+        );
+      }
+      if (data.objective) setObjectiveHint(data.objective);
+      if (data.budgetDailyUsd != null) setBudgetHint(String(data.budgetDailyUsd));
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
+      setSuggestError(
+        e instanceof Error ? e.message : "No pudimos rellenarlo con IA.",
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   // ---- Start a run -------------------------------------------------------
   async function startRun() {
     setError(null);
+    setSuggestError(null);
     setStarting(true);
     advancedRef.current = new Set();
+    suggestAbortRef.current?.abort();
     setLiveLog({});
     setActivateResult(null);
     try {
@@ -384,8 +440,8 @@ export function SearchCampaignCreator({
           <div>
             <h1 className="text-2xl font-bold mb-1">Nueva campaña de búsqueda</h1>
             <p style={{ color: colors.textMuted, marginBottom: 24, fontSize: 14 }}>
-              Cuéntanos qué quieres y 6 ayudantes preparan tu campaña en Google. Tú
-              solo das el visto bueno.
+              No necesitas rellenar nada: la IA usa la información de tu negocio
+              para preparar la campaña. Si quieres, ajusta algo antes de empezar.
             </p>
 
             <div style={styles.card}>
@@ -400,7 +456,34 @@ export function SearchCampaignCreator({
               </div>
 
               <div style={{ marginBottom: 18 }}>
-                <label style={styles.lbl}>¿Qué quieres conseguir?</label>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    marginBottom: 7,
+                  }}
+                >
+                  <label style={{ ...styles.lbl, marginBottom: 0 }}>
+                    ¿Qué quieres conseguir? (opcional)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={requestSuggestion}
+                    disabled={suggesting}
+                    style={{
+                      ...styles.secondaryBtn,
+                      padding: "6px 12px",
+                      fontSize: 13,
+                      whiteSpace: "nowrap",
+                      opacity: suggesting ? 0.7 : 1,
+                      cursor: suggesting ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {suggesting ? "Pensando…" : "✨ Rellenar con IA"}
+                  </button>
+                </div>
                 <textarea
                   value={objectiveHint}
                   onChange={(e) => setObjectiveHint(e.target.value)}
@@ -409,8 +492,12 @@ export function SearchCampaignCreator({
                   style={{ ...styles.inp, resize: "vertical" }}
                 />
                 <p style={styles.hint}>
-                  Escríbelo con tus palabras. No hace falta nada técnico.
+                  Puedes dejarlo vacío: la IA lo propone por ti con la información
+                  de tu negocio. O pulsa “✨ Rellenar con IA”.
                 </p>
+                {suggestError && (
+                  <p style={{ ...styles.hint, color: "#ef4444" }}>{suggestError}</p>
+                )}
               </div>
 
               <div style={{ marginBottom: 22 }}>
@@ -545,10 +632,15 @@ export function SearchCampaignCreator({
                         fontSize: 14,
                         color: "#FBBF24",
                         fontWeight: 600,
-                        marginBottom: 16,
+                        marginBottom: 8,
                       }}
                     >
-                      Está en PAUSA. No se gasta nada hasta que la pongas en marcha.
+                      Está en pausa. No se gasta nada hasta que la pongas en marcha.
+                    </p>
+                    <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
+                      Cuando la pongas en marcha, empezará a mostrarse en Google y
+                      a gastar como mucho tu presupuesto del día. Puedes volver a
+                      pausarla cuando quieras, sin coste.
                     </p>
                     <button
                       onClick={enableCampaign}
@@ -564,9 +656,16 @@ export function SearchCampaignCreator({
                   </>
                 )}
                 {enabledNow && (
-                  <p style={{ fontSize: 14, color: colors.accent, fontWeight: 600 }}>
-                    Ya está activa y mostrándose en Google.
-                  </p>
+                  <>
+                    <p style={{ fontSize: 14, color: colors.accent, fontWeight: 600 }}>
+                      Ya está activa y mostrándose en Google.
+                    </p>
+                    <p style={{ fontSize: 13, color: colors.textMuted, marginTop: 8 }}>
+                      A partir de ahora puede gastar como mucho tu presupuesto del
+                      día. Si quieres pararla, entra en tu cuenta de Google Ads y
+                      ponla en pausa cuando quieras.
+                    </p>
+                  </>
                 )}
               </div>
             )}
@@ -709,7 +808,7 @@ function Timeline({
                       dot === "pending" ? colors.textMuted : colors.text,
                   }}
                 >
-                  {AGENT_TITLES[agent]}
+                  {STEP_TITLE[agent]}
                 </span>
                 <StatusPill state={dot} colors={colors} />
               </div>
@@ -1209,9 +1308,23 @@ function dotStateFor(step: StepDTO | undefined): DotState {
 }
 
 function currentAwaitingStep(state: RunStateDTO): StepDTO | null {
-  return (
-    state.steps.find((s) => s.status === "AWAITING_APPROVAL") ?? null
+  // Future-proof: honour an explicit AWAITING_APPROVAL status if the engine
+  // ever starts setting one on the step itself.
+  const explicit = state.steps.find((s) => s.status === "AWAITING_APPROVAL");
+  if (explicit) return explicit;
+  // Today the engine parks the RUN at "awaiting_approval" after each assisted
+  // step but leaves that step COMPLETED. Derive the step pending approval: the
+  // last COMPLETED step that still has an un-run, non-activator step after it.
+  if (state.run.status !== "awaiting_approval") return null;
+  const nextPending = state.steps.find(
+    (s) => s.agent !== "activator" && s.status === "NOT_STARTED",
   );
+  if (!nextPending) return null; // only the activator remains → activation gate
+  const idx = state.steps.indexOf(nextPending);
+  for (let i = idx - 1; i >= 0; i--) {
+    if (state.steps[i].status === "COMPLETED") return state.steps[i];
+  }
+  return null;
 }
 
 // The activation gate: the run is awaiting approval and the only remaining
@@ -1249,7 +1362,7 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
       if (o.geo?.locations?.length)
         lines.push(`📍 Zona: ${o.geo.locations.join(", ")}`);
       if (o.budget?.dailyUsd != null)
-        lines.push(`💶 Presupuesto: $${o.budget.dailyUsd} al día`);
+        lines.push(`💰 Presupuesto: $${o.budget.dailyUsd} al día`);
       if (o.themes?.length)
         lines.push(`🗂️ Temas: ${o.themes.map((t) => t.name).join(", ")}`);
       return lines;
@@ -1298,7 +1411,14 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
     case "activator": {
       const o = out as { status?: string; keywordsAdded?: number; adsCreated?: number };
       const lines: string[] = [];
-      if (o.status) lines.push(`Estado en Google Ads: ${o.status}`);
+      if (o.status) {
+        const statusMap: Record<string, string> = {
+          PAUSED: "En pausa (lista, sin gastar todavía)",
+          ENABLED: "Activa (ya puede mostrarse)",
+          REMOVED: "Eliminada",
+        };
+        lines.push(`Estado: ${statusMap[o.status] ?? o.status}`);
+      }
       if (o.adsCreated != null) lines.push(`📢 ${o.adsCreated} anuncios creados`);
       if (o.keywordsAdded != null)
         lines.push(`🔑 ${o.keywordsAdded} palabras clave añadidas`);

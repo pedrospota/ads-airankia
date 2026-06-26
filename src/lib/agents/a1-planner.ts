@@ -252,6 +252,7 @@ function buildUserPrompt(ctx: RunContext): string {
     `- Landing (a donde apuntarán los anuncios): ${landing}`,
   ];
   if (b.description) lines.push(`- Descripción del negocio: ${b.description}`);
+  if (b.industry) lines.push(`- Sector / actividad: ${b.industry}`);
   lines.push(
     `- Objetivo (en sus palabras): ${b.objectiveHint ?? "(no indicado)"}`,
     `- Zona geográfica (en sus palabras): ${b.geoHint ?? "(no indicada)"}`,

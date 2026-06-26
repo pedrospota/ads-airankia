@@ -52,6 +52,10 @@ const STEP_TITLE: Record<AgentId, string> = {
   activator: "Crear en Google Ads",
 };
 
+// Symbol shown next to budgets. Google Ads charges in the account's own
+// currency; this is only what we DISPLAY. One place to switch it.
+const CURRENCY = "€";
+
 type DotState = "pending" | "working" | "done" | "failed";
 
 interface SearchCampaignCreatorProps {
@@ -502,7 +506,7 @@ export function SearchCampaignCreator({
               </div>
 
               <div style={{ marginBottom: 22 }}>
-                <label style={styles.lbl}>Presupuesto al día (opcional, en $)</label>
+                <label style={styles.lbl}>Presupuesto al día (opcional)</label>
                 <input
                   type="number"
                   min={BUDGET.minDailyUsd}
@@ -513,7 +517,7 @@ export function SearchCampaignCreator({
                   style={styles.inp}
                 />
                 <p style={styles.hint}>
-                  Si lo dejas vacío, lo proponemos por ti. Mínimo ${BUDGET.minDailyUsd} al día.
+                  Si lo dejas vacío, lo proponemos por ti. Mínimo {BUDGET.minDailyUsd} {CURRENCY} al día.
                 </p>
               </div>
 
@@ -1021,7 +1025,7 @@ function ApprovalBlock({
             />
           </div>
           <div>
-            <label style={styles.lbl}>Presupuesto al día ($)</label>
+            <label style={styles.lbl}>Presupuesto al día ({CURRENCY})</label>
             <input
               type="number"
               min={BUDGET.minDailyUsd}
@@ -1180,7 +1184,7 @@ function ActivationReview({
         {planner?.budget?.dailyUsd != null && (
           <Stat
             label="Presupuesto"
-            value={`$${planner.budget.dailyUsd}/día`}
+            value={`${planner.budget.dailyUsd} ${CURRENCY}/día`}
             colors={colors}
           />
         )}
@@ -1446,7 +1450,7 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
       if (o.geo?.locations?.length)
         lines.push(`📍 Zona: ${o.geo.locations.join(", ")}`);
       if (o.budget?.dailyUsd != null)
-        lines.push(`💰 Presupuesto: $${o.budget.dailyUsd} al día`);
+        lines.push(`💰 Presupuesto: ${o.budget.dailyUsd} ${CURRENCY} al día`);
       if (o.themes?.length)
         lines.push(`🗂️ Temas: ${o.themes.map((t) => t.name).join(", ")}`);
       return lines;

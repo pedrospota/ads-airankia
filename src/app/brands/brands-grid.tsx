@@ -17,11 +17,11 @@ export function BrandsGrid({ brands }: { brands: Brand[] }) {
   const { mode } = useMode();
 
   // Mode-aware destination: Clásico → existing citations view;
-  // Nuevo → the "¿Qué quieres hacer?" chooser, which then routes to the right
-  // campaign creator (Búsqueda vs. Banners).
+  // Nuevo → the campaigns dashboard (the place to return to), from which the
+  // user can review existing Search campaigns or start a new one.
   const hrefFor = (id: string) =>
     mode === "nuevo"
-      ? `/brands/${id}/campaigns/new/choose`
+      ? `/brands/${id}/campaigns`
       : `/brands/${id}/citations`;
 
   return (

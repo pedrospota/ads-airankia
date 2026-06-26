@@ -179,6 +179,52 @@ function idFromResourceName(resourceName: string): string {
   return resourceName.split("/").pop() ?? "";
 }
 
+/**
+ * POST a GAQL query to `googleAds:search` and return the rows. READ-ONLY —
+ * never mutates the account. Mirrors `mutate`'s auth/headers. Used to inspect
+ * the account (e.g. whether conversions are measured) before deciding bidding.
+ */
+async function search(query: string): Promise<Record<string, unknown>[]> {
+  const token = await getAccessToken();
+  const resp = await fetch(`${BASE}/googleAds:search`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({ query }),
+  });
+  const data = (await resp.json()) as {
+    results?: Record<string, unknown>[];
+    error?: unknown;
+  };
+  if (data.error) throw new Error(JSON.stringify(data.error));
+  return data.results ?? [];
+}
+
+/**
+ * True when the account MEASURES conversions (has at least one ENABLED
+ * conversion action). Smart Bidding (Maximize Conversions / tCPA / Maximize
+ * Conversion Value / tROAS) can only optimize when conversions are tracked; on
+ * a brand-new account with nothing set up, such a campaign barely serves. We
+ * use this to fall back to Maximize Clicks so the campaign ALWAYS drives
+ * traffic. Read-only.
+ */
+async function accountHasEligibleConversions(): Promise<boolean> {
+  const rows = await search(
+    "SELECT conversion_action.resource_name FROM conversion_action " +
+      "WHERE conversion_action.status = 'ENABLED' LIMIT 1"
+  );
+  return rows.length > 0;
+}
+
+/** Bidding strategies that need conversion measurement to work at all. */
+function isConversionStrategy(s: BiddingStrategy): boolean {
+  return (
+    s === "MAXIMIZE_CONVERSIONS" ||
+    s === "TARGET_CPA" ||
+    s === "MAXIMIZE_CONVERSION_VALUE" ||
+    s === "TARGET_ROAS"
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Bidding payload — maps our BiddingStrategy union onto the v19 campaign field.
 // ----------------------------------------------------------------------------
@@ -356,6 +402,36 @@ async function activate(
   const priorCampaignId = existing?.googleCampaignId ?? null;
   const resuming = priorCampaignId != null;
 
+  // --- CONVERSION-AWARE BIDDING (decided automatically, no user input) -------
+  // The planner may pick a Smart Bidding strategy (Maximize Conversions, tCPA,
+  // Maximize Conversion Value, tROAS). Those ONLY work if the account measures
+  // conversions; on a fresh account with none, such a campaign barely serves
+  // and the user's budget would do nothing. So on a FIRST create we ask Google
+  // whether any conversion is tracked; if not, we downgrade to Maximize Clicks
+  // (targetSpend), which reliably drives traffic with no conversion history,
+  // and we explain the choice in plain Spanish. On resume we keep whatever the
+  // existing campaign already uses (we never re-read or change a live strategy).
+  const plannedStrategy: BiddingStrategy =
+    structure.biddingStrategy ?? planner.biddingStrategy;
+  let effectiveStrategy: BiddingStrategy = plannedStrategy;
+  if (!resuming && isConversionStrategy(plannedStrategy)) {
+    // On a read error, KEEP the planner's choice (default true): we must never
+    // silently downgrade a real advertiser's account that DOES measure
+    // conversions just because a single read hiccuped. The downgrade exists
+    // only to RESCUE an account we positively confirm has zero conversions.
+    const hasConversions = await accountHasEligibleConversions().catch(
+      () => true
+    );
+    if (!hasConversions) {
+      effectiveStrategy = "MAXIMIZE_CLICKS";
+      await helpers.emit("decision", {
+        agent: AGENT_ID,
+        summary:
+          "Tu cuenta todavía no mide conversiones, así que hemos elegido una puja que consigue el máximo de visitas con tu presupuesto. Cuando empieces a medir conversiones podremos optimizar para conseguir clientes, no solo visitas.",
+      });
+    }
+  }
+
   // --- (1) Budget -----------------------------------------------------------
   const dailyUsd = Math.max(planner.budget.dailyUsd, BUDGET.minDailyUsd);
   const dailyMicros = Math.max(
@@ -431,7 +507,7 @@ async function activate(
               negativeGeoTargetType: "PRESENCE",
             },
             ...biddingPayload(
-              structure.biddingStrategy ?? planner.biddingStrategy,
+              effectiveStrategy,
               planner.targetCpaUsd,
               planner.targetRoas
             ),
@@ -458,13 +534,22 @@ async function activate(
     .set({
       googleCampaignId: googleCampaignId ? Number(googleCampaignId) : null,
       googleAccountId: CUSTOMER_ID,
-      biddingStrategy: structure.biddingStrategy ?? planner.biddingStrategy,
+      // Persist the EFFECTIVE strategy actually created in Google (may differ
+      // from the planner's pick if we downgraded for a no-conversion account).
+      biddingStrategy: effectiveStrategy,
+      // A target CPA/ROAS only makes sense under a conversion strategy; if we
+      // downgraded to Maximize Clicks, store null so the UI never shows a
+      // phantom target that isn't actually in effect.
       targetCpaMicros:
-        planner.targetCpaUsd && planner.targetCpaUsd > 0
+        isConversionStrategy(effectiveStrategy) &&
+        planner.targetCpaUsd &&
+        planner.targetCpaUsd > 0
           ? Math.round(planner.targetCpaUsd * MICROS_PER_UNIT)
           : null,
       targetRoas:
-        planner.targetRoas && planner.targetRoas > 0
+        isConversionStrategy(effectiveStrategy) &&
+        planner.targetRoas &&
+        planner.targetRoas > 0
           ? String(planner.targetRoas)
           : null,
       status: "paused",

@@ -226,6 +226,51 @@ function isConversionStrategy(s: BiddingStrategy): boolean {
 }
 
 // ----------------------------------------------------------------------------
+// Assets / extensions — collapse whitespace and clamp to Google's hard limits.
+// Truncation can only make a borderline asset valid, so it's always safe.
+// ----------------------------------------------------------------------------
+
+function clamp(s: string | undefined | null, max: number): string {
+  const t = (s ?? "").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : t.slice(0, max).trim();
+}
+
+// Structured-snippet headers are validated by Google per campaign language. We
+// only emit a snippet for languages whose canonical header we know for certain;
+// any other language simply skips the snippet (the other assets still apply).
+const SNIPPET_HEADERS: Record<string, string> = {
+  es: "Servicios",
+  en: "Services",
+};
+
+/**
+ * Create a batch of assets of ONE type and link them to the campaign. Returns
+ * the number actually linked. Isolated per type by the caller so one type's
+ * rejection never blocks the others. Assets are an ENHANCEMENT — callers treat
+ * any throw as non-fatal (the campaign itself is already created).
+ */
+async function createLinkedAssets(
+  campaignResourceName: string,
+  fieldType: "SITELINK" | "CALLOUT" | "STRUCTURED_SNIPPET",
+  createBodies: Record<string, unknown>[]
+): Promise<number> {
+  if (createBodies.length === 0) return 0;
+  const assetResp = await mutate("assets", {
+    operations: createBodies.map((b) => ({ create: b })),
+  });
+  const names = (assetResp.results ?? [])
+    .map((r) => r.resourceName ?? "")
+    .filter((n): n is string => Boolean(n));
+  if (names.length === 0) return 0;
+  await mutate("campaignAssets", {
+    operations: names.map((asset) => ({
+      create: { campaign: campaignResourceName, asset, fieldType },
+    })),
+  });
+  return names.length;
+}
+
+// ----------------------------------------------------------------------------
 // Bidding payload — maps our BiddingStrategy union onto the v19 campaign field.
 // ----------------------------------------------------------------------------
 
@@ -805,6 +850,175 @@ async function activate(
     mutationLog.push(
       await logMutation(runId, campaignDbId, "addCampaignNegatives", "done")
     );
+  }
+
+  // --- (6) Assets / extensions (sitelinks, callouts, structured snippets) ----
+  // Auto-generated from the plan (no user input) to lift ad strength & Quality
+  // Score — every serious competitor attaches these. SAFETY: assets are an
+  // ENHANCEMENT, never the critical resource, so each type is created in its own
+  // isolated try/catch and ANY failure just logs and continues (the campaign is
+  // already safely created above). Skipped on resume to avoid duplicates. We
+  // reuse ONLY copy that already passed Policy-QA (RSA headlines/descriptions,
+  // ad-group names) so no new, unverified claims are ever introduced.
+  if (!resuming) {
+    let assetsLinked = 0;
+    const addedKinds: string[] = [];
+
+    // Sitelinks — one per ad group (Google shows them with >=2). Link text =
+    // ad-group name; description1/2 = the group's RSA descriptions (both or
+    // neither, per Google's rule); final URL = the group's landing page.
+    const sitelinkBodies: Record<string, unknown>[] = [];
+    const sitelinkSeen = new Set<string>();
+    for (const { group, ad } of plan.adGroups.slice(0, 4)) {
+      const linkText = clamp(group.name, 25);
+      if (!linkText) continue;
+      // Dedupe link text: two identically-named groups would otherwise make
+      // Google collapse the assets and reject the duplicate campaign link.
+      const linkKey = linkText.toLowerCase();
+      if (sitelinkSeen.has(linkKey)) continue;
+      sitelinkSeen.add(linkKey);
+      const d1 = clamp(ad.descriptions[0]?.text, 35);
+      const d2 = clamp(ad.descriptions[1]?.text, 35);
+      const sitelinkAsset: Record<string, unknown> = { linkText };
+      if (d1 && d2) {
+        sitelinkAsset.description1 = d1;
+        sitelinkAsset.description2 = d2;
+      }
+      sitelinkBodies.push({ finalUrls: [ad.finalUrl], sitelinkAsset });
+    }
+    if (sitelinkBodies.length >= 2) {
+      try {
+        const n = await createLinkedAssets(
+          campaignResourceName,
+          "SITELINK",
+          sitelinkBodies
+        );
+        if (n > 0) {
+          assetsLinked += n;
+          addedKinds.push("enlaces a tu web");
+        }
+      } catch (e) {
+        mutationLog.push(
+          await logMutation(
+            runId,
+            campaignDbId,
+            "addSitelinks",
+            "failed",
+            undefined,
+            e instanceof Error ? e.message : "fallo al añadir enlaces"
+          )
+        );
+      }
+    }
+
+    // Callouts — short value props, reusing QA-approved headlines that already
+    // fit the 25-char limit WITHOUT truncation (truncated callouts read badly).
+    const calloutSeen = new Set<string>();
+    const calloutBodies: Record<string, unknown>[] = [];
+    for (const { ad } of plan.adGroups) {
+      for (const h of ad.headlines) {
+        const t = (h.text ?? "").trim();
+        if (t.length === 0 || t.length > 25) continue;
+        const key = t.toLowerCase();
+        if (calloutSeen.has(key)) continue;
+        calloutSeen.add(key);
+        calloutBodies.push({ calloutAsset: { calloutText: t } });
+        if (calloutBodies.length >= 6) break;
+      }
+      if (calloutBodies.length >= 6) break;
+    }
+    if (calloutBodies.length >= 2) {
+      try {
+        const n = await createLinkedAssets(
+          campaignResourceName,
+          "CALLOUT",
+          calloutBodies
+        );
+        if (n > 0) {
+          assetsLinked += n;
+          addedKinds.push("textos destacados");
+        }
+      } catch (e) {
+        mutationLog.push(
+          await logMutation(
+            runId,
+            campaignDbId,
+            "addCallouts",
+            "failed",
+            undefined,
+            e instanceof Error ? e.message : "fallo al añadir textos destacados"
+          )
+        );
+      }
+    }
+
+    // Structured snippet — header by language (only known headers), values =
+    // ad-group names as the service/category list (Google needs >=3 values).
+    const snippetHeader =
+      SNIPPET_HEADERS[(planner.geo.languageCode ?? "es").toLowerCase()] ?? null;
+    if (snippetHeader) {
+      const snippetSeen = new Set<string>();
+      const snippetValues: string[] = [];
+      for (const { group } of plan.adGroups) {
+        const v = clamp(group.name, 25);
+        if (!v) continue;
+        const key = v.toLowerCase();
+        if (snippetSeen.has(key)) continue;
+        snippetSeen.add(key);
+        snippetValues.push(v);
+        if (snippetValues.length >= 10) break;
+      }
+      if (snippetValues.length >= 3) {
+        try {
+          const n = await createLinkedAssets(
+            campaignResourceName,
+            "STRUCTURED_SNIPPET",
+            [
+              {
+                structuredSnippetAsset: {
+                  header: snippetHeader,
+                  values: snippetValues,
+                },
+              },
+            ]
+          );
+          if (n > 0) {
+            assetsLinked += n;
+            addedKinds.push("lista de servicios");
+          }
+        } catch (e) {
+          mutationLog.push(
+            await logMutation(
+              runId,
+              campaignDbId,
+              "addStructuredSnippet",
+              "failed",
+              undefined,
+              e instanceof Error ? e.message : "fallo al añadir la lista"
+            )
+          );
+        }
+      }
+    }
+
+    if (assetsLinked > 0) {
+      mutationLog.push(
+        await logMutation(
+          runId,
+          campaignDbId,
+          "addAssets",
+          "done",
+          undefined,
+          `${assetsLinked} extensiones (${addedKinds.join(", ")})`
+        )
+      );
+      await helpers.emit("decision", {
+        agent: AGENT_ID,
+        summary: `Añadimos extensiones automáticas (${addedKinds.join(
+          ", "
+        )}) para que tu anuncio sea más completo y de mayor calidad, sin que tengas que hacer nada.`,
+      });
+    }
   }
 
   const output: ActivatorOutput = {

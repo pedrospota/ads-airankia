@@ -620,7 +620,12 @@ async function activate(
           {
             create: {
               adGroup: agResourceName,
-              status: "PAUSED", // ads paused too; campaign is the delivery gate
+              // Ad ENABLED on purpose. The CAMPAIGN (created PAUSED above) is the
+              // ONLY delivery gate. If the ad were PAUSED, /enable — which flips
+              // just the campaign to ENABLED — would leave every ad paused and the
+              // campaign would serve ZERO ads with no error. Enabling the ad here
+              // is safe: nothing serves until the user enables the campaign.
+              status: "ENABLED",
               ad: {
                 finalUrls: [groupAds.finalUrl],
                 responsiveSearchAd: {

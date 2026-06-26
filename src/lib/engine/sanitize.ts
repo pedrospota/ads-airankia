@@ -187,12 +187,31 @@ export function buildSanitizedPlan(
   const adGroups: SanitizedAdGroupPlan[] = [];
   const skipped: { name: string; reason: string }[] = [];
 
+  // A keyword (text + match type) may live in only ONE ad group. The same
+  // keyword in two groups makes them compete internally for the same query
+  // (ambiguous serving, wasted spend). dedupeKeywords only collapses WITHIN a
+  // group, so we also dedupe ACROSS groups here — first group to claim it wins.
+  const seenKeywordKeys = new Set<string>();
+
   for (const g of structure.adGroups ?? []) {
     const name = g?.name ?? "(sin nombre)";
 
-    const keywords = dedupeKeywords(g?.keywords);
-    if (keywords.length === 0) {
+    const groupKeywords = dedupeKeywords(g?.keywords);
+    if (groupKeywords.length === 0) {
       skipped.push({ name, reason: "sin palabras clave válidas" });
+      continue;
+    }
+    const keywords = groupKeywords.filter((k) => {
+      const key = keywordKey(k);
+      if (seenKeywordKeys.has(key)) return false;
+      seenKeywordKeys.add(key);
+      return true;
+    });
+    if (keywords.length === 0) {
+      skipped.push({
+        name,
+        reason: "sus palabras clave ya estaban en otro grupo",
+      });
       continue;
     }
 

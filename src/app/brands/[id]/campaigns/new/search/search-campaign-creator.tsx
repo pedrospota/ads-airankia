@@ -82,6 +82,7 @@ export function SearchCampaignCreator({
   const [brandName, setBrandName] = useState(initialBrandName);
   const [objectiveHint, setObjectiveHint] = useState("");
   const [budgetHint, setBudgetHint] = useState<string>("");
+  const [budgetReason, setBudgetReason] = useState("");
   const [mode, setMode] = useState<RunMode>("auto");
 
   // ---- Run state ---------------------------------------------------------
@@ -299,6 +300,7 @@ export function SearchCampaignCreator({
   // ---- AI auto-fill: draft objective + budget from the business context --
   async function requestSuggestion() {
     setSuggestError(null);
+    setBudgetReason("");
     setSuggesting(true);
     suggestAbortRef.current?.abort();
     const controller = new AbortController();
@@ -314,6 +316,7 @@ export function SearchCampaignCreator({
       const data = (await r.json()) as {
         objective?: string;
         budgetDailyUsd?: number;
+        reason?: string;
         error?: string;
       };
       if (!r.ok || data.error) {
@@ -323,6 +326,7 @@ export function SearchCampaignCreator({
       }
       if (data.objective) setObjectiveHint(data.objective);
       if (data.budgetDailyUsd != null) setBudgetHint(String(data.budgetDailyUsd));
+      if (data.reason) setBudgetReason(data.reason);
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
       setSuggestError(
@@ -602,6 +606,11 @@ export function SearchCampaignCreator({
                 <p style={styles.hint}>
                   Si lo dejas vacío, lo proponemos por ti. Mínimo {BUDGET.minDailyUsd} {CURRENCY} al día.
                 </p>
+                {budgetReason && (
+                  <p style={{ ...styles.hint, marginTop: 6, color: "#0f766e" }}>
+                    ✨ {budgetReason}
+                  </p>
+                )}
               </div>
 
               {/* MODE TOGGLE — big and visual */}

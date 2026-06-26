@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useTheme } from "./theme-provider";
+import { ModeSwitch } from "./mode-switch";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 
 export function Header({
@@ -52,6 +53,7 @@ export function Header({
         </div>
         <div className="flex items-center gap-2">
           {action}
+          <ModeSwitch />
           <button
             onClick={toggleTheme}
             style={{

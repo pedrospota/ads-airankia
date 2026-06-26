@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adsDb } from "@/lib/ads-db";
 import { campaigns, placements } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 
 // POST: Create campaign as DRAFT (DB only, no Google Ads)
@@ -70,6 +70,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "brandId required" }, { status: 400 });
   }
 
-  const result = await adsDb.select().from(campaigns).where(eq(campaigns.brandId, brandId));
+  // Display-only: Search campaigns live behind the Search engine routes and must
+  // never surface here (keeps the Display/Search paths isolated).
+  const result = await adsDb
+    .select()
+    .from(campaigns)
+    .where(and(eq(campaigns.brandId, brandId), eq(campaigns.campaignType, "display")));
   return NextResponse.json({ campaigns: result });
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTheme } from "@/components/theme-provider";
+import { useMode } from "@/components/mode-provider";
 
 interface Brand {
   id: string;
@@ -13,13 +14,35 @@ interface Brand {
 
 export function BrandsGrid({ brands }: { brands: Brand[] }) {
   const { colors } = useTheme();
+  const { mode } = useMode();
+
+  // Mode-aware destination: Clásico → existing citations view;
+  // Nuevo → the Search campaign launcher (new engine).
+  const hrefFor = (id: string) =>
+    mode === "nuevo"
+      ? `/brands/${id}/campaigns/new/search`
+      : `/brands/${id}/citations`;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <>
+      {mode === "nuevo" && (
+        <div
+          className="mb-4 px-4 py-3 rounded-xl text-sm"
+          style={{
+            background: "rgba(16,185,129,0.08)",
+            border: "1px solid rgba(16,185,129,0.25)",
+            color: colors.text,
+          }}
+        >
+          <span style={{ fontWeight: 600, color: colors.accent }}>Modo Nuevo</span>
+          {" — elige una marca para lanzar una campaña con el nuevo sistema."}
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {brands.map((brand) => (
         <Link
           key={brand.id}
-          href={`/brands/${brand.id}/citations`}
+          href={hrefFor(brand.id)}
           className="group p-6 rounded-xl transition-colors"
           style={{ background: colors.bgCard, border: `1px solid ${colors.border}` }}
         >
@@ -55,6 +78,7 @@ export function BrandsGrid({ brands }: { brands: Brand[] }) {
           </div>
         </Link>
       ))}
-    </div>
+      </div>
+    </>
   );
 }

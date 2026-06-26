@@ -220,6 +220,139 @@ export async function updateBudget(budgetId: string, dailyAmountMicros: number):
   if (data.error) throw new Error(JSON.stringify(data.error));
 }
 
+// ---------------------------------------------------------------------------
+// Keyword Plan Ideas — real search metrics for A2 (KeywordPlanIdeaService).
+// Returns one entry per idea with monthly searches + competition + bid range.
+// Returns [] (never throws to the caller's pipeline) when the API can't serve
+// metrics; the agent falls back to LLM estimates in that case.
+// ---------------------------------------------------------------------------
+
+export interface KeywordPlanIdea {
+  text: string;
+  avgMonthlySearches: number;
+  competition: "LOW" | "MEDIUM" | "HIGH" | "UNSPECIFIED" | "UNKNOWN";
+  topOfPageBidLowMicros?: number;
+  topOfPageBidHighMicros?: number;
+}
+
+// ISO-3166 alpha-2 -> Google Ads geoTargetConstant id (country level).
+// Covers the Spanish-speaking + main markets we target; defaults to Spain.
+const GEO_TARGET_CONSTANTS: Record<string, string> = {
+  ES: "2724", // Spain
+  MX: "2484", // Mexico
+  AR: "2032", // Argentina
+  CO: "2170", // Colombia
+  CL: "2152", // Chile
+  PE: "2604", // Peru
+  US: "2840", // United States
+  GB: "2826", // United Kingdom
+  FR: "2250", // France
+  DE: "2276", // Germany
+  IT: "2380", // Italy
+  PT: "2620", // Portugal
+};
+
+// ISO language code -> Google Ads languageConstant id.
+const LANGUAGE_CONSTANTS: Record<string, string> = {
+  es: "1003", // Spanish
+  en: "1000", // English
+  fr: "1002", // French
+  de: "1001", // German
+  it: "1004", // Italian
+  pt: "1014", // Portuguese
+};
+
+function competitionFrom(raw: unknown): KeywordPlanIdea["competition"] {
+  const v = String(raw ?? "UNSPECIFIED").toUpperCase();
+  if (v === "LOW" || v === "MEDIUM" || v === "HIGH" || v === "UNKNOWN") return v;
+  return "UNSPECIFIED";
+}
+
+export async function generateKeywordIdeas(params: {
+  keywordSeeds?: string[];
+  urlSeed?: string;
+  languageCode: string;
+  countryCodes: string[];
+}): Promise<KeywordPlanIdea[]> {
+  const seeds = (params.keywordSeeds ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 20); // KeywordPlanIdeaService caps keyword seeds at 20
+  const url = params.urlSeed?.trim() || undefined;
+  if (seeds.length === 0 && !url) return [];
+
+  const token = await getAccessToken();
+
+  const language = `languageConstants/${
+    LANGUAGE_CONSTANTS[params.languageCode?.toLowerCase()] ?? LANGUAGE_CONSTANTS.es
+  }`;
+  const geoTargetConstants = (params.countryCodes.length > 0 ? params.countryCodes : ["ES"])
+    .map((c) => GEO_TARGET_CONSTANTS[c?.toUpperCase()])
+    .filter((id): id is string => Boolean(id))
+    .map((id) => `geoTargetConstants/${id}`);
+  if (geoTargetConstants.length === 0) {
+    geoTargetConstants.push(`geoTargetConstants/${GEO_TARGET_CONSTANTS.ES}`);
+  }
+
+  const body: Record<string, unknown> = {
+    language,
+    geoTargetConstants,
+    includeAdultKeywords: false,
+    keywordPlanNetwork: "GOOGLE_SEARCH",
+    pageSize: 1000,
+  };
+  // Seed selection: keyword + url > keyword only > url only.
+  if (seeds.length > 0 && url) {
+    body.keywordAndUrlSeed = { url, keywords: seeds };
+  } else if (seeds.length > 0) {
+    body.keywordSeed = { keywords: seeds };
+  } else if (url) {
+    body.urlSeed = { url };
+  }
+
+  let data: {
+    error?: unknown;
+    results?: {
+      text?: string;
+      keywordIdeaMetrics?: {
+        avgMonthlySearches?: string | number;
+        competition?: string;
+        lowTopOfPageBidMicros?: string | number;
+        highTopOfPageBidMicros?: string | number;
+      };
+    }[];
+  };
+  try {
+    const resp = await fetch(`${BASE}:generateKeywordIdeas`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(body),
+    });
+    data = await resp.json();
+  } catch {
+    return [];
+  }
+
+  if (data.error || !Array.isArray(data.results)) return [];
+
+  return data.results
+    .filter((r): r is { text: string; keywordIdeaMetrics?: NonNullable<typeof r.keywordIdeaMetrics> } =>
+      Boolean(r.text)
+    )
+    .map((r) => {
+      const m = r.keywordIdeaMetrics;
+      const low = m?.lowTopOfPageBidMicros;
+      const high = m?.highTopOfPageBidMicros;
+      return {
+        text: r.text,
+        avgMonthlySearches: Number(m?.avgMonthlySearches ?? 0),
+        competition: competitionFrom(m?.competition),
+        topOfPageBidLowMicros: low !== undefined ? Number(low) : undefined,
+        topOfPageBidHighMicros: high !== undefined ? Number(high) : undefined,
+      };
+    });
+}
+
 // Get campaign performance
 export async function getCampaignPerformance(campaignId: string): Promise<{
   impressions: number; clicks: number; costMicros: number; status: string;

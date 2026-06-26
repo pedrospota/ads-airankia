@@ -18,6 +18,15 @@ export async function POST(request: NextRequest) {
   // Get campaign from our DB
   const [campaign] = await adsDb.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+  // SAFETY: Search campaigns are isolated from this Display route. They are only
+  // enabled via the dedicated /enable chokepoint (HARD RULE 7). Never let a
+  // Search row reach the ENABLED path here.
+  if (campaign.campaignType === "search") {
+    return NextResponse.json(
+      { error: "Search campaigns are enabled only via /api/search/runs/[id]/enable" },
+      { status: 409 }
+    );
+  }
   if (!campaign.googleCampaignId) return NextResponse.json({ error: "Campaign not synced to Google Ads" }, { status: 400 });
 
   try {

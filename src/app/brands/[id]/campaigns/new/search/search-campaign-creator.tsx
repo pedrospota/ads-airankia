@@ -108,6 +108,9 @@ export function SearchCampaignCreator({
   const abortRef = useRef<AbortController | null>(null);
   // Track which step we already auto-advanced, so we POST /advance once per step.
   const advancedRef = useRef<Set<string>>(new Set());
+  // Timestamp (ms) of the last stream event. Lets a 'running' run that has gone
+  // silent (its server process likely died) be detected and nudged to resume.
+  const lastProgressRef = useRef<number>(0);
   // Guards the one-shot "rellenar con IA" fetch on the start card.
   const suggestAbortRef = useRef<AbortController | null>(null);
 
@@ -215,6 +218,9 @@ export function SearchCampaignCreator({
   // ---- Handle one parsed SSE event ---------------------------------------
   const handleEvent = useCallback(
     (id: string, evt: StreamEvent) => {
+      // Any event = the server is alive and making progress; reset the silence
+      // clock the resilience watcher below uses to detect a dead process.
+      lastProgressRef.current = Date.now();
       const agent = pickAgent(evt.data);
       switch (evt.type) {
         case "run_status":
@@ -296,6 +302,31 @@ export function SearchCampaignCreator({
     advancedRef.current.add(step.id);
     void advance(runId, { stepId: step.id, action: "accept" });
   }, [runId, state, advance, autoFinish]);
+
+  // ---- Resilience: revive a 'running' run whose server process died ----------
+  // In Automático the whole pipeline runs inside ONE /advance request. If that
+  // process is killed (timeout, redeploy, crash), the run is stuck 'running' and
+  // the SSE stream falls silent forever — an endless spinner. We watch for that
+  // silence: every 30s we re-read state, and if no stream event has arrived for
+  // SILENCE_MS we re-open the stream and re-POST /advance. The server treats the
+  // refire as a safe no-op while a loop is still alive (it only takes over once
+  // the run is truly stale), so this never double-drives a healthy run — it only
+  // rescues a dead one. Keyed on the run STATUS (not the whole state object) so
+  // the interval survives routine state refreshes instead of resetting on each.
+  useEffect(() => {
+    if (!runId) return;
+    if (state?.run.status !== "running") return;
+    lastProgressRef.current = Date.now();
+    const SILENCE_MS = 90_000;
+    const timer = setInterval(() => {
+      void refreshState(runId);
+      if (Date.now() - lastProgressRef.current < SILENCE_MS) return;
+      lastProgressRef.current = Date.now();
+      openStream(runId);
+      void advance(runId);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [runId, state?.run.status, refreshState, openStream, advance]);
 
   // ---- AI auto-fill: draft objective + budget from the business context --
   async function requestSuggestion() {

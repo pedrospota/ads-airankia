@@ -17,7 +17,7 @@
 import { getAgent } from "@/lib/agents/registry";
 import { adsDb } from "@/lib/ads-db";
 import { agentRuns, agentSteps, campaigns } from "@/lib/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { MODELS } from "@/lib/anthropic";
 import {
   emitEvent,
@@ -70,6 +70,13 @@ function pipelineIndex(agent: string): number {
   const idx = PIPELINE.indexOf(agent as AgentId);
   return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
 }
+
+// A run stuck in 'running' with no heartbeat for this long is treated as dead
+// (its serverless process was killed mid-loop — timeout, redeploy, crash). The
+// next advance call may then safely take over and resume it. Sized well above
+// the slowest single LLM step but below the 300s function limit, so a healthy
+// in-flight loop is never mistaken for a dead one.
+const RUN_STALE_MS = 180_000;
 
 type StepRow = typeof agentSteps.$inferSelect;
 type RunRow = typeof agentRuns.$inferSelect;
@@ -341,6 +348,44 @@ export async function advanceRun(
   const run = await loadRun(runId);
   let steps = await loadSteps(runId);
 
+  // --- RESILIENCE: concurrency guard + dead-process reclaim -----------------
+  // (a0) If this run is ALREADY 'running' and beat recently, another advance
+  // loop is in flight. Starting a second concurrent loop could double-run a
+  // step, so we just return the current state. Only a 'running' run that has
+  // gone SILENT past RUN_STALE_MS is treated as dead — then we fall through and
+  // take over to resume it. A user override submit always proceeds (it's a
+  // deliberate gate action, never a duplicate auto-advance).
+  const lastBeat = run.updatedAt ? new Date(run.updatedAt).getTime() : 0;
+  const runningButFresh =
+    run.status === "running" && Date.now() - lastBeat < RUN_STALE_MS;
+  if (runningButFresh && opts?.userOverride === undefined) {
+    return getRunState(runId);
+  }
+
+  // (a1) Reclaim any step stranded in RUNNING by a process that died mid-step.
+  // We only reach here when no LIVE loop owns this run (the guard above already
+  // returned for an active one), so resetting a stranded RUNNING step back to
+  // NOT_STARTED is safe: runStep re-executes it (a half-run step wrote no
+  // COMPLETED output, and runStep is idempotent on COMPLETED). Without this,
+  // firstNotStarted would SKIP the stranded step and the pipeline would stall
+  // here forever.
+  const stranded = steps.filter((s) => s.status === "RUNNING");
+  if (stranded.length > 0) {
+    await adsDb
+      .update(agentSteps)
+      .set({ status: "NOT_STARTED", startedAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentSteps.runId, runId),
+          inArray(
+            agentSteps.id,
+            stranded.map((s) => s.id)
+          )
+        )
+      );
+    steps = await loadSteps(runId);
+  }
+
   // (b) Next runnable step = first NOT_STARTED. Activator is a gate (never
   // auto-run here).
   let next = firstNotStarted(steps);
@@ -357,6 +402,14 @@ export async function advanceRun(
     while (next && (next.agent as AgentId) !== "activator") {
       const stepId = next.id;
       const agent = next.agent as AgentId;
+
+      // Heartbeat: keep updatedAt fresh right before each step so a watchdog or
+      // a client refire can distinguish this live loop from a dead one
+      // (RUN_STALE_MS). A dead process stops beating and becomes resumable.
+      await adsDb
+        .update(agentRuns)
+        .set({ updatedAt: new Date() })
+        .where(eq(agentRuns.id, runId));
 
       await runStep(runId, stepId);
 

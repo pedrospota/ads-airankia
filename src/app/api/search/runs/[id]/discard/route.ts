@@ -12,9 +12,13 @@ export const dynamic = "force-dynamic";
 //
 // This is the user's "deshacer" button. It removes the campaign from Google Ads
 // if it was already created, then resets the local row so the campaign no longer
-// shows up as something to finish. It is always SAFE: the campaign is created
-// PAUSED and is never enabled from here, so nothing has ever spent. Removing a
-// paused campaign cannot cost anything.
+// shows up as something to finish. It is safe for the normal case because the
+// campaign is created PAUSED and so has never spent.
+//
+// SAFETY: an ACTIVE campaign is one the user already enabled and that may be
+// spending right now. We refuse to silently remove it here (the UI already hides
+// the button in that state, but a direct call or a race must not slip through).
+// To take down a live campaign the user pauses it first.
 //
 // Only the run's owner may discard it, and only Search campaigns are touched
 // (the Display path is never affected).
@@ -56,6 +60,19 @@ export async function POST(
   if (campaign && campaign.campaignType !== "search") {
     return NextResponse.json(
       { ok: false, error: "La campaña no es de búsqueda" },
+      { status: 409 }
+    );
+  }
+
+  // SAFETY: never auto-remove a campaign the user already turned on — it may be
+  // live and spending. They must pause it first, then discard.
+  if (campaign && campaign.status === "active") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Esta campaña está activa. Ponla en pausa en Google Ads antes de descartarla.",
+      },
       { status: 409 }
     );
   }

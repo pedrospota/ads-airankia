@@ -114,6 +114,10 @@ export function SearchCampaignCreator({
   const lastProgressRef = useRef<number>(0);
   // Guards the one-shot "rellenar con IA" fetch on the start card.
   const suggestAbortRef = useRef<AbortController | null>(null);
+  // Highest event seq seen, so a reconnect resumes with ?after=<seq> instead of
+  // replaying the whole log from 0 (which flickered the live timeline). Reset to
+  // 0 on a brand-new run so its first open streams the full history.
+  const lastSeqRef = useRef<number>(0);
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -144,16 +148,36 @@ export function SearchCampaignCreator({
     async (
       id: string,
       body?: { stepId?: string; userOverride?: unknown; action?: "accept" | "run_next" | "regenerate" },
+      opts?: { silent?: boolean },
     ) => {
+      // `silent` is for the background resilience refire (a best-effort no-op
+      // resend) — it must never flash an error. User-initiated calls (gate
+      // accept, auto-advance) DO surface failures so the flow can't freeze in
+      // silence with the user unsure whether anything is happening.
+      if (!opts?.silent) setError(null);
       try {
-        await fetch(`/api/search/runs/${id}/advance`, {
+        const r = await fetch(`/api/search/runs/${id}/advance`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
         });
+        if (!r.ok && !opts?.silent) {
+          let msg = "No pudimos continuar. Inténtalo de nuevo en un momento.";
+          try {
+            const data = (await r.json()) as { error?: string };
+            if (data?.error) msg = data.error;
+          } catch {
+            /* no JSON body — keep the friendly default */
+          }
+          setError(msg);
+        }
       } catch {
-        /* the stream/state poll will surface the real status */
+        if (!opts?.silent) {
+          setError(
+            "No pudimos continuar. Revisa tu conexión e inténtalo de nuevo.",
+          );
+        }
       } finally {
         void refreshState(id);
       }
@@ -174,11 +198,14 @@ export function SearchCampaignCreator({
 
       (async () => {
         try {
-          const res = await fetch(`/api/search/runs/${id}/stream`, {
-            credentials: "include",
-            headers: { Accept: "text/event-stream" },
-            signal: controller.signal,
-          });
+          const res = await fetch(
+            `/api/search/runs/${id}/stream?after=${lastSeqRef.current}`,
+            {
+              credentials: "include",
+              headers: { Accept: "text/event-stream" },
+              signal: controller.signal,
+            },
+          );
           if (!res.body) {
             await refreshState(id);
             return;
@@ -222,7 +249,19 @@ export function SearchCampaignCreator({
       // Any event = the server is alive and making progress; reset the silence
       // clock the resilience watcher below uses to detect a dead process.
       lastProgressRef.current = Date.now();
-      const agent = pickAgent(evt.data);
+      // The stream serializes the whole EngineEvent ({ seq, type, stepId, data,
+      // createdAt }), so the agent/text payload the agents emit lives one level
+      // deeper, inside evt.data.data. Unwrap it — without this the live log was
+      // permanently blank because pickAgent/pickText read the envelope instead.
+      const payload =
+        isRecord(evt.data) && "data" in (evt.data as Record<string, unknown>)
+          ? (evt.data as { data: unknown }).data
+          : evt.data;
+      // Remember the high-water seq so a reconnect resumes after it.
+      if (isRecord(evt.data) && typeof evt.data.seq === "number") {
+        lastSeqRef.current = Math.max(lastSeqRef.current, evt.data.seq);
+      }
+      const agent = pickAgent(payload);
       switch (evt.type) {
         case "run_status":
         case "gate":
@@ -237,7 +276,7 @@ export function SearchCampaignCreator({
         case "decision":
         case "step_progress":
         case "token": {
-          const text = pickText(evt.data);
+          const text = pickText(payload);
           if (text && agent) {
             setLiveLog((prev) => ({
               ...prev,
@@ -247,7 +286,7 @@ export function SearchCampaignCreator({
           break;
         }
         case "error": {
-          const text = pickText(evt.data);
+          const text = pickText(payload);
           if (text) setError(text);
           void refreshState(id);
           break;
@@ -324,7 +363,7 @@ export function SearchCampaignCreator({
       if (Date.now() - lastProgressRef.current < SILENCE_MS) return;
       lastProgressRef.current = Date.now();
       openStream(runId);
-      void advance(runId);
+      void advance(runId, undefined, { silent: true });
     }, 30_000);
     return () => clearInterval(timer);
   }, [runId, state?.run.status, refreshState, openStream, advance]);
@@ -378,6 +417,7 @@ export function SearchCampaignCreator({
     setAutoFinish(false);
     suggestAbortRef.current?.abort();
     setLiveLog({});
+    lastSeqRef.current = 0;
     setActivateResult(null);
     try {
       const seed: StartRunRequest["seed"] = {
@@ -537,6 +577,7 @@ export function SearchCampaignCreator({
   function reset() {
     abortStream();
     advancedRef.current = new Set();
+    lastSeqRef.current = 0;
     setRunId(null);
     setState(null);
     setLiveLog({});
@@ -1002,9 +1043,31 @@ export function SearchCampaignCreator({
                       margin: 0,
                     }}
                   >
-                    <li>⏱️ Revisa tus primeros clics en 24-48 horas.</li>
-                    <li>📊 Fíjate en si te llegan clientes de calidad.</li>
-                    <li>🔧 Si hace falta, ajusta tus palabras clave o el presupuesto.</li>
+                    {enabledNow ? (
+                      <>
+                        <li>⏱️ Revisa tus primeros clics en 24-48 horas.</li>
+                        <li>📊 Fíjate en si te llegan clientes de calidad.</li>
+                        <li>
+                          🔧 Si hace falta, ajusta tus palabras clave o el
+                          presupuesto.
+                        </li>
+                      </>
+                    ) : (
+                      <>
+                        <li>
+                          👀 Revisa la propuesta con calma: el nombre, las
+                          palabras clave y los anuncios.
+                        </li>
+                        <li>
+                          ▶️ Cuando estés listo, pulsa «Ponerla en marcha» para
+                          empezar a mostrarla en Google.
+                        </li>
+                        <li>
+                          📊 En cuanto reciba sus primeros clics, te ayudo a
+                          mejorarla.
+                        </li>
+                      </>
+                    )}
                   </ul>
                 </div>
               </div>
@@ -1546,7 +1609,10 @@ function ActivationReview({
     keywords?.keywords?.length ??
     0;
   const sampleAd: AdGroupAds | undefined = rsa?.ads?.[0];
-  const campaignName = structure?.campaignName ?? `${state.run.id.slice(0, 6)}`;
+  // The AI always names the campaign; the fallback only matters if the
+  // structure step is somehow missing. Use a human label, never a raw run-id
+  // slug (which would read as a meaningless code to the user).
+  const campaignName = structure?.campaignName?.trim() || "Campaña de Búsqueda";
 
   // The user may rename the campaign before it's created (optional — it comes
   // pre-filled with the name the AI already chose, so doing nothing is fine).
@@ -1845,8 +1911,20 @@ function pickAgent(data: unknown): AgentId | null {
 function pickText(data: unknown): string | null {
   if (typeof data === "string") return data;
   if (!isRecord(data)) return null;
-  const t = data.text ?? data.message ?? data.decision ?? data.detail ?? data.delta;
-  return typeof t === "string" ? t : null;
+  // `summary` is the field the agents actually emit on decision events — it was
+  // missing here, so even once the payload is unwrapped the human-readable line
+  // would never appear. Keep the others as fallbacks for token/progress events.
+  const t =
+    data.text ??
+    data.message ??
+    data.summary ??
+    data.decision ??
+    data.detail ??
+    data.delta;
+  if (typeof t === "string") return t;
+  // The activator streams per-ad-group ticks carrying only the group name.
+  if (typeof data.adGroup === "string") return `Creando grupo: ${data.adGroup}`;
+  return null;
 }
 
 function dotStateFor(step: StepDTO | undefined): DotState {

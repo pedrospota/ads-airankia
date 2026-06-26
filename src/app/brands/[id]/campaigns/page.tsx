@@ -86,7 +86,11 @@ export default async function CampaignsPage({
   const nameByRun = new Map<string, string>();
   if (runIds.length > 0) {
     const nameRows = await adsDb
-      .select({ runId: agentSteps.runId, output: agentSteps.output })
+      .select({
+        runId: agentSteps.runId,
+        output: agentSteps.output,
+        userOverride: agentSteps.userOverride,
+      })
       .from(agentSteps)
       .where(
         and(
@@ -95,7 +99,13 @@ export default async function CampaignsPage({
         )
       );
     for (const n of nameRows) {
-      const cn = (n.output as { campaignName?: string } | null)?.campaignName;
+      // A hand-edited name (userOverride) wins over the AI's original output,
+      // mirroring how buildRunContext folds userOverride ?? output for the
+      // activator. Without this, a rename before activating would never show.
+      const effective = (n.userOverride ?? n.output) as {
+        campaignName?: string;
+      } | null;
+      const cn = effective?.campaignName;
       if (cn && n.runId) nameByRun.set(n.runId, cn);
     }
   }

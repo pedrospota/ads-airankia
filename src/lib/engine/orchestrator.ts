@@ -477,6 +477,23 @@ export async function runActivatorStep(runId: string): Promise<RunStateDTO> {
     throw new Error(`Run ${runId} no tiene paso de activación`);
   }
 
+  // SAFETY GATE: never push a campaign to Google before the final review has
+  // finished, and never if that review BLOCKED the plan. This is the
+  // authoritative server-side check — the UI mirrors it, but this is the line
+  // that actually protects the user's Google Ads account.
+  const qaStep = steps.find((s) => (s.agent as AgentId) === "policy_qa");
+  if (!qaStep || qaStep.status !== "COMPLETED") {
+    throw new Error(
+      "Todavía no hemos terminado de revisar la campaña. Espera a que acabe la revisión final antes de activar.",
+    );
+  }
+  const qa = (qaStep.userOverride ?? qaStep.output) as QAOutput | null;
+  if (qa?.verdict === "block") {
+    throw new Error(
+      "La revisión final encontró algo que hay que corregir antes de publicar. Revisa los avisos y vuelve a generar la campaña.",
+    );
+  }
+
   // Pushes to Google PAUSED + persists google ids (inside the agent).
   await runStep(runId, activator.id);
 

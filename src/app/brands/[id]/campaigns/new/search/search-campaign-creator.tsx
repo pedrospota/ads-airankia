@@ -11,6 +11,7 @@ import {
   type AgentId,
   type KeywordResearchOutput,
   type PlannerOutput,
+  type QAOutput,
   type RunMode,
   type RunStateDTO,
   type RSAOutput,
@@ -606,6 +607,7 @@ export function SearchCampaignCreator({
                 styles={styles}
                 activating={activating}
                 onActivate={activateCampaign}
+                onReset={reset}
               />
             )}
 
@@ -1086,12 +1088,14 @@ function ActivationReview({
   styles,
   activating,
   onActivate,
+  onReset,
 }: {
   state: RunStateDTO;
   colors: ReturnType<typeof useTheme>["colors"];
   styles: Styles;
   activating: boolean;
   onActivate: () => void;
+  onReset: () => void;
 }) {
   const structure = readStep<StructureOutput>(state, "structure_architect");
   const rsa = readStep<RSAOutput>(state, "rsa_copywriter");
@@ -1105,6 +1109,60 @@ function ActivationReview({
     0;
   const sampleAd: AdGroupAds | undefined = rsa?.ads?.[0];
   const campaignName = structure?.campaignName ?? `${state.run.id.slice(0, 6)}`;
+
+  const qa = readStep<QAOutput>(state, "policy_qa");
+  const blockingIssues = (qa?.issues ?? []).filter((i) => i.severity === "block");
+  const fixIssues = (qa?.issues ?? []).filter((i) => i.severity === "fix");
+
+  // SAFETY: if the final review BLOCKED the plan, never offer activation.
+  // Show what to fix and let the user start over (nothing is published).
+  if (qa?.verdict === "block") {
+    const shown = blockingIssues.length ? blockingIssues : fixIssues;
+    return (
+      <div style={{ ...styles.card, marginTop: 12, borderColor: "#F87171" }}>
+        <h2 style={{ fontSize: 19, fontWeight: 700, marginBottom: 4 }}>
+          Casi listo: hay que corregir algo antes de publicar ⚠️
+        </h2>
+        <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
+          La revisión final encontró{" "}
+          {shown.length === 1 ? "un punto" : `${shown.length} puntos`} que conviene
+          arreglar para cumplir las reglas de Google. Por seguridad, no la
+          publicamos hasta que esté bien. No se ha creado nada en Google.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+          {shown.map((issue, i) => (
+            <div
+              key={i}
+              style={{ ...styles.adPreview, borderColor: "rgba(248,113,113,0.4)" }}
+            >
+              <p style={{ fontSize: 13.5, fontWeight: 600, color: colors.text }}>
+                {issue.message}
+              </p>
+              {issue.suggestion && (
+                <p style={{ fontSize: 12.5, color: colors.textMuted, marginTop: 4 }}>
+                  Cómo arreglarlo: {issue.suggestion}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={onReset}
+          style={{
+            ...styles.primaryBtn,
+            width: "100%",
+            fontSize: 15,
+            padding: "13px 24px",
+          }}
+        >
+          Empezar de nuevo
+        </button>
+        <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 10, textAlign: "center" }}>
+          Vuelve a crearla ajustando los datos (por ejemplo, la web o el presupuesto).
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ ...styles.card, marginTop: 12, borderColor: colors.accent }}>
@@ -1148,6 +1206,32 @@ function ActivationReview({
                 .join(" ")}
             </div>
           </div>
+        </div>
+      )}
+
+      {fixIssues.length > 0 && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 14,
+            borderRadius: 10,
+            background: "rgba(251,191,36,0.08)",
+            border: "1px solid rgba(251,191,36,0.3)",
+          }}
+        >
+          <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+            Sugerencias para mejorarla (opcionales):
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {fixIssues.slice(0, 4).map((issue, i) => (
+              <li
+                key={i}
+                style={{ fontSize: 12.5, color: colors.textMuted, marginBottom: 3 }}
+              >
+                {issue.message}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

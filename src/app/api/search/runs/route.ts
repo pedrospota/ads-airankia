@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
 import { createRun } from "@/lib/engine/orchestrator";
+import { getBrandAiContext } from "@/lib/queries";
 import type {
   StartRunRequest,
   StartRunResponse,
@@ -49,7 +50,9 @@ export async function POST(request: NextRequest) {
   const readClient = createSupabaseReadClient(session?.access_token);
   const { data: brand, error: brandError } = await readClient
     .from("brand_project")
-    .select("id, workspace_id, name, industry, website, description:business_entity_description")
+    .select(
+      "id, workspace_id, name, industry, website, description:business_entity_description, business_entity_offering, audience_client, audience_plural, audience_singular, brand_voice, competitors, main_country"
+    )
     .eq("id", brandId)
     .single();
 
@@ -59,9 +62,10 @@ export async function POST(request: NextRequest) {
   }
 
   // Enrich the seed with the full business context we already have on file, so
-  // the pipeline plans with real information (name, website, sector) instead of
-  // only whatever the user typed. User-typed hints (objective, budget) always
-  // win; brand identity is filled from the database where the user left a gap.
+  // the pipeline plans with real information (name, website, sector, what they
+  // offer, who they sell to, competitors) instead of only whatever the user
+  // typed. User-typed hints (objective, budget) always win; brand identity is
+  // filled from the database where the user left a gap.
   const fullSeed: BrandSeed = {
     ...seed,
     brandId,
@@ -76,6 +80,35 @@ export async function POST(request: NextRequest) {
   }
   if (brand.description && !fullSeed.description) {
     fullSeed.description = brand.description;
+  }
+
+  // Richer brand profile (only fill gaps the user didn't type).
+  const offering = (brand.business_entity_offering ?? "").trim();
+  if (offering && !fullSeed.offering) fullSeed.offering = offering;
+  const audience = (
+    brand.audience_client ||
+    brand.audience_plural ||
+    brand.audience_singular ||
+    ""
+  ).trim();
+  if (audience && !fullSeed.audience) fullSeed.audience = audience;
+  const brandVoice = (brand.brand_voice ?? "").trim();
+  if (brandVoice && !fullSeed.brandVoice) fullSeed.brandVoice = brandVoice;
+  if (!fullSeed.competitors && Array.isArray(brand.competitors)) {
+    const comps = brand.competitors
+      .map((c: unknown) => (typeof c === "string" ? c.trim() : ""))
+      .filter(Boolean)
+      .slice(0, 8);
+    if (comps.length) fullSeed.competitors = comps;
+  }
+  const mainCountry = (brand.main_country ?? "").trim();
+  if (mainCountry && !fullSeed.mainCountry) fullSeed.mainCountry = mainCountry;
+
+  // Live AI-visibility signals (real prompts + cited domains). Best-effort and
+  // bounded — never blocks campaign creation if AirAnkia has nothing yet.
+  const aiContext = await getBrandAiContext(brandId, session?.access_token);
+  if (aiContext.topQueries.length || aiContext.citationDomains.length) {
+    fullSeed.aiContext = aiContext;
   }
 
   const { runId } = await createRun({

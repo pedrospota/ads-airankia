@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
+import { getBrandAiContext } from "@/lib/queries";
 import { callStructured } from "@/lib/llm";
 import { BUDGET } from "@/lib/engine/types";
 
@@ -69,7 +70,9 @@ export async function POST(request: NextRequest) {
   const readClient = createSupabaseReadClient(session?.access_token);
   const { data: brand, error: brandError } = await readClient
     .from("brand_project")
-    .select("id, name, industry, website, description:business_entity_description")
+    .select(
+      "id, name, industry, website, description:business_entity_description, business_entity_offering, audience_client, audience_plural, audience_singular, competitors, main_country"
+    )
     .eq("id", body.brandId)
     .single();
 
@@ -78,11 +81,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "brand not found" }, { status: 404 });
   }
 
+  // Live AI-visibility signals (real prompts + cited domains). Best-effort.
+  const ai = await getBrandAiContext(body.brandId, session?.access_token);
+
+  const audience = (
+    brand.audience_client ||
+    brand.audience_plural ||
+    brand.audience_singular ||
+    ""
+  ).trim();
+  const competitors = Array.isArray(brand.competitors)
+    ? brand.competitors
+        .map((c: unknown) => (typeof c === "string" ? c.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+
   const context = [
     `Brand name: ${brand.name ?? "(no name)"}`,
     brand.industry ? `Industry / activity: ${brand.industry}` : null,
     brand.website ? `Website: ${brand.website}` : null,
     brand.description ? `Description: ${brand.description}` : null,
+    brand.business_entity_offering
+      ? `What they offer: ${brand.business_entity_offering}`
+      : null,
+    audience ? `Target audience: ${audience}` : null,
+    competitors.length ? `Known competitors: ${competitors.join(", ")}` : null,
+    brand.main_country ? `Main country: ${brand.main_country}` : null,
+    ai.topQueries.length
+      ? `Real questions people ask AI assistants about this brand/market:\n${ai.topQueries
+          .map((q) => `  • ${q}`)
+          .join("\n")}`
+      : null,
+    ai.citationDomains.length
+      ? `Domains AI assistants cite for these topics: ${ai.citationDomains
+          .map((d) => d.domain)
+          .join(", ")}`
+      : null,
   ]
     .filter(Boolean)
     .join("\n");

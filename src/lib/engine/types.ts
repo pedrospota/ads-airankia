@@ -119,6 +119,20 @@ export const MICROS_PER_UNIT = 1_000_000;
 // Brand seed — what the user gives us to start a run
 // ----------------------------------------------------------------------------
 
+/**
+ * Live AI-visibility signals AirAnkia already holds for a brand. Best-effort:
+ * every field may be empty (the brand may have no prompts/citations yet). We
+ * keep both lists SMALL on purpose so they ground the agents without bloating
+ * the prompt (which would slow the LLM call / risk the deadline).
+ */
+export interface BrandAiContext {
+  /** Real prompts users ask AI assistants about this brand or its market. */
+  topQueries: string[];
+  /** Domains AI assistants cite for those topics (most-cited first) — an
+   *  authority / competition signal. */
+  citationDomains: { domain: string; count: number }[];
+}
+
 export interface BrandSeed {
   brandId: string;
   brandName: string;
@@ -128,6 +142,20 @@ export interface BrandSeed {
   description?: string;
   /** Sector / actividad del negocio, tomado de la ficha de marca. */
   industry?: string;
+  // --- Richer brand profile already on file in AirAnkia (all optional) -------
+  /** What the business actually offers (business_entity_offering). */
+  offering?: string;
+  /** Who the brand sells to (audience_client/plural/singular, composed). */
+  audience?: string;
+  /** Brand tone of voice, to steer ad copy downstream. */
+  brandVoice?: string;
+  /** Known competitor brand names (for competitor negatives / positioning). */
+  competitors?: string[];
+  /** Brand's main country from its profile (geo grounding hint). */
+  mainCountry?: string;
+  /** Live AI-assistant signals (real demand + where the brand is cited). */
+  aiContext?: BrandAiContext;
+  // --- Plain-language hints the user typed (always win over the above) -------
   /** Plain-language goal the user typed, optional ("quiero más reservas"). */
   objectiveHint?: string;
   geoHint?: string;

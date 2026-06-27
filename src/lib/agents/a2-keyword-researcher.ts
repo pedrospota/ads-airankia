@@ -321,6 +321,32 @@ function buildUserPrompt(ctx: RunContext): string {
     `- Landing page (where the ads will point): ${landing}`,
   ];
   if (b.description) lines.push(`- Business description: ${b.description}`);
+  if (b.offering) lines.push(`- What they offer: ${b.offering}`);
+  if (b.audience) lines.push(`- Target audience (who they serve): ${b.audience}`);
+  if (b.competitors?.length)
+    lines.push(`- Known competitors: ${b.competitors.join(", ")}`);
+
+  // Real AI-assistant signals AirAnkia already has — strong keyword seeds and a
+  // competitor/citation signal. The schema's `source` field already allows
+  // "citation", so the model can tag ideas it derives from these.
+  const ai = b.aiContext;
+  if (ai && (ai.topQueries.length || ai.citationDomains.length)) {
+    lines.push(
+      "",
+      "AIRANKIA SIGNALS — real data on how people query AI assistants about this brand/market. Mine these for genuine search language and intent:"
+    );
+    if (ai.topQueries.length) {
+      lines.push("- Real questions people ask AI assistants here (great keyword seeds):");
+      for (const q of ai.topQueries) lines.push(`    • ${q}`);
+    }
+    if (ai.citationDomains.length) {
+      lines.push(
+        `- Domains AI assistants cite for these topics (treat well-known ones as competitor/citation signals): ${ai.citationDomains
+          .map((d) => d.domain)
+          .join(", ")}`
+      );
+    }
+  }
 
   if (planner) {
     lines.push(

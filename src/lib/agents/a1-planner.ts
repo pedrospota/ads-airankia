@@ -255,6 +255,34 @@ function buildUserPrompt(ctx: RunContext): string {
   ];
   if (b.description) lines.push(`- Business description: ${b.description}`);
   if (b.industry) lines.push(`- Industry / activity: ${b.industry}`);
+  if (b.offering) lines.push(`- What they offer: ${b.offering}`);
+  if (b.audience) lines.push(`- Target audience (who they serve): ${b.audience}`);
+  if (b.brandVoice) lines.push(`- Brand voice / tone: ${b.brandVoice}`);
+  if (b.competitors?.length)
+    lines.push(`- Known competitors: ${b.competitors.join(", ")}`);
+  if (b.mainCountry)
+    lines.push(`- Main country (from the brand profile): ${b.mainCountry}`);
+
+  // Real AI-assistant signals AirAnkia already has on this brand.
+  const ai = b.aiContext;
+  if (ai && (ai.topQueries.length || ai.citationDomains.length)) {
+    lines.push(
+      "",
+      "AIRANKIA SIGNALS — real data we already collected on how AI assistants talk about this brand and its market (use it to ground the objective, themes and language; it reflects genuine demand):"
+    );
+    if (ai.topQueries.length) {
+      lines.push("- Real questions people ask AI assistants here:");
+      for (const q of ai.topQueries) lines.push(`    • ${q}`);
+    }
+    if (ai.citationDomains.length) {
+      lines.push(
+        `- Domains AI assistants cite for these topics (authority / competition signal): ${ai.citationDomains
+          .map((d) => d.domain)
+          .join(", ")}`
+      );
+    }
+  }
+
   lines.push(
     `- Objective (in their words): ${b.objectiveHint ?? "(not provided)"}`,
     `- Geographic area (in their words): ${b.geoHint ?? "(not provided)"}`,

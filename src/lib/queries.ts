@@ -1,4 +1,5 @@
 import { createSupabaseReadClient } from "./supabase-server";
+import type { BrandAiContext } from "./engine/types";
 
 export interface Brand {
   id: string;
@@ -102,6 +103,85 @@ export async function getCitationsForBrand(
       models: Array.from(c.models),
     }))
     .sort((a, b) => b.citation_count - a.citation_count);
+}
+
+// Live AI-visibility context for a brand, drawn from the data AirAnkia already
+// collected: the real prompts people ask AI assistants about the brand/market
+// (queries.query, linked by attached_brand_id) and the domains those answers
+// cite. Both lists are kept SMALL and the whole thing is best-effort — if the
+// brand has no prompts yet, or anything fails, we return empty lists so the
+// campaign pipeline keeps working exactly as before.
+const MAX_AI_QUERIES = 12;
+const MAX_CITATION_DOMAINS = 8;
+
+export async function getBrandAiContext(
+  brandId: string,
+  accessToken?: string
+): Promise<BrandAiContext> {
+  const empty: BrandAiContext = { topQueries: [], citationDomains: [] };
+  try {
+    const supabase = createSupabaseReadClient(accessToken);
+
+    // Most-recent prompts attached to this brand.
+    const { data: queries } = await supabase
+      .from("queries")
+      .select("id, query, last_analysis_at")
+      .eq("attached_brand_id", brandId)
+      .order("last_analysis_at", { ascending: false, nullsFirst: false })
+      .limit(40);
+
+    if (!queries || queries.length === 0) return empty;
+
+    // Distinct, trimmed prompt texts (most recent first), capped.
+    const seen = new Set<string>();
+    const topQueries: string[] = [];
+    for (const q of queries) {
+      const text = (q.query ?? "").trim();
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      topQueries.push(text.length > 160 ? `${text.slice(0, 157)}…` : text);
+      if (topQueries.length >= MAX_AI_QUERIES) break;
+    }
+
+    // Domains cited across this brand's answers (bounded scan).
+    const queryIds = queries.map((q) => q.id);
+    const { data: results } = await supabase
+      .from("query_run_results")
+      .select("citations")
+      .in("query_id", queryIds)
+      .not("citations", "is", null)
+      .limit(200);
+
+    const domainCount = new Map<string, number>();
+    for (const r of results ?? []) {
+      const cites = r.citations as Array<{ url?: string; domain?: string }> | null;
+      if (!Array.isArray(cites)) continue;
+      for (const c of cites) {
+        let domain = (c.domain ?? "").trim().toLowerCase();
+        if (!domain && c.url) {
+          try {
+            domain = new URL(c.url).hostname.toLowerCase();
+          } catch {
+            domain = "";
+          }
+        }
+        domain = domain.replace(/^www\./, "");
+        if (!domain) continue;
+        domainCount.set(domain, (domainCount.get(domain) ?? 0) + 1);
+      }
+    }
+    const citationDomains = Array.from(domainCount.entries())
+      .map(([domain, count]) => ({ domain, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, MAX_CITATION_DOMAINS);
+
+    return { topQueries, citationDomains };
+  } catch (e) {
+    console.error("[getBrandAiContext] failed (non-fatal)", e);
+    return empty;
+  }
 }
 
 // GDN availability is now checked dynamically via ads.txt + scraping

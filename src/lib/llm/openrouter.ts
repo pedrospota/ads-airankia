@@ -88,6 +88,13 @@ export interface ORModel {
 // Low-level POST with retry on 429 / 5xx
 // ----------------------------------------------------------------------------
 
+// A single OpenRouter call should always return well under this for our prompt
+// and output sizes. The per-attempt cap turns a stuck connection into a
+// retriable error instead of a request that hangs until the reverse proxy gives
+// up (which the user only ever sees as a generic 504). The overall budget is
+// enforced one layer up, in callStructured (src/lib/llm/index.ts).
+const PER_ATTEMPT_TIMEOUT_MS = 45_000;
+
 async function postChat(
   apiKey: string,
   body: Record<string, unknown>,
@@ -96,6 +103,11 @@ async function postChat(
   const maxAttempts = 4;
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Abort this attempt if the caller's signal fires (overall deadline / the
+    // user navigating away) OR our own per-attempt timeout trips.
+    const attemptSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(PER_ATTEMPT_TIMEOUT_MS)])
+      : AbortSignal.timeout(PER_ATTEMPT_TIMEOUT_MS);
     try {
       const res = await fetch(OPENROUTER_CHAT_URL, {
         method: "POST",
@@ -106,7 +118,7 @@ async function postChat(
           "X-Title": TITLE,
         },
         body: JSON.stringify(body),
-        signal,
+        signal: attemptSignal,
       });
 
       if (!res.ok) {
@@ -133,8 +145,19 @@ async function postChat(
       }
       return json;
     } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") throw e;
-      lastErr = e;
+      // The CALLER aborted (overall deadline reached, or the request was
+      // cancelled) → stop the whole cascade, don't keep retrying.
+      if (signal?.aborted) throw e;
+      // Our per-attempt timeout (TimeoutError) or a transient network error is
+      // retriable — fall through to the next attempt.
+      const isTimeout =
+        e instanceof Error &&
+        (e.name === "TimeoutError" || e.name === "AbortError");
+      lastErr = isTimeout
+        ? new OpenRouterError(
+            `OpenRouter no respondió en ${PER_ATTEMPT_TIMEOUT_MS / 1000}s`
+          )
+        : e;
       if (attempt < maxAttempts - 1) {
         await sleep(backoffMs(attempt));
         continue;

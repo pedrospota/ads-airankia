@@ -1460,7 +1460,12 @@ function AgentSummary({
 }) {
   const out = (step.userOverride ?? step.output) as unknown;
   const lines = summarizeAgent(agent, out);
-  if (lines.length === 0) {
+  // For the keyword step, show the full expandable list under the summary.
+  const keywordDetail =
+    agent === "keyword_researcher" && isRecord(out)
+      ? (out as unknown as KeywordResearchOutput)
+      : null;
+  if (lines.length === 0 && !keywordDetail) {
     if (!step.rationale) return null;
     return <p style={styles.summary}>{step.rationale}</p>;
   }
@@ -1471,6 +1476,102 @@ function AgentSummary({
           {l}
         </div>
       ))}
+      {keywordDetail && <KeywordDetails data={keywordDetail} colors={colors} />}
+    </div>
+  );
+}
+
+// Full, expandable keyword + negative list for the keyword step. Pedro asked to
+// see EVERY keyword (not just a handful of examples), so the whole list is here
+// behind one click — the timeline stays compact until you want the detail.
+function KeywordDetails({
+  data,
+  colors,
+}: {
+  data: KeywordResearchOutput;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const [open, setOpen] = useState(false);
+  const keywords = data.keywords ?? [];
+  const negatives = data.negatives ?? [];
+  if (keywords.length === 0 && negatives.length === 0) return null;
+
+  const chip = (text: string, kind: "kw" | "neg") => (
+    <span
+      key={kind + text}
+      style={{
+        display: "inline-block",
+        fontSize: 12,
+        padding: "3px 9px",
+        borderRadius: 99,
+        margin: "0 6px 6px 0",
+        background:
+          kind === "kw" ? "rgba(16,185,129,0.10)" : "rgba(248,113,113,0.10)",
+        border: `1px solid ${
+          kind === "kw" ? "rgba(16,185,129,0.3)" : "rgba(248,113,113,0.3)"
+        }`,
+        color: colors.text,
+        wordBreak: "break-word",
+      }}
+    >
+      {text}
+    </span>
+  );
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          color: colors.accent,
+          fontSize: 12.5,
+          fontWeight: 600,
+          textDecoration: "underline",
+        }}
+      >
+        {open
+          ? "Ocultar la lista completa"
+          : `Ver la lista completa (${keywords.length + negatives.length})`}
+      </button>
+      {open && (
+        <div style={{ marginTop: 10, maxHeight: 320, overflow: "auto" }}>
+          {keywords.length > 0 && (
+            <div style={{ marginBottom: negatives.length ? 14 : 0 }}>
+              <p
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: colors.textMuted,
+                  marginBottom: 6,
+                }}
+              >
+                🔑 Palabras por las que aparecerás ({keywords.length})
+              </p>
+              <div>{keywords.map((k) => chip(k.text, "kw"))}</div>
+            </div>
+          )}
+          {negatives.length > 0 && (
+            <div>
+              <p
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: colors.textMuted,
+                  marginBottom: 6,
+                }}
+              >
+                🚫 Palabras que evitaremos ({negatives.length})
+              </p>
+              <div>{negatives.map((n) => chip(n.text, "neg"))}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2085,8 +2186,8 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
         lines.push(`🔑 ${o.keywords.length} palabras clave encontradas`);
       if (o.negatives?.length)
         lines.push(`🚫 ${o.negatives.length} palabras a evitar`);
-      const sample = o.keywords?.slice(0, 4).map((k) => k.text);
-      if (sample?.length) lines.push(`Ejemplos: ${sample.join(", ")}`);
+      // The full, scrollable list is rendered separately by <KeywordDetails>
+      // (Pedro asked to see EVERY keyword, not just a few examples).
       return lines;
     }
     case "structure_architect": {

@@ -68,10 +68,24 @@ export function defaultAnthropicModel(agentId: AgentId): string {
   return TIER[agentId] === "opus" ? MODELS.opus : MODELS.sonnet;
 }
 
+// Bound the WHOLE structured call (all fallback strategies + their retries).
+// The /advance and /suggest requests run behind a reverse proxy that gives up
+// around ~100s; a slow or looping provider must fail fast and cleanly — with a
+// real Spanish message — well before that, instead of letting the request hang
+// into a generic 504 the user can do nothing about. Leaves headroom for the
+// surrounding work in a step (e.g. the Google Ads keyword call in A2).
+const LLM_DEADLINE_MS = 70_000;
+
 export async function callStructured<T>(
   p: UnifiedStructuredParams
 ): Promise<UnifiedStructuredResult<T>> {
   const config = await getLlmConfig();
+
+  // Abort on whichever fires first: our overall deadline, or a caller signal
+  // (component unmount / cancel). `deadline.aborted` lets us tell the two apart
+  // so a timeout reads as a friendly "tardó demasiado", not a raw AbortError.
+  const deadline = AbortSignal.timeout(LLM_DEADLINE_MS);
+  const signal = p.signal ? AbortSignal.any([p.signal, deadline]) : deadline;
 
   if (config.provider === "openrouter") {
     const model = config.perAgent?.[p.agentId] ?? config.defaultModel;
@@ -97,10 +111,15 @@ export async function callStructured<T>(
         toolDescription: p.toolDescription,
         maxTokens: p.maxTokens,
         temperature: p.temperature,
-        signal: p.signal,
+        signal,
       });
       return { ...r, model, provider: "openrouter" };
     } catch (e) {
+      if (deadline.aborted) {
+        throw new LLMError(
+          "La IA tardó demasiado en responder. Espera unos segundos y vuelve a intentarlo."
+        );
+      }
       if (e instanceof Error && e.name === "AbortError") throw e;
       throw new LLMError(
         e instanceof Error ? e.message : "Fallo llamando a OpenRouter"
@@ -120,10 +139,15 @@ export async function callStructured<T>(
       toolDescription: p.toolDescription,
       maxTokens: p.maxTokens,
       temperature: p.temperature,
-      signal: p.signal,
+      signal,
     });
     return { ...r, model, provider: "anthropic" };
   } catch (e) {
+    if (deadline.aborted) {
+      throw new LLMError(
+        "La IA tardó demasiado en responder. Espera unos segundos y vuelve a intentarlo."
+      );
+    }
     if (e instanceof Error && e.name === "AbortError") throw e;
     if (e instanceof AnthropicError) throw new LLMError(e.message);
     throw e;

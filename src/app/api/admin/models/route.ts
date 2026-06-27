@@ -47,7 +47,7 @@ export async function GET() {
         error:
           e instanceof Error
             ? e.message
-            : "No se pudo obtener la lista de modelos de OpenRouter",
+            : "Couldn't fetch the OpenRouter model list",
       },
       { status: 502 }
     );

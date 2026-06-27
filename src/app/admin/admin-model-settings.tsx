@@ -87,6 +87,180 @@ function optionLabel(m: ORModel): string {
 }
 
 // ----------------------------------------------------------------------------
+// Curated "top models" — surfaces the flagship + a cheap/fast pick per family,
+// computed LIVE from the OpenRouter catalogue (no hardcoded slugs, so prices and
+// new releases stay current). The families that matter here: Claude, Gemini,
+// GPT, and the top Chinese / open models (GLM, Kimi, DeepSeek, Qwen) + Grok.
+// ----------------------------------------------------------------------------
+
+const FAMILIES: { key: string; label: string; match: (m: ORModel) => boolean }[] = [
+  { key: "claude", label: "Claude · Anthropic", match: (m) => m.id.startsWith("anthropic/") },
+  { key: "gemini", label: "Gemini · Google", match: (m) => m.id.startsWith("google/") && m.id.toLowerCase().includes("gemini") },
+  { key: "gpt", label: "ChatGPT · OpenAI", match: (m) => m.id.startsWith("openai/") },
+  { key: "glm", label: "GLM · Z.ai", match: (m) => m.id.startsWith("z-ai/") },
+  { key: "kimi", label: "Kimi · Moonshot", match: (m) => m.id.startsWith("moonshotai/") || m.id.toLowerCase().includes("kimi") },
+  { key: "deepseek", label: "DeepSeek", match: (m) => m.id.startsWith("deepseek/") },
+  { key: "qwen", label: "Qwen · Alibaba", match: (m) => m.id.startsWith("qwen/") },
+  { key: "grok", label: "Grok · xAI", match: (m) => m.id.startsWith("x-ai/") },
+];
+
+const FAST_RE = /flash|mini|air|turbo|haiku|lite|nano|fast|small/i;
+const SLOW_RE = /think|reason|reasoner|\br1\b/i;
+
+function speedTag(m: ORModel): { label: string; color: string } | null {
+  const s = `${m.id} ${m.name}`;
+  if (FAST_RE.test(s)) return { label: "⚡ fast", color: "#4ADE80" };
+  if (SLOW_RE.test(s)) return { label: "🧠 reasoning · slower", color: "#FBBF24" };
+  return null;
+}
+
+/** Newest 2 + cheapest tool-capable model in each family (deduped, max 3). */
+function curateFamily(models: ORModel[], fam: (typeof FAMILIES)[number]): ORModel[] {
+  const inFam = models.filter((m) => fam.match(m) && m.supportsTools);
+  const newest = inFam.slice(0, 2); // models arrive globally sorted newest-first
+  const cheapest = inFam
+    .filter((m) => m.completionPrice != null)
+    .sort((a, b) => (a.completionPrice ?? 0) - (b.completionPrice ?? 0))[0];
+  const picked = [...newest];
+  if (cheapest && !picked.some((m) => m.id === cheapest.id)) picked.push(cheapest);
+  return picked;
+}
+
+function CuratedModels({
+  models,
+  value,
+  onPick,
+}: {
+  models: ORModel[];
+  value: string;
+  onPick: (id: string) => void;
+}) {
+  const groups = useMemo(
+    () =>
+      FAMILIES.map((fam) => {
+        const picks = curateFamily(models, fam);
+        const min = Math.min(
+          ...picks.map((m) => m.completionPrice ?? Number.POSITIVE_INFINITY)
+        );
+        return { fam, picks, min };
+      }).filter((g) => g.picks.length > 0),
+    [models]
+  );
+
+  if (!models.length) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      {groups.map(({ fam, picks, min }) => (
+        <div key={fam.key}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              opacity: 0.5,
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              marginBottom: 6,
+            }}
+          >
+            {fam.label}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
+              gap: 8,
+            }}
+          >
+            {picks.map((m) => {
+              const selected = m.id === value;
+              const sp = speedTag(m);
+              const cheap =
+                picks.length > 1 &&
+                m.completionPrice != null &&
+                m.completionPrice === min;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => onPick(m.id)}
+                  title={m.id}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    background: selected
+                      ? "rgba(99,102,241,0.18)"
+                      : "rgba(255,255,255,0.03)",
+                    border: `1px solid ${
+                      selected ? "#6366F1" : "rgba(255,255,255,0.1)"
+                    }`,
+                    color: "#FAFAFA",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      marginBottom: 4,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 6,
+                    }}
+                  >
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {m.name}
+                    </span>
+                    {selected && <span style={{ color: "#A5B4FC" }}>✓</span>}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>
+                    {priceShort(m) || "price n/a"}
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {sp && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: sp.color,
+                          border: `1px solid ${sp.color}33`,
+                          borderRadius: 999,
+                          padding: "1px 7px",
+                        }}
+                      >
+                        {sp.label}
+                      </span>
+                    )}
+                    {cheap && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: "#7DD3FC",
+                          border: "1px solid #7DD3FC33",
+                          borderRadius: 999,
+                          padding: "1px 7px",
+                        }}
+                      >
+                        💲 cheapest
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
 // Reusable model picker (search box + native select)
 // ----------------------------------------------------------------------------
 
@@ -180,6 +354,7 @@ export function AdminModelSettings() {
   const [modelsLoading, setModelsLoading] = useState(false);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAllModels, setShowAllModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
@@ -391,9 +566,25 @@ export function AdminModelSettings() {
               Default model
             </h2>
             <p style={{ opacity: 0.5, fontSize: 13, marginBottom: 12 }}>
-              All the agents use it unless you set a different one below. The
-              🔧 icon means the model supports tools (recommended).
+              Pick one of the top models below — all the agents use it unless you
+              set a different one per agent further down. Prices are per 1M
+              tokens (input / output). 🔧 means it supports tools.
             </p>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#A5B4FC",
+                background: "rgba(99,102,241,0.08)",
+                border: "1px solid rgba(99,102,241,0.2)",
+                borderRadius: 8,
+                padding: "8px 10px",
+                marginBottom: 14,
+              }}
+            >
+              Tip: the first step (the strategist) is the heaviest, so very large
+              “reasoning” models can hit the time limit. For reliable runs prefer
+              a ⚡ fast model (e.g. a Flash / Sonnet / Air / Turbo variant).
+            </div>
 
             {modelsLoading && (
               <div style={{ opacity: 0.5, fontSize: 13, marginBottom: 8 }}>
@@ -412,12 +603,39 @@ export function AdminModelSettings() {
               </div>
             )}
 
-            <ModelSelect
-              value={defaultModel}
-              onChange={setDefaultModel}
+            <CuratedModels
               models={models}
-              showChips
+              value={defaultModel}
+              onPick={(id) => {
+                setProvider("openrouter");
+                setDefaultModel(id);
+              }}
             />
+
+            <button
+              onClick={() => setShowAllModels((s) => !s)}
+              style={{
+                marginTop: 14,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                color: "#A5B4FC",
+              }}
+            >
+              {showAllModels
+                ? "▾ Hide full list"
+                : "▸ Browse all models (search the full catalogue)"}
+            </button>
+            {showAllModels && (
+              <div style={{ marginTop: 12 }}>
+                <ModelSelect
+                  value={defaultModel}
+                  onChange={setDefaultModel}
+                  models={models}
+                  showChips
+                />
+              </div>
+            )}
 
             {selectedModel && !selectedModel.supportsTools && (
               <div
@@ -436,7 +654,20 @@ export function AdminModelSettings() {
                 one with 🔧.
               </div>
             )}
-            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.45 }}>
+            <div style={{ marginTop: 10, fontSize: 12 }}>
+              {defaultModel ? (
+                <span style={{ color: "#4ADE80" }}>
+                  ● Selected:{" "}
+                  <strong>{selectedModel ? selectedModel.name : defaultModel}</strong>
+                  {selectedModel && priceShort(selectedModel)
+                    ? ` · ${priceShort(selectedModel)}`
+                    : ""}
+                </span>
+              ) : (
+                <span style={{ color: "#FBBF24" }}>● No model selected yet</span>
+              )}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.45 }}>
               {models.length > 0
                 ? `${models.length} models available · sorted from newest to oldest`
                 : ""}

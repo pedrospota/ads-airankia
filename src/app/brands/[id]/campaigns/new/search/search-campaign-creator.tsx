@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import Link from "next/link";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
@@ -10,7 +17,10 @@ import {
   type ActivateResponse,
   type AdGroupAds,
   type AgentId,
+  type KeywordIdea,
   type KeywordResearchOutput,
+  type MatchType,
+  type NegativeKeywordIdea,
   type ObjectiveType,
   type PlannerOutput,
   type QAOutput,
@@ -1710,6 +1720,391 @@ function KeywordDetails({
   );
 }
 
+// Match-type options shared by the keyword editor (plain labels, no jargon).
+const MATCH_OPTIONS: { value: MatchType; label: string }[] = [
+  { value: "PHRASE", label: "Phrase" },
+  { value: "EXACT", label: "Exact" },
+  { value: "BROAD", label: "Broad" },
+];
+
+// Friendly, NO-JSON editor for the keyword step. The AI already chose every
+// keyword; this just lets a non-expert tweak the text, switch the match type with
+// a dropdown, remove, or add — with one click. Edits flow up via onChange so the
+// parent sends them as the step's userOverride. A newly-added keyword inherits a
+// real theme/intent from an existing one so the next step (which groups keywords
+// by theme) never silently drops it.
+function KeywordEditor({
+  value,
+  colors,
+  styles,
+  onChange,
+}: {
+  value: KeywordResearchOutput;
+  colors: ReturnType<typeof useTheme>["colors"];
+  styles: Styles;
+  onChange: (v: KeywordResearchOutput) => void;
+}) {
+  const [kws, setKws] = useState<KeywordIdea[]>(() => value.keywords ?? []);
+  const [negs, setNegs] = useState<NegativeKeywordIdea[]>(
+    () => value.negatives ?? []
+  );
+
+  function commit(nextKws: KeywordIdea[], nextNegs: NegativeKeywordIdea[]) {
+    setKws(nextKws);
+    setNegs(nextNegs);
+    onChange({ ...value, keywords: nextKws, negatives: nextNegs });
+  }
+
+  function addKw() {
+    const base = kws[0];
+    commit(
+      [
+        ...kws,
+        {
+          text: "",
+          matchType: "PHRASE",
+          theme: base?.theme ?? "",
+          intent: base?.intent ?? "commercial",
+          source: "manual",
+        },
+      ],
+      negs
+    );
+  }
+  function addNeg() {
+    const base = negs[0];
+    commit(kws, [
+      ...negs,
+      {
+        text: "",
+        matchType: "PHRASE",
+        negativeClass: base?.negativeClass ?? "wrong_intent",
+      },
+    ]);
+  }
+
+  const rowStyle: CSSProperties = {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    marginBottom: 8,
+  };
+  const matchSelect: CSSProperties = {
+    ...styles.inp,
+    width: 104,
+    flex: "0 0 auto",
+    padding: "8px 10px",
+  };
+  const textInput: CSSProperties = { ...styles.inp, flex: 1, minWidth: 0 };
+  const removeBtn: CSSProperties = {
+    flex: "0 0 auto",
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    cursor: "pointer",
+    background: "transparent",
+    border: `1px solid ${colors.border}`,
+    color: "#F87171",
+    fontSize: 18,
+    lineHeight: 1,
+  };
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <p style={{ ...styles.lbl, marginBottom: 8 }}>
+        🔑 Keywords you&apos;ll show up for ({kws.length})
+      </p>
+      <div style={{ maxHeight: 280, overflow: "auto", paddingRight: 4 }}>
+        {kws.map((k, i) => (
+          <div key={i} style={rowStyle}>
+            <input
+              value={k.text}
+              onChange={(e) =>
+                commit(
+                  kws.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)),
+                  negs
+                )
+              }
+              style={textInput}
+              placeholder="keyword"
+            />
+            <select
+              value={k.matchType}
+              onChange={(e) =>
+                commit(
+                  kws.map((x, j) =>
+                    j === i ? { ...x, matchType: e.target.value as MatchType } : x
+                  ),
+                  negs
+                )
+              }
+              style={matchSelect}
+              aria-label="Match type"
+            >
+              {MATCH_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => commit(kws.filter((_, j) => j !== i), negs)}
+              style={removeBtn}
+              aria-label="Remove keyword"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={addKw} style={{ ...styles.ghostBtn, marginTop: 4 }}>
+        + Add keyword
+      </button>
+
+      <p style={{ ...styles.lbl, marginTop: 18, marginBottom: 8 }}>
+        🚫 Keywords we&apos;ll avoid ({negs.length})
+      </p>
+      <div style={{ maxHeight: 200, overflow: "auto", paddingRight: 4 }}>
+        {negs.map((n, i) => (
+          <div key={i} style={rowStyle}>
+            <input
+              value={n.text}
+              onChange={(e) =>
+                commit(
+                  kws,
+                  negs.map((x, j) => (j === i ? { ...x, text: e.target.value } : x))
+                )
+              }
+              style={textInput}
+              placeholder="keyword to avoid"
+            />
+            <select
+              value={n.matchType}
+              onChange={(e) =>
+                commit(
+                  kws,
+                  negs.map((x, j) =>
+                    j === i ? { ...x, matchType: e.target.value as MatchType } : x
+                  )
+                )
+              }
+              style={matchSelect}
+              aria-label="Match type"
+            >
+              {MATCH_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => commit(kws, negs.filter((_, j) => j !== i))}
+              style={removeBtn}
+              aria-label="Remove keyword to avoid"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={addNeg} style={{ ...styles.ghostBtn, marginTop: 4 }}>
+        + Add a keyword to avoid
+      </button>
+      <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 10 }}>
+        Match type: <strong>Phrase</strong> and <strong>Exact</strong> keep you
+        tightly on-topic; <strong>Broad</strong> reaches more but needs results
+        data first.
+      </p>
+    </div>
+  );
+}
+
+// Friendly, NO-JSON editor for the ads (RSA) step: edit each headline and
+// description's text inline, with a live character counter and Google's limits
+// enforced (15 headlines max / 90-char descriptions, etc.). Pinning, paths and
+// the destination URL are preserved untouched. Edits flow up via onChange.
+function RsaEditor({
+  value,
+  colors,
+  styles,
+  onChange,
+}: {
+  value: RSAOutput;
+  colors: ReturnType<typeof useTheme>["colors"];
+  styles: Styles;
+  onChange: (v: RSAOutput) => void;
+}) {
+  const [ads, setAds] = useState<AdGroupAds[]>(() => value.ads ?? []);
+
+  function commit(next: AdGroupAds[]) {
+    setAds(next);
+    onChange({ ...value, ads: next });
+  }
+  function updateAd(ai: number, patch: Partial<AdGroupAds>) {
+    commit(ads.map((a, j) => (j === ai ? { ...a, ...patch } : a)));
+  }
+
+  const HEADLINE_MAX = 30;
+  const DESC_MAX = 90;
+  const rowStyle: CSSProperties = {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    marginBottom: 8,
+  };
+  const removeBtn: CSSProperties = {
+    flex: "0 0 auto",
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    cursor: "pointer",
+    background: "transparent",
+    border: `1px solid ${colors.border}`,
+    color: "#F87171",
+    fontSize: 18,
+    lineHeight: 1,
+  };
+  const counter = (len: number, max: number): CSSProperties => ({
+    flex: "0 0 auto",
+    width: 48,
+    textAlign: "right",
+    fontSize: 11,
+    color: len > max ? "#F87171" : colors.textFaint,
+  });
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {ads.map((ad, ai) => (
+        <div
+          key={ai}
+          style={{
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 12,
+            marginBottom: 12,
+          }}
+        >
+          <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+            {ad.adGroupName}
+          </p>
+
+          <p style={{ ...styles.lbl, marginBottom: 8 }}>
+            Headlines ({ad.headlines.length}/15)
+          </p>
+          {ad.headlines.map((h, hi) => (
+            <div key={hi} style={rowStyle}>
+              <input
+                value={h.text}
+                maxLength={HEADLINE_MAX}
+                onChange={(e) =>
+                  updateAd(ai, {
+                    headlines: ad.headlines.map((x, j) =>
+                      j === hi ? { ...x, text: e.target.value } : x
+                    ),
+                  })
+                }
+                style={{ ...styles.inp, flex: 1, minWidth: 0 }}
+                placeholder="headline"
+              />
+              <span style={counter(h.text.length, HEADLINE_MAX)}>
+                {h.text.length}/{HEADLINE_MAX}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  ad.headlines.length > 3 &&
+                  updateAd(ai, {
+                    headlines: ad.headlines.filter((_, j) => j !== hi),
+                  })
+                }
+                disabled={ad.headlines.length <= 3}
+                style={{
+                  ...removeBtn,
+                  opacity: ad.headlines.length <= 3 ? 0.35 : 1,
+                  cursor: ad.headlines.length <= 3 ? "not-allowed" : "pointer",
+                }}
+                aria-label="Remove headline"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {ad.headlines.length < 15 && (
+            <button
+              type="button"
+              onClick={() =>
+                updateAd(ai, {
+                  headlines: [...ad.headlines, { text: "" }],
+                })
+              }
+              style={{ ...styles.ghostBtn, marginTop: 2, marginBottom: 6 }}
+            >
+              + Add headline
+            </button>
+          )}
+
+          <p style={{ ...styles.lbl, marginTop: 12, marginBottom: 8 }}>
+            Descriptions ({ad.descriptions.length}/4)
+          </p>
+          {ad.descriptions.map((d, di) => (
+            <div key={di} style={rowStyle}>
+              <input
+                value={d.text}
+                maxLength={DESC_MAX}
+                onChange={(e) =>
+                  updateAd(ai, {
+                    descriptions: ad.descriptions.map((x, j) =>
+                      j === di ? { ...x, text: e.target.value } : x
+                    ),
+                  })
+                }
+                style={{ ...styles.inp, flex: 1, minWidth: 0 }}
+                placeholder="description"
+              />
+              <span style={counter(d.text.length, DESC_MAX)}>
+                {d.text.length}/{DESC_MAX}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  ad.descriptions.length > 2 &&
+                  updateAd(ai, {
+                    descriptions: ad.descriptions.filter((_, j) => j !== di),
+                  })
+                }
+                disabled={ad.descriptions.length <= 2}
+                style={{
+                  ...removeBtn,
+                  opacity: ad.descriptions.length <= 2 ? 0.35 : 1,
+                  cursor: ad.descriptions.length <= 2 ? "not-allowed" : "pointer",
+                }}
+                aria-label="Remove description"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {ad.descriptions.length < 4 && (
+            <button
+              type="button"
+              onClick={() =>
+                updateAd(ai, {
+                  descriptions: [...ad.descriptions, { text: "" }],
+                })
+              }
+              style={{ ...styles.ghostBtn, marginTop: 2 }}
+            >
+              + Add description
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ASISTIDO inline approval: friendly fields for the planner, textarea fallback
 // for the rest.
 function ApprovalBlock({
@@ -1747,6 +2142,17 @@ function ApprovalBlock({
   const [language, setLanguage] = useState<string>(
     planner?.geo?.languageCode?.toLowerCase() ?? "",
   );
+
+  // Friendly, no-JSON editors for the two steps a user most wants to tweak:
+  // the keyword list and the ad copy. The AI already filled both; this just
+  // makes editing one-click (a dropdown + text fields) instead of touching JSON.
+  const isKeyword = step.agent === "keyword_researcher";
+  const isRsa = step.agent === "rsa_copywriter";
+  const canEditFriendly = isKeyword || isRsa;
+  const [showEditor, setShowEditor] = useState(false);
+  // Holds the user's edits (full output object) so they ride along as the
+  // step's userOverride on accept. Null until they actually change something.
+  const [editedOutput, setEditedOutput] = useState<unknown>(null);
 
   // Generic "Ajustar" fallback (editable JSON-ish textarea) for other steps.
   const [editing, setEditing] = useState(false);
@@ -1806,6 +2212,12 @@ function ApprovalBlock({
         },
       };
       cb(step.id, override);
+      return;
+    }
+    // Friendly editors (keywords / ad copy): if the user changed anything, send
+    // their edited version as the override; otherwise accept the AI's output.
+    if (canEditFriendly && editedOutput != null) {
+      cb(step.id, editedOutput);
       return;
     }
     cb(step.id);
@@ -1928,6 +2340,38 @@ function ApprovalBlock({
         </div>
       )}
 
+      {canEditFriendly && !editing && (
+        <div style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => setShowEditor((v) => !v)}
+            style={{ ...styles.ghostBtn, marginBottom: showEditor ? 12 : 0 }}
+          >
+            {showEditor
+              ? "✓ Done editing"
+              : isKeyword
+                ? "✏️ Edit keywords"
+                : "✏️ Edit the ads"}
+          </button>
+          {showEditor && isKeyword && isRecord(out) && (
+            <KeywordEditor
+              value={out as unknown as KeywordResearchOutput}
+              colors={colors}
+              styles={styles}
+              onChange={setEditedOutput}
+            />
+          )}
+          {showEditor && isRsa && isRecord(out) && (
+            <RsaEditor
+              value={out as unknown as RSAOutput}
+              colors={colors}
+              styles={styles}
+              onChange={setEditedOutput}
+            />
+          )}
+        </div>
+      )}
+
       {editing && (
         <div style={{ marginBottom: 12 }}>
           <label style={styles.lbl}>Settings (advanced)</label>
@@ -1968,7 +2412,13 @@ function ApprovalBlock({
         </button>
       </div>
       <div style={{ marginTop: 8 }}>
-        {!isPlanner && (
+        {canEditFriendly && (
+          <span style={{ fontSize: 11.5, color: colors.textFaint }}>
+            {isKeyword ? "Edit keywords" : "Edit the ads"} above with one click,
+            or just accept what the AI prepared.{" "}
+          </span>
+        )}
+        {!isPlanner && !canEditFriendly && (
           <span style={{ fontSize: 11.5, color: colors.textFaint }}>
             Want to change it? Press “Start over” and adjust your details; the AI
             will redo it for you.{" "}

@@ -610,11 +610,20 @@ function clamp(s: string | undefined | null, max: number): string {
 }
 
 // Structured-snippet headers are validated by Google per campaign language. We
-// only emit a snippet for languages whose canonical header we know for certain;
-// any other language simply skips the snippet (the other assets still apply).
+// only emit a snippet for languages whose canonical "Services" header we know
+// for certain; any other language simply skips the snippet (the other assets
+// still apply). A wrong header is REJECTED by Google but our caller isolates the
+// snippet in its own try/catch, so an unknown language degrades to "no snippet"
+// exactly like before — never blocking the campaign. Expanded beyond es/en so
+// brands in other European languages also get a snippet (most brands here are
+// NOT English/Spanish, so es/en-only left the majority with no snippet at all).
 const SNIPPET_HEADERS: Record<string, string> = {
   es: "Servicios",
   en: "Services",
+  pt: "Serviços",
+  fr: "Services",
+  it: "Servizi",
+  de: "Dienstleistungen",
 };
 
 /**
@@ -888,6 +897,33 @@ async function activate(
       agent: AGENT_ID,
       summary: detection.rationale,
     });
+  }
+
+  // --- STRATEGIC MATCH-TYPE GUARD (concordancias) ---------------------------
+  // The keyword agents assign BROAD only "when Smart Bidding is on" — but at that
+  // point they only see the planner's HINT, not the bidding the account can
+  // actually support. The REAL strategy is decided here (effectiveStrategy). If
+  // the account can't run Smart Bidding yet (R1/R2 → Maximize Clicks, no
+  // conversion signal), BROAD without conversion data is a known budget-waster,
+  // so we demote BROAD → PHRASE before pushing to Google. This makes the
+  // match-type strategy honest end-to-end instead of intent-only. It NEVER
+  // widens a match type — only ever narrows BROAD→PHRASE; EXACT/PHRASE untouched.
+  const demoteBroad = !isConversionStrategy(effectiveStrategy);
+  const effMatchType = (
+    mt: PlannedKeyword["matchType"]
+  ): PlannedKeyword["matchType"] =>
+    demoteBroad && mt === "BROAD" ? "PHRASE" : mt;
+  if (demoteBroad && !campaignAlreadyCreated) {
+    const hasBroad = plan.adGroups.some(({ group }) =>
+      group.keywords.some((k) => k.matchType === "BROAD")
+    );
+    if (hasBroad) {
+      await helpers.emit("decision", {
+        agent: AGENT_ID,
+        summary:
+          "Until your account has conversion data, we use tighter keyword matching (no broad match) so your budget only goes to closely-matching searches. Once results start coming in, the campaign can widen matching on its own.",
+      });
+    }
   }
 
   // --- (1) Budget -----------------------------------------------------------
@@ -1182,7 +1218,10 @@ async function activate(
           create: {
             adGroup: agResourceName,
             status: "ENABLED",
-            keyword: { text: kw.text, matchType: matchTypeEnum(kw.matchType) },
+            keyword: {
+              text: kw.text,
+              matchType: matchTypeEnum(effMatchType(kw.matchType)),
+            },
           },
         })),
       });
@@ -1191,11 +1230,15 @@ async function activate(
       );
 
       // Mark the matching keyword rows as live (by ad_group + text + matchType).
+      // When the strategic guard demoted BROAD→PHRASE, persist the EFFECTIVE
+      // match type onto the row too, so the database mirrors exactly what was
+      // pushed to Google (no row left claiming BROAD when PHRASE was created).
       if (adGroupDbId) {
         for (const kw of group.keywords) {
+          const eff = effMatchType(kw.matchType);
           await adsDb
             .update(keywords)
-            .set({ status: "live" })
+            .set(eff === kw.matchType ? { status: "live" } : { status: "live", matchType: eff })
             .where(
               and(
                 eq(keywords.adGroupId, adGroupDbId),

@@ -11,6 +11,7 @@ import {
   type AdGroupAds,
   type AgentId,
   type KeywordResearchOutput,
+  type ObjectiveType,
   type PlannerOutput,
   type QAOutput,
   type RunMode,
@@ -1285,6 +1286,27 @@ const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_LABELS).map(([code, name]) => (
   name,
 }));
 
+// ── Objetivo de la campaña: nombres amables en español ───────────────────────
+// La IA elige el objetivo por defecto según la web de la marca; aquí solo lo
+// enseñamos claro y dejamos que el usuario lo cambie con un clic si quiere.
+// Las claves coinciden con ObjectiveType de src/lib/engine/types.ts.
+const OBJECTIVE_LABELS: Record<ObjectiveType, string> = {
+  leads: "Conseguir contactos (clientes potenciales)",
+  sales: "Vender o conseguir compras en tu web",
+  calls: "Recibir llamadas de teléfono",
+  traffic: "Llevar más visitas a tu web",
+  awareness: "Dar a conocer tu marca",
+};
+
+function objectiveLabel(type?: string): string {
+  const t = (type ?? "").toLowerCase();
+  return OBJECTIVE_LABELS[t as ObjectiveType] ?? (type || "—");
+}
+
+const OBJECTIVE_OPTIONS = Object.entries(OBJECTIVE_LABELS).map(
+  ([code, name]) => ({ code, name }),
+);
+
 // Prominent "this is the country/language we'll target" banner, shown at the
 // very top of the run so the user SEES it before the heavy steps run (Pedro
 // asked to show the country up front, per brand). It reads the planner's geo,
@@ -1716,6 +1738,10 @@ function ApprovalBlock({
   const [objective, setObjective] = useState<string>(
     planner?.objectiveSummary ?? "",
   );
+  // Objetivo de la campaña: la IA lo eligió; aquí dejamos cambiarlo con un clic.
+  const [objectiveType, setObjectiveType] = useState<string>(
+    planner?.objectiveType?.toLowerCase() ?? "",
+  );
   // País + idioma: la IA ya los eligió; aquí solo dejamos cambiarlos con un clic.
   const [country, setCountry] = useState<string>(
     planner?.geo?.countryCodes?.[0]?.toUpperCase() ?? "",
@@ -1763,6 +1789,8 @@ function ApprovalBlock({
       }
       const override: PlannerOutput = {
         ...planner,
+        objectiveType:
+          (objectiveType as ObjectiveType) || planner.objectiveType,
         objectiveSummary: objective.trim() || planner.objectiveSummary,
         geo: {
           ...planner.geo,
@@ -1806,8 +1834,32 @@ function ApprovalBlock({
       {isPlanner && planner && !editing && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
           <div>
+            <label htmlFor="planner-objective-type" style={styles.lbl}>
+              ¿Qué quieres conseguir?
+            </label>
+            <select
+              id="planner-objective-type"
+              value={objectiveType}
+              onChange={(e) => setObjectiveType(e.target.value)}
+              style={styles.inp}
+            >
+              {objectiveType && !OBJECTIVE_LABELS[objectiveType as ObjectiveType] && (
+                <option value={objectiveType}>{objectiveType}</option>
+              )}
+              {OBJECTIVE_OPTIONS.map((o) => (
+                <option key={o.code} value={o.code}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6 }}>
+              La IA eligió esto por ti mirando tu web. Si lo cambias, ajustará
+              los anuncios y la forma de pujar para ese objetivo.
+            </p>
+          </div>
+          <div>
             <label htmlFor="planner-objective" style={styles.lbl}>
-              Tu objetivo
+              En tus palabras (opcional)
             </label>
             <textarea
               id="planner-objective"
@@ -2354,7 +2406,9 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
     case "planner": {
       const o = out as Partial<PlannerOutput>;
       const lines: string[] = [];
-      if (o.objectiveSummary) lines.push(`🎯 ${o.objectiveSummary}`);
+      if (o.objectiveType)
+        lines.push(`🎯 Objetivo: ${objectiveLabel(o.objectiveType)}`);
+      if (o.objectiveSummary) lines.push(`💬 ${o.objectiveSummary}`);
       if (o.geo?.countryCodes?.length) {
         const c = countryLabel(o.geo.countryCodes[0]);
         const more = o.geo.countryCodes.length - 1;

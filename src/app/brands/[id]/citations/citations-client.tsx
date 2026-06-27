@@ -99,7 +99,7 @@ export function CitationsClient({ brand, citations, error }: { brand: Brand; cit
         action={(
           <div className="flex items-center gap-3">
             <a href={`/brands/${brand.id}/campaigns/new/choose`} style={{ padding: '8px 16px', borderRadius: 8, background: colors.accent, color: '#000', fontWeight: 600, fontSize: 13, textDecoration: 'none', display: 'inline-block' }}>
-              Crear campaña
+              Create campaign
             </a>
           </div>
         )} />

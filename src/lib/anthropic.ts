@@ -56,7 +56,7 @@ function apiKey(): string {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) {
     throw new AnthropicError(
-      "Falta ANTHROPIC_API_KEY en el servidor. Añade la clave para que los agentes puedan pensar."
+      "ANTHROPIC_API_KEY is missing on the server. Add the key so the agents can think."
     );
   }
   return key;
@@ -206,7 +206,7 @@ export async function callStructured<T>(
   const call = result.toolCalls.find((c) => c.name === params.toolName);
   if (!call) {
     throw new AnthropicError(
-      `El modelo no devolvió la herramienta ${params.toolName}. stop_reason=${result.stopReason}`
+      `The model didn't return the ${params.toolName} tool. stop_reason=${result.stopReason}`
     );
   }
 

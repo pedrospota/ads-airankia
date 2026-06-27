@@ -6,10 +6,10 @@ import { useRouter } from 'next/navigation'
 
 function traducirError(msg: string): string {
   const m = (msg || '').toLowerCase()
-  if (m.includes('invalid login credentials')) return 'Correo o contraseña incorrectos.'
-  if (m.includes('email not confirmed')) return 'Tu correo aún no está confirmado.'
-  if (m.includes('rate limit') || m.includes('too many')) return 'Demasiados intentos. Espera un momento e inténtalo otra vez.'
-  return 'No pudimos iniciar sesión. Inténtalo de nuevo.'
+  if (m.includes('invalid login credentials')) return 'Wrong email or password.'
+  if (m.includes('email not confirmed')) return 'Your email isn’t confirmed yet.'
+  if (m.includes('rate limit') || m.includes('too many')) return 'Too many tries. Wait a moment and try again.'
+  return 'We couldn’t log you in. Please try again.'
 }
 
 export default function LoginPage() {
@@ -48,35 +48,35 @@ export default function LoginPage() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
           <img src="/airankia-logo.png" alt="AI Rankia" style={{ height: 36, width: 'auto', marginBottom: 20, objectFit: 'contain' }} />
           <h1 style={{ fontSize: 22, fontWeight: 600, color: '#fff', letterSpacing: '-0.5px', margin: 0, lineHeight: 1.2 }}>
-            Plataforma de Anuncios
+            Ads Platform
           </h1>
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
-            de AI Rankia · Inicia sesión en tu espacio
+            by AI Rankia · Log in to your space
           </p>
         </div>
 
         <div style={{ background: '#1C1C23', border: '1px solid #38383F', borderRadius: 14, padding: '28px 28px 24px' }}>
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
-              <label htmlFor="login-email" style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)', marginBottom: 7, textTransform: 'uppercase' }}>Correo electrónico</label>
-              <input id="login-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="tucorreo@empresa.com"
+              <label htmlFor="login-email" style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)', marginBottom: 7, textTransform: 'uppercase' }}>Email</label>
+              <input id="login-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com"
                 style={{ width: '100%', background: '#0A0A0E', border: '1px solid #38383F', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#fff', outline: 'none', boxSizing: 'border-box' }} />
             </div>
             <div>
-              <label htmlFor="login-password" style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)', marginBottom: 7, textTransform: 'uppercase' }}>Contraseña</label>
+              <label htmlFor="login-password" style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)', marginBottom: 7, textTransform: 'uppercase' }}>Password</label>
               <input id="login-password" type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••"
                 style={{ width: '100%', background: '#0A0A0E', border: '1px solid #38383F', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#fff', outline: 'none', boxSizing: 'border-box' }} />
             </div>
             {error && <p role="alert" style={{ fontSize: 12, color: '#F87171', background: 'rgba(248,113,113,0.1)', padding: '8px 12px', borderRadius: 7, margin: 0 }}>{error}</p>}
             <button type="submit" disabled={loading}
               style={{ width: '100%', background: '#10B981', border: 'none', borderRadius: 8, padding: '11px', fontSize: 13, fontWeight: 600, color: '#000', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1, marginTop: 4 }}>
-              {loading ? 'Iniciando sesión…' : 'Iniciar sesión'}
+              {loading ? 'Logging in…' : 'Log in'}
             </button>
           </form>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '18px 0' }}>
             <div style={{ flex: 1, height: 1, background: '#38383F' }} />
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>o</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>or</span>
             <div style={{ flex: 1, height: 1, background: '#38383F' }} />
           </div>
 
@@ -88,12 +88,12 @@ export default function LoginPage() {
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-            Continuar con Google
+            Continue with Google
           </button>
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.2)', marginTop: 20 }}>
-          Crea tus anuncios de Google · Con tecnología de AI Rankia
+          Create your Google ads · Powered by AI Rankia
         </p>
       </div>
     </div>

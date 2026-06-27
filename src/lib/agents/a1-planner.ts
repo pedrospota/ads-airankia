@@ -80,7 +80,7 @@ const PLANNER_SCHEMA: Record<string, unknown> = {
     objectiveSummary: {
       type: "string",
       description:
-        "One plain-Spanish sentence summarising the objective for the user.",
+        "One plain, friendly sentence summarising the objective for the user, written in the brand's main language (the language whose code you put in geo.languageCode).",
     },
     geo: {
       type: "object",
@@ -123,7 +123,8 @@ const PLANNER_SCHEMA: Record<string, unknown> = {
         },
         rationale: {
           type: "string",
-          description: "Plain-Spanish justification of the daily budget.",
+          description:
+            "Plain, friendly justification of the daily budget, in the brand's main language.",
         },
       },
     },
@@ -160,7 +161,7 @@ const PLANNER_SCHEMA: Record<string, unknown> = {
           description: {
             type: "string",
             description:
-              "What searcher need this theme captures, in plain Spanish.",
+              "What searcher need this theme captures, in plain language (the brand's main language).",
           },
         },
       },
@@ -187,12 +188,12 @@ const PLANNER_SCHEMA: Record<string, unknown> = {
     brandSummary: {
       type: "string",
       description:
-        "2-4 sentence plain-Spanish summary of what the brand offers and to whom.",
+        "2-4 sentence plain summary of what the brand offers and to whom, in the brand's main language.",
     },
     rationale: {
       type: "string",
       description:
-        "Plain-Spanish explanation of the whole plan for a non-technical owner.",
+        "Plain explanation of the whole plan for a non-technical owner, in the brand's main language.",
     },
   },
 };
@@ -203,74 +204,75 @@ const PLANNER_SCHEMA: Record<string, unknown> = {
 
 function buildSystemPrompt(): string {
   return [
-    "Eres un estratega senior de Google Ads (Search) con 15 años de experiencia",
-    "creando campañas de búsqueda rentables para PYMES. Piensas como un consultor",
-    "que defiende cada decisión ante el dueño del negocio.",
+    "You are a senior Google Ads (Search) strategist with 15 years of experience",
+    "building profitable search campaigns for small and medium businesses. You think",
+    "like a consultant who defends every decision to the business owner.",
     "",
-    "Tu trabajo: a partir de la información de la marca, definir los CIMIENTOS de",
-    "una campaña de Search nueva (objetivo, geo/idioma, presupuesto diario,",
-    "estrategia de puja y 3-6 temas de intención única que se convertirán en grupos",
-    "de anuncios).",
+    "Your job: from the brand information, define the FOUNDATIONS of a new Search",
+    "campaign (objective, geo/language, daily budget, bidding strategy and 3-6",
+    "single-intent themes that will become ad groups).",
     "",
-    "PRINCIPIOS QUE SIEMPRE APLICAS:",
-    "1. STAG (Single Theme Ad Group): cada tema captura UNA sola intención de",
-    "   búsqueda, clara y acotada. Nada de temas-cajón de sastre. Si dudas entre",
-    "   meter dos ideas juntas, sepáralas. Entre 3 y 6 temas.",
-    "2. Estrategia de puja por defecto: MAXIMIZE_CONVERSIONS. Asumimos seguimiento",
-    "   de conversiones maduro y CERO historial de anuncios. NO necesitamos un",
-    "   arranque con Maximizar Clics. Solo te desvías de MAXIMIZE_CONVERSIONS si la",
-    "   información de la marca lo justifica de forma explícita (p. ej. objetivo de",
-    "   ventas con valor por conversión claro → MAXIMIZE_CONVERSION_VALUE).",
-    "3. Geo: presenceOnly SIEMPRE true (personas que están FÍSICAMENTE en la zona,",
-    "   no las que solo muestran interés). countryCodes en ISO-2 MAYÚSCULAS.",
-    "4. Idioma: usa el idioma real de la audiencia objetivo y de la landing.",
-    "5. Presupuesto: el mínimo es 1 USD/día. Si el usuario da una pista de",
-    "   presupuesto, respétala (nunca por debajo del mínimo). Si NO da pista,",
-    "   propón un diario razonable (~20-50 USD) coherente con el objetivo y",
-    "   justifícalo. El dinero NO se expresa en micros aquí: usa dólares.",
-    "6. Objetivo: elige el más cercano a la intención del negocio (leads, sales,",
-    "   traffic, calls, awareness). La mayoría de PYMES de servicios = leads o calls.",
-    "7. KPIs: define métricas con objetivos concretos y medibles.",
+    "PRINCIPLES YOU ALWAYS APPLY:",
+    "1. STAG (Single Theme Ad Group): each theme captures ONE single, clear and",
+    "   well-bounded search intent. No catch-all themes. If you hesitate between",
+    "   putting two ideas together, split them. Between 3 and 6 themes.",
+    "2. Default bidding strategy: MAXIMIZE_CONVERSIONS. We assume mature conversion",
+    "   tracking and ZERO ad history. We do NOT need a Maximize Clicks warm-up. Only",
+    "   deviate from MAXIMIZE_CONVERSIONS if the brand info explicitly justifies it",
+    "   (e.g. a sales objective with clear conversion value → MAXIMIZE_CONVERSION_VALUE).",
+    "3. Geo: presenceOnly ALWAYS true (people PHYSICALLY in the area, not those who",
+    "   merely show interest). countryCodes in UPPERCASE ISO-2.",
+    "4. Language: use the real language of the target audience and the landing page.",
+    "5. Budget: the minimum is 1 USD/day. If the user gives a budget hint, respect it",
+    "   (never below the minimum). If there is NO hint, propose a reasonable daily",
+    "   budget (~20-50 USD) consistent with the objective and justify it. Money is NOT",
+    "   expressed in micros here: use dollars.",
+    "6. Objective: pick the one closest to the business intent (leads, sales, traffic,",
+    "   calls, awareness). Most service SMBs = leads or calls.",
+    "7. KPIs: define metrics with concrete, measurable targets.",
     "",
-    "TONO DE LOS TEXTOS PARA EL USUARIO (objectiveSummary, budget.rationale,",
-    "themes.description, brandSummary, rationale): español sencillo, cercano y",
-    "claro, pensado para un dueño de negocio que NO es técnico. Sin jerga, sin",
-    "anglicismos innecesarios. Frases cortas.",
+    "LANGUAGE OF USER-FACING TEXT (objectiveSummary, budget.rationale,",
+    "themes[].description, brandSummary, rationale, kpis): write them in the brand's",
+    "MAIN language — the language of its website, landing page and the customers it",
+    "serves — which is the SAME language whose ISO-639-1 code you put in",
+    "geo.languageCode. If the brand serves an English-speaking market, write them in",
+    "English; if Spanish, in Spanish; if French, in French; and so on. Keep it simple,",
+    "warm and clear for a non-technical business owner. Short sentences, no jargon.",
     "",
-    "Devuelve EXCLUSIVAMENTE la herramienta estructurada. No añadas texto libre.",
+    "Return ONLY the structured tool. Do not add any free text.",
   ].join("\n");
 }
 
 function buildUserPrompt(ctx: RunContext): string {
   const b = ctx.brand;
-  const landing = b.landingPageUrl ?? b.brandWebsite ?? "(no indicada)";
+  const landing = b.landingPageUrl ?? b.brandWebsite ?? "(not provided)";
   const lines: string[] = [
-    "Información de la marca para planificar la campaña de Search:",
+    "Brand information to plan the Search campaign:",
     "",
-    `- Nombre de la marca: ${b.brandName}`,
-    `- Sitio web: ${b.brandWebsite ?? "(no indicado)"}`,
-    `- Landing (a donde apuntarán los anuncios): ${landing}`,
+    `- Brand name: ${b.brandName}`,
+    `- Website: ${b.brandWebsite ?? "(not provided)"}`,
+    `- Landing page (where the ads will point): ${landing}`,
   ];
-  if (b.description) lines.push(`- Descripción del negocio: ${b.description}`);
-  if (b.industry) lines.push(`- Sector / actividad: ${b.industry}`);
+  if (b.description) lines.push(`- Business description: ${b.description}`);
+  if (b.industry) lines.push(`- Industry / activity: ${b.industry}`);
   lines.push(
-    `- Objetivo (en sus palabras): ${b.objectiveHint ?? "(no indicado)"}`,
-    `- Zona geográfica (en sus palabras): ${b.geoHint ?? "(no indicada)"}`,
-    `- Idioma (pista): ${b.languageHint ?? "(no indicada)"}`,
-    `- Presupuesto diario sugerido (USD): ${
-      b.budgetHintUsd !== undefined ? b.budgetHintUsd : "(no indicado)"
+    `- Objective (in their words): ${b.objectiveHint ?? "(not provided)"}`,
+    `- Geographic area (in their words): ${b.geoHint ?? "(not provided)"}`,
+    `- Language (hint): ${b.languageHint ?? "(not provided)"}`,
+    `- Suggested daily budget (USD): ${
+      b.budgetHintUsd !== undefined ? b.budgetHintUsd : "(not provided)"
     }`,
     "",
-    "Instrucciones:",
-    `- El presupuesto diario mínimo es ${BUDGET.minDailyUsd} USD/día.`,
+    "Instructions:",
+    `- The minimum daily budget is ${BUDGET.minDailyUsd} USD/day.`,
     b.budgetHintUsd !== undefined
-      ? `- Respeta el presupuesto sugerido (${b.budgetHintUsd} USD/día) salvo que esté por debajo del mínimo.`
-      : "- No hay pista de presupuesto: propón un diario razonable (~20-50 USD/día) y justifícalo.",
-    "- Si no hay pista de zona geográfica, dedúcela del dominio del sitio web y del idioma (por ejemplo, un dominio .es sugiere España) y di CLARAMENTE en objectiveSummary qué zona has asumido, para que el usuario pueda corregirla si hace falta.",
-    "- Define 3-6 temas de intención única (STAG) bien acotados.",
-    "- Usa MAXIMIZE_CONVERSIONS salvo justificación explícita en contra.",
-    "- presenceOnly = true. countryCodes en ISO-2 mayúsculas.",
-    "- Escribe todos los textos para el usuario en español sencillo y claro.",
+      ? `- Respect the suggested budget (${b.budgetHintUsd} USD/day) unless it is below the minimum.`
+      : "- No budget hint: propose a reasonable daily budget (~20-50 USD/day) and justify it.",
+    "- If there is no geo hint, infer it from the website domain and the language (e.g. a .es domain suggests Spain) and state CLEARLY in objectiveSummary which area you assumed, so the user can correct it if needed.",
+    "- Define 3-6 well-bounded single-intent themes (STAG).",
+    "- Use MAXIMIZE_CONVERSIONS unless there is an explicit justification against it.",
+    "- presenceOnly = true. countryCodes in uppercase ISO-2.",
+    "- Decide the brand's main language, put its ISO-639-1 code in geo.languageCode, and write ALL user-facing text (objectiveSummary, budget.rationale, themes[].description, brandSummary, rationale, kpis) in THAT language.",
   );
   return lines.join("\n");
 }
@@ -281,7 +283,7 @@ function buildUserPrompt(ctx: RunContext): string {
 
 const a1Planner: AgentDefinition<PlannerOutput> = {
   id: "planner",
-  title: "Estratega",
+  title: "Strategist",
   model: defaultAnthropicModel("planner"),
   kind: "llm",
   promptVersion: PROMPT_VERSION,
@@ -302,7 +304,7 @@ const a1Planner: AgentDefinition<PlannerOutput> = {
         schema: PLANNER_SCHEMA,
         toolName: "submit_plan",
         toolDescription:
-          "Entrega el plan estratégico de la campaña de Search como objeto estructurado.",
+          "Submit the strategic plan for the Search campaign as a structured object.",
         temperature: TEMPERATURE,
         signal: helpers.signal,
       });
@@ -326,7 +328,7 @@ const a1Planner: AgentDefinition<PlannerOutput> = {
 
     await helpers.emit("decision", {
       agent: "planner",
-      summary: `Objetivo "${output.objectiveType}" · ${output.themes.length} temas · ${output.budget.dailyUsd} USD/día · puja ${output.biddingStrategy} · ${output.geo.locations.join(", ")} (${output.geo.languageCode}).`,
+      summary: `Objective "${output.objectiveType}" · ${output.themes.length} themes · ${output.budget.dailyUsd} USD/day · bidding ${output.biddingStrategy} · ${output.geo.locations.join(", ")} (${output.geo.languageCode}).`,
     });
     await helpers.emit("artifact", { output });
 

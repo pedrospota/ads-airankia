@@ -59,7 +59,7 @@ export async function POST(
   // SAFETY: this route owns Search campaigns only. Never touch a Display row.
   if (campaign && campaign.campaignType !== "search") {
     return NextResponse.json(
-      { ok: false, error: "La campaña no es de búsqueda" },
+      { ok: false, error: "This isn't a Search campaign" },
       { status: 409 }
     );
   }
@@ -71,7 +71,7 @@ export async function POST(
       {
         ok: false,
         error:
-          "Esta campaña está activa. Ponla en pausa en Google Ads antes de descartarla.",
+          "This campaign is active. Pause it in Google Ads before discarding it.",
       },
       { status: 409 }
     );
@@ -111,7 +111,7 @@ export async function POST(
       {
         ok: false,
         error:
-          e instanceof Error ? e.message : "No se pudo descartar la campaña",
+          e instanceof Error ? e.message : "We couldn't discard the campaign",
       },
       { status: 500 }
     );

@@ -117,7 +117,7 @@ export default async function CampaignsPage({
     displayName:
       (r.runId ? nameByRun.get(r.runId) : undefined) ||
       r.brandName ||
-      "Campaña de Búsqueda",
+      "Search campaign",
     campaignStatus: r.campaignStatus,
     runStatus: r.runStatus,
     googleCampaignId:

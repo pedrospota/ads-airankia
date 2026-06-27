@@ -534,7 +534,7 @@ export async function runActivatorStep(runId: string): Promise<RunStateDTO> {
   const steps = await loadSteps(runId);
   const activator = steps.find((s) => (s.agent as AgentId) === "activator");
   if (!activator) {
-    throw new Error(`Run ${runId} no tiene paso de activación`);
+    throw new Error(`Run ${runId} has no activation step`);
   }
 
   // SAFETY GATE: never push a campaign to Google before the final review has
@@ -544,13 +544,13 @@ export async function runActivatorStep(runId: string): Promise<RunStateDTO> {
   const qaStep = steps.find((s) => (s.agent as AgentId) === "policy_qa");
   if (!qaStep || qaStep.status !== "COMPLETED") {
     throw new Error(
-      "Todavía no hemos terminado de revisar la campaña. Espera a que acabe la revisión final antes de activar.",
+      "We haven't finished reviewing the campaign yet. Wait for the final review to finish before turning it on.",
     );
   }
   const qa = (qaStep.userOverride ?? qaStep.output) as QAOutput | null;
   if (qa?.verdict === "block") {
     throw new Error(
-      "La revisión final encontró algo que hay que corregir antes de publicar. Revisa los avisos y vuelve a generar la campaña.",
+      "The final review found something to fix before publishing. Check the warnings and generate the campaign again.",
     );
   }
 

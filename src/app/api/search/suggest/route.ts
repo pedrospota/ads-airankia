@@ -30,15 +30,16 @@ const SCHEMA: Record<string, unknown> = {
     objective: {
       type: "string",
       description:
-        "Objetivo de la campaña en 1-2 frases, EN PRIMERA PERSONA como si lo escribiera el dueño del negocio. Español sencillo, sin jerga ni anglicismos.",
+        "Campaign objective in 1-2 sentences, in FIRST PERSON as if the business owner wrote it. Plain, friendly language, no jargon. Written in the brand's own main language.",
     },
     budgetDailyUsd: {
       type: "number",
-      description: "Presupuesto diario sugerido para empezar (número entero).",
+      description: "Suggested daily budget to start with (whole number).",
     },
     reason: {
       type: "string",
-      description: "Una sola frase explicando por qué ese presupuesto.",
+      description:
+        "A single sentence explaining why that budget, in the brand's own main language.",
     },
   },
 };
@@ -78,25 +79,30 @@ export async function POST(request: NextRequest) {
   }
 
   const context = [
-    `Nombre de la marca: ${brand.name ?? "(sin nombre)"}`,
-    brand.industry ? `Sector / actividad: ${brand.industry}` : null,
-    brand.website ? `Sitio web: ${brand.website}` : null,
-    brand.description ? `Descripción: ${brand.description}` : null,
+    `Brand name: ${brand.name ?? "(no name)"}`,
+    brand.industry ? `Industry / activity: ${brand.industry}` : null,
+    brand.website ? `Website: ${brand.website}` : null,
+    brand.description ? `Description: ${brand.description}` : null,
   ]
     .filter(Boolean)
     .join("\n");
 
   const system =
-    "Eres un experto en Google Ads que ayuda a personas SIN conocimientos técnicos. " +
-    "Escribe SIEMPRE en español sencillo, cercano y claro, sin jerga ni anglicismos.";
+    "You are a Google Ads expert who helps people with NO technical knowledge. " +
+    "Write in plain, friendly, clear language, with no jargon. " +
+    "Write the objective and the reason in the BRAND'S OWN MAIN LANGUAGE — the " +
+    "language of its website and the customers it serves (e.g. an English-speaking " +
+    "business → English; a Spanish one → Spanish). Match that language exactly.";
 
   const prompt = [
-    "A partir de la información de este negocio, propón:",
-    "1) Un objetivo de campaña de Google (búsqueda), redactado EN PRIMERA PERSONA, como si lo hubiera escrito el dueño (1-2 frases concretas, sin tecnicismos).",
-    `2) Un presupuesto diario razonable para empezar (número entero, mínimo ${BUDGET.minDailyUsd}).`,
-    "3) Una breve razón (1 frase) de por qué ese presupuesto.",
+    "Based on this business's information, propose:",
+    "1) A Google Search campaign objective, written in FIRST PERSON as if the owner wrote it (1-2 concrete sentences, no jargon).",
+    `2) A reasonable daily budget to start with (whole number, minimum ${BUDGET.minDailyUsd}).`,
+    "3) A short reason (1 sentence) for that budget.",
     "",
-    "Información del negocio:",
+    "Write the objective and reason in the brand's own main language (infer it from the name, website and description).",
+    "",
+    "Business information:",
     context,
   ].join("\n");
 
@@ -106,9 +112,9 @@ export async function POST(request: NextRequest) {
       system,
       prompt,
       schema: SCHEMA,
-      toolName: "proponer_campania",
+      toolName: "suggest_campaign",
       toolDescription:
-        "Devuelve un objetivo y un presupuesto diario sugeridos para la campaña.",
+        "Return a suggested objective and daily budget for the campaign.",
       maxTokens: 600,
       temperature: 0.4,
     });
@@ -128,7 +134,7 @@ export async function POST(request: NextRequest) {
         error:
           e instanceof Error
             ? e.message
-            : "No pudimos generar la sugerencia. Inténtalo de nuevo.",
+            : "We couldn't generate the suggestion. Please try again.",
       },
       { status: 500 },
     );

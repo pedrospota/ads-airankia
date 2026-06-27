@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Rankia Ads — Crea tu campaña en minutos",
+  title: "AI Rankia Ads — Create your campaign in minutes",
   description:
-    "Crea campañas de Google Ads guiado paso a paso. La IA lo prepara por ti y tú decides cuándo activarla.",
+    "Create Google Ads campaigns with step-by-step guidance. The AI sets it up for you and you decide when to turn it on.",
   icons: {
     icon: [
       { url: "/favicon.png", sizes: "32x32", type: "image/png" },
@@ -33,7 +33,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('ads-theme')||'dark';document.body.style.background=t==='dark'?'#0A0A0E':'#FFFFFF';document.body.style.color=t==='dark'?'#FAFAFA':'#111827';})()` }} />
       </head>

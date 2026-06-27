@@ -19,6 +19,7 @@ import { callStructured, LLMError, defaultAnthropicModel } from "@/lib/llm";
 import {
   AGENT_TITLES,
   RSA_LIMITS,
+  languageName,
   type AdGroupAds,
   type AgentDefinition,
   type AgentHelpers,
@@ -38,73 +39,78 @@ const PROMPT_VERSION = "a4-rsa-copywriter@1";
 // Prompts
 // ----------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `Eres un redactor publicitario senior y estratega de Google Ads de clase mundial, especializado en anuncios de búsqueda responsivos (RSA). Has gestionado millones de euros en inversión y conoces al dedillo las políticas de Google y lo que de verdad mueve el CTR y la conversión.
+const SYSTEM_PROMPT = `You are a senior copywriter and world-class Google Ads strategist, specialized in responsive search ads (RSA). You have managed millions of euros in spend and know Google's policies inside out, along with what truly drives CTR and conversion.
 
-Tu trabajo: escribir, para CADA grupo de anuncios, un RSA impecable.
+Your job: write a flawless RSA for EACH ad group.
 
-REGLAS DURAS DE GOOGLE (innegociables, son límites de caracteres reales):
-- Exactamente 15 títulos (headlines). Cada título <= 30 caracteres, contando espacios.
-- Exactamente 4 descripciones. Cada descripción <= 90 caracteres, contando espacios.
-- path1 y path2 (rutas de la URL visible) son opcionales; si los usas, cada uno <= 15 caracteres, una sola palabra o término corto, sin espacios, sin barras, sin URL.
-- Cuenta los caracteres tú mismo antes de enviar. Si dudas, acórtalo. Nunca te pases.
+GOOGLE HARD RULES (non-negotiable, these are real character limits):
+- Exactly 15 headlines. Each headline <= 30 characters, counting spaces.
+- Exactly 4 descriptions. Each description <= 90 characters, counting spaces.
+- path1 and path2 (visible URL paths) are optional; if you use them, each is <= 15 characters, a single word or short term, no spaces, no slashes, no URL.
+- Count the characters yourself before submitting. If in doubt, shorten it. Never go over.
 
-CALIDAD (lo que defiende un PPC senior):
-- Variedad de ÁNGULOS entre los 15 títulos: beneficio, característica/diferenciador, llamada a la acción (CTA), prueba social/confianza, urgencia/escasez, y marca. No repitas la misma idea con otras palabras.
-- Que ningún par de títulos sea casi idéntico: Google rota los activos, necesita combinaciones que tengan sentido juntas.
-- Incluye al menos 2-3 títulos con una keyword principal del grupo (relevancia = Quality Score), pero escritos de forma natural, no forzada.
-- Incluye CTAs claros ("Pide cita hoy", "Reserva ahora", "Pide presupuesto").
-- Las 4 descripciones deben ampliar el valor, no repetir los títulos: una de beneficio, una de prueba/confianza, una con CTA, una con oferta/diferenciador.
-- Tono según la marca y el mercado. Por defecto, español neutro, claro y cercano. Usa inglés SOLO si la marca/geo es claramente angloparlante.
-- Nada de superlativos prohibidos ni promesas sin respaldo ("el mejor", "garantizado al 100%", "nº1"), ni MAYÚSCULAS sostenidas, ni símbolos/emoji raros, ni signos de exclamación repetidos. Cumple políticas de Google.
+QUALITY (what a senior PPC defends):
+- Variety of ANGLES across the 15 headlines: benefit, feature/differentiator, call to action (CTA), social proof/trust, urgency/scarcity, and brand. Do not repeat the same idea in other words.
+- No two headlines should be nearly identical: Google rotates the assets and needs combinations that make sense together.
+- Include at least 2-3 headlines with a primary keyword from the group (relevance = Quality Score), but written naturally, not forced.
+- Include clear CTAs ("Book today", "Reserve now", "Request a quote").
+- The 4 descriptions must expand on the value, not repeat the headlines: one benefit, one proof/trust, one with a CTA, one with an offer/differentiator.
+- Tone according to the brand and the market.
+- LANGUAGE: Write ALL ad copy — every headline, description and path — in the brand's MAIN language, which is specified in the user prompt. It is the language the brand's customers actually search and read in. Do not mix languages.
+- No prohibited superlatives or unsupported promises ("the best", "100% guaranteed", "#1"), no sustained ALL-CAPS, no odd symbols/emoji, no repeated exclamation marks. Comply with Google's policies.
 
-ANCLAJE (pinning): ánclalo con MUCHA moderación. Como mucho 1-2 títulos anclados en total (típicamente la marca en HEADLINE_1 o un CTA), y normalmente 0 descripciones. Anclar de más mata la optimización de Google. Deja la inmensa mayoría sin anclar (pinnedField = null).
+PINNING: pin with GREAT restraint. At most 1-2 pinned headlines in total (typically the brand in HEADLINE_1 or a CTA), and normally 0 descriptions. Over-pinning kills Google's optimization. Leave the vast majority unpinned (pinnedField = null).
 
-Devuelve TODOS los grupos de anuncios que te den. Para cada grupo usa su landingPageUrl tal cual como finalUrl. Añade un rationale corto explicando tu enfoque de copy.`;
+Return ALL the ad groups you are given. For each group use its landingPageUrl as-is for finalUrl. Add a short rationale explaining your copy approach.`;
 
 function buildUserPrompt(ctx: RunContext): string {
   const { brand, planner, structure } = ctx;
 
+  const lang = languageName(ctx.planner?.geo.languageCode);
+
   const brandBlock = [
-    `Marca: ${brand.brandName}`,
-    brand.brandWebsite ? `Web: ${brand.brandWebsite}` : null,
-    brand.description ? `Descripción: ${brand.description}` : null,
-    brand.geoHint ? `Geo (pista): ${brand.geoHint}` : null,
-    brand.languageHint ? `Idioma (pista): ${brand.languageHint}` : null,
+    `Brand: ${brand.brandName}`,
+    brand.brandWebsite ? `Website: ${brand.brandWebsite}` : null,
+    brand.description ? `Description: ${brand.description}` : null,
+    brand.geoHint ? `Geo (hint): ${brand.geoHint}` : null,
+    brand.languageHint ? `Language (hint): ${brand.languageHint}` : null,
   ]
     .filter(Boolean)
     .join("\n");
 
   const planBlock = planner
     ? [
-        `Objetivo: ${planner.objectiveType} — ${planner.objectiveSummary}`,
-        `Geo: ${planner.geo.locations.join(", ")} (idioma ${planner.geo.languageCode})`,
-        `Resumen de marca: ${planner.brandSummary}`,
+        `Objective: ${planner.objectiveType} — ${planner.objectiveSummary}`,
+        `Geo: ${planner.geo.locations.join(", ")} (language ${planner.geo.languageCode})`,
+        `Brand summary: ${planner.brandSummary}`,
         planner.kpis.length
           ? `KPIs: ${planner.kpis.map((k) => `${k.primary} → ${k.target}`).join("; ")}`
           : null,
       ]
         .filter(Boolean)
         .join("\n")
-    : "(sin plan disponible)";
+    : "(no plan available)";
 
   const groupsBlock = (structure?.adGroups ?? [])
     .map((g, i) => formatAdGroup(g, i))
     .join("\n\n");
 
-  return `Escribe los anuncios RSA para esta campaña.
+  return `Write the RSA ads for this campaign.
 
-== CONTEXTO DE MARCA ==
+== BRAND CONTEXT ==
 ${brandBlock}
 
-== ESTRATEGIA (A1) ==
+== STRATEGY (A1) ==
 ${planBlock}
 
-== ESTRUCTURA (A3) — ${structure?.campaignName ?? "campaña"} ==
-Genera un RSA para CADA UNO de estos ${structure?.adGroups.length ?? 0} grupos. Usa el campo "name" exactamente como adGroupName y la "landingPageUrl" exactamente como finalUrl.
+== STRUCTURE (A3) — ${structure?.campaignName ?? "campaign"} ==
+Generate one RSA for EACH of these ${structure?.adGroups.length ?? 0} groups. Use the "name" field exactly as adGroupName and the "landingPageUrl" exactly as finalUrl.
 
 ${groupsBlock}
 
-Recuerda: por grupo, 15 títulos (<=30 caracteres cada uno) y 4 descripciones (<=90 caracteres cada una), ángulos variados, anclaje mínimo, español claro salvo que la marca/geo sea claramente angloparlante.`;
+LANGUAGE: Write EVERY headline, description and path in ${lang} (the brand's main language — the language its customers actually search and read in). Do not mix languages. Write the rationale in ${lang} as well.
+
+Remember: per group, 15 headlines (<=30 characters each) and 4 descriptions (<=90 characters each), varied angles, minimal pinning.`;
 }
 
 function formatAdGroup(g: PlannedAdGroup, index: number): string {
@@ -113,10 +119,10 @@ function formatAdGroup(g: PlannedAdGroup, index: number): string {
     .map((k) => `${k.text} [${k.matchType}]`)
     .join(", ");
   return [
-    `Grupo ${index + 1}: "${g.name}"`,
-    `  Tema/intención: ${g.theme} (${g.archetype})`,
+    `Group ${index + 1}: "${g.name}"`,
+    `  Theme/intent: ${g.theme} (${g.archetype})`,
     `  Landing (finalUrl): ${g.landingPageUrl}`,
-    kws ? `  Keywords clave: ${kws}` : null,
+    kws ? `  Key keywords: ${kws}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -136,7 +142,7 @@ const OUTPUT_SCHEMA: JSONSchema = {
   properties: {
     ads: {
       type: "array",
-      description: "Un RSA por cada grupo de anuncios recibido.",
+      description: "One RSA for each ad group received.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -144,11 +150,11 @@ const OUTPUT_SCHEMA: JSONSchema = {
         properties: {
           adGroupName: {
             type: "string",
-            description: "Nombre EXACTO del grupo (campo name de la estructura).",
+            description: "EXACT group name (the name field from the structure).",
           },
           headlines: {
             type: "array",
-            description: "Exactamente 15 títulos, cada uno <= 30 caracteres.",
+            description: "Exactly 15 headlines, each <= 30 characters.",
             minItems: RSA_LIMITS.minHeadlines,
             maxItems: RSA_LIMITS.maxHeadlines,
             items: {
@@ -160,14 +166,14 @@ const OUTPUT_SCHEMA: JSONSchema = {
                 pinnedField: {
                   type: ["string", "null"],
                   enum: HEADLINE_PINS,
-                  description: "Anclaje opcional; usar con mucha moderación.",
+                  description: "Optional pinning; use with great restraint.",
                 },
               },
             },
           },
           descriptions: {
             type: "array",
-            description: "Exactamente 4 descripciones, cada una <= 90 caracteres.",
+            description: "Exactly 4 descriptions, each <= 90 characters.",
             minItems: RSA_LIMITS.minDescriptions,
             maxItems: RSA_LIMITS.maxDescriptions,
             items: {
@@ -179,7 +185,7 @@ const OUTPUT_SCHEMA: JSONSchema = {
                 pinnedField: {
                   type: ["string", "null"],
                   enum: DESCRIPTION_PINS,
-                  description: "Anclaje opcional; normalmente null.",
+                  description: "Optional pinning; normally null.",
                 },
               },
             },
@@ -187,23 +193,24 @@ const OUTPUT_SCHEMA: JSONSchema = {
           path1: {
             type: "string",
             maxLength: RSA_LIMITS.path1MaxChars,
-            description: "Ruta visible 1, opcional, <= 15 caracteres, sin espacios.",
+            description: "Visible path 1, optional, <= 15 characters, no spaces.",
           },
           path2: {
             type: "string",
             maxLength: RSA_LIMITS.path2MaxChars,
-            description: "Ruta visible 2, opcional, <= 15 caracteres, sin espacios.",
+            description: "Visible path 2, optional, <= 15 characters, no spaces.",
           },
           finalUrl: {
             type: "string",
-            description: "URL de destino = landingPageUrl del grupo.",
+            description: "Destination URL = the group's landingPageUrl.",
           },
         },
       },
     },
     rationale: {
       type: "string",
-      description: "Explicación breve del enfoque de copy (en español).",
+      description:
+        "Short explanation of the copy approach (in the brand's main language).",
     },
   },
 };
@@ -329,7 +336,7 @@ const a4RsaCopywriter: AgentDefinition<RSAOutput> = {
   async execute(ctx: RunContext, helpers: AgentHelpers) {
     if (!ctx.structure || ctx.structure.adGroups.length === 0) {
       const message =
-        "No hay estructura de campaña: el redactor de anuncios necesita los grupos del Arquitecto (A3) antes de escribir.";
+        "No campaign structure: the ad copywriter needs the Architect's (A3) ad groups before writing.";
       await helpers.emit("error", { agent: "rsa_copywriter", message });
       throw new LLMError(message);
     }
@@ -346,7 +353,7 @@ const a4RsaCopywriter: AgentDefinition<RSAOutput> = {
         schema: OUTPUT_SCHEMA,
         toolName: "submit_rsa_ads",
         toolDescription:
-          "Devuelve los anuncios RSA (15 títulos + 4 descripciones por grupo) respetando los límites de caracteres de Google.",
+          "Returns the RSA ads (15 headlines + 4 descriptions per group) respecting Google's character limits.",
         temperature: 0.8,
         maxTokens: 8192,
         signal: helpers.signal,
@@ -433,11 +440,11 @@ const a4RsaCopywriter: AgentDefinition<RSAOutput> = {
 
     await helpers.emit("decision", {
       agent: "rsa_copywriter",
-      summary: `Escribí anuncios para ${output.ads.length} grupo(s): ${RSA_LIMITS.maxHeadlines} títulos y ${RSA_LIMITS.maxDescriptions} descripciones por grupo.${
+      summary: `Wrote ads for ${output.ads.length} group(s): ${RSA_LIMITS.maxHeadlines} headlines and ${RSA_LIMITS.maxDescriptions} descriptions per group.${
         totalTruncations > 0
-          ? ` Ajusté ${totalTruncations} texto(s) para respetar los límites de caracteres.`
+          ? ` Adjusted ${totalTruncations} text(s) to respect the character limits.`
           : ""
-      }${persisted > 0 ? ` Guardé ${persisted} anuncio(s).` : ""}`,
+      }${persisted > 0 ? ` Saved ${persisted} ad(s).` : ""}`,
     });
 
     await helpers.emit("artifact", { output });

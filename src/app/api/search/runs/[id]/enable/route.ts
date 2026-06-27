@@ -116,7 +116,7 @@ export async function POST(
       {
         ok: false,
         enabled: false,
-        error: e instanceof Error ? e.message : "No se pudo activar la campana",
+        error: e instanceof Error ? e.message : "We couldn't turn on the campaign",
       },
       { status: 500 }
     );

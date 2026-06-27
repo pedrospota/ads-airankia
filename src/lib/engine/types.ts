@@ -37,13 +37,41 @@ export const PIPELINE: AgentId[] = [
 ];
 
 export const AGENT_TITLES: Record<AgentId, string> = {
-  planner: "Estratega",
-  keyword_researcher: "Investigador de keywords",
-  structure_architect: "Arquitecto de estructura",
-  rsa_copywriter: "Redactor de anuncios",
-  policy_qa: "Revisor de calidad y política",
-  activator: "Activador",
+  planner: "Strategist",
+  keyword_researcher: "Keyword researcher",
+  structure_architect: "Structure architect",
+  rsa_copywriter: "Ad copywriter",
+  policy_qa: "Quality & policy reviewer",
+  activator: "Activator",
 };
+
+// ----------------------------------------------------------------------------
+// Brand language → human name. The app UI is always in English, but the AI's
+// CAMPAIGN CONTENT (objective summary, themes, keyword rationale, ad copy, QA
+// notes…) must be written in the brand's main language, which the planner
+// detects and stores in geo.languageCode (ISO-639-1). languageName() turns that
+// code into an English name the agent prompts can drop into an instruction
+// ("Write all user-facing text in <name>").
+// ----------------------------------------------------------------------------
+export const LANGUAGE_NAMES: Record<string, string> = {
+  es: "Spanish",
+  en: "English",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  nl: "Dutch",
+  ca: "Catalan",
+  gl: "Galician",
+  eu: "Basque",
+};
+
+/** English name of an ISO-639-1 language code, for agent prompts. */
+export function languageName(code?: string | null): string {
+  if (!code) return "the brand's main language";
+  const c = code.trim().toLowerCase().slice(0, 2);
+  return LANGUAGE_NAMES[c] ?? code;
+}
 
 export type Intent =
   | "brand"

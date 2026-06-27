@@ -366,37 +366,37 @@ function objectiveFromCategory(category: string): ObjectiveType {
   }
 }
 
-/** Plain-Spanish label for a conversion category (honest UI; no jargon). */
-function friendlyEsLabel(category: string): string {
+/** Plain-English label for a conversion category (honest UI; no jargon). */
+function friendlyLabel(category: string): string {
   switch (category) {
     case "PURCHASE":
-      return "compras";
+      return "sales";
     case "ADD_TO_CART":
-      return "carritos";
+      return "carts";
     case "BEGIN_CHECKOUT":
-      return "pagos iniciados";
+      return "started checkouts";
     case "SIGNUP":
-      return "registros";
+      return "sign-ups";
     case "SUBMIT_LEAD_FORM":
-      return "formularios";
+      return "form submissions";
     case "CONTACT":
-      return "contactos";
+      return "contacts";
     case "PHONE_CALL_LEAD":
     case "PHONE_CALL":
-      return "llamadas";
+      return "calls";
     case "BOOK_APPOINTMENT":
-      return "reservas";
+      return "bookings";
     case "REQUEST_QUOTE":
-      return "presupuestos";
+      return "quote requests";
     case "DEFAULT":
-      return "contactos";
+      return "contacts";
     default:
-      return "resultados";
+      return "results";
   }
 }
 
 function uniqueLabels(set: DetectedAction[]): string[] {
-  return Array.from(new Set(set.map((a) => friendlyEsLabel(a.category))));
+  return Array.from(new Set(set.map((a) => friendlyLabel(a.category))));
 }
 
 /** R1 — the account measures nothing yet. Safe Maximize Clicks. */
@@ -410,7 +410,7 @@ function rung1(degraded = false): ObjectiveDetection {
     conversionTrackingEnabled: false,
     degraded,
     rationale:
-      "Tu cuenta todavía no mide resultados, así que buscamos el máximo de visitas de calidad con tu presupuesto. En cuanto empieces a medir, la campaña pasará sola a buscar clientes.",
+      "Your account doesn't track results yet, so we aim for the most quality visits your budget allows. As soon as you start tracking, the campaign will switch on its own to finding customers.",
   };
 }
 
@@ -430,7 +430,7 @@ function rung2(
     conversionTrackingEnabled,
     degraded,
     rationale:
-      "Tu cuenta ya está preparada para medir resultados, pero todavía no hay datos suficientes para optimizar con seguridad. Mientras tanto buscamos el máximo de visitas de calidad y seguimos contando cada resultado; cuando haya datos, cambiaremos solos a buscar clientes.",
+      "Your account is already set up to track results, but there isn't enough data yet to optimize safely. In the meantime we aim for the most quality visits and keep counting every result; once there's data, we'll switch on our own to finding customers.",
   };
 }
 
@@ -583,8 +583,8 @@ async function detectAccountObjective(
   const dominant = [...optimizedSet].sort((a, b) => b.conv90d - a.conv90d)[0];
   const labels = uniqueLabels(optimizedSet);
   const rationale =
-    `Tu cuenta ya mide ${labels.join(" y ")} con datos suficientes, así que ` +
-    "optimizamos la campaña para conseguir más de eso automáticamente, sin que tengas que elegir nada.";
+    `Your account already tracks ${labels.join(" and ")} with enough data, so ` +
+    "we optimize the campaign to get more of that automatically, without you having to choose anything.";
 
   return {
     rung: "R3",
@@ -754,11 +754,11 @@ async function activate(
   const { planner, structure, rsa } = ctx;
   const campaignDbId = ctx.campaignId ?? ctx.run.campaignId ?? null;
 
-  if (!planner) throw new Error("Falta la salida del estratega (planner).");
-  if (!structure) throw new Error("Falta la estructura de la campaña.");
-  if (!rsa) throw new Error("Faltan los anuncios (RSA).");
+  if (!planner) throw new Error("The strategist (planner) output is missing.");
+  if (!structure) throw new Error("The campaign structure is missing.");
+  if (!rsa) throw new Error("The ads (RSA) are missing.");
   if (!campaignDbId) {
-    throw new Error("No hay campaña en la base de datos para activar.");
+    throw new Error("There is no campaign in the database to activate.");
   }
 
   const runId = ctx.run.id;
@@ -772,13 +772,13 @@ async function activate(
   const plan = buildSanitizedPlan(structure, rsa, ctx.brand);
   if (plan.adGroups.length === 0) {
     throw new Error(
-      "No se puede publicar la campaña: ningún grupo de anuncios quedó completo (faltan palabras clave, anuncios o enlaces válidos). Revisa los pasos anteriores."
+      "The campaign can't be published: no ad group was complete (missing keywords, ads, or valid links). Please review the previous steps."
     );
   }
   if (plan.skipped.length > 0) {
     await helpers.emit("decision", {
       agent: AGENT_ID,
-      summary: `Se omitieron ${plan.skipped.length} grupo(s) por datos incompletos: ${plan.skipped
+      summary: `Skipped ${plan.skipped.length} group(s) due to incomplete data: ${plan.skipped
         .map((s) => `${s.name} (${s.reason})`)
         .join("; ")}.`,
     });
@@ -799,7 +799,7 @@ async function activate(
   );
   if (geoTargetIds.length === 0) {
     throw new Error(
-      "No pudimos determinar la zona geográfica de la campaña, así que la hemos detenido para no mostrar tus anuncios en todo el mundo y gastar de más. Revisa la ubicación en el paso del estratega."
+      "We couldn't determine the campaign's geographic area, so we've stopped it to avoid showing your ads worldwide and overspending. Please review the location in the strategist step."
     );
   }
   // presenceOnly (planner decides; default true): show ads to people PHYSICALLY
@@ -852,7 +852,7 @@ async function activate(
       operation,
       resourceName,
       status: "done",
-      detail: "reanudado",
+      detail: "resumed",
     });
   };
 
@@ -909,7 +909,7 @@ async function activate(
       operations: [
         {
           create: {
-            name: `${structure.campaignName} — presupuesto`,
+            name: `${structure.campaignName} — budget`,
             amountMicros: String(dailyMicros),
             deliveryMethod: "STANDARD",
           },
@@ -1401,7 +1401,7 @@ async function activate(
         );
         if (n > 0) {
           assetsLinked += n;
-          assetKinds.push("enlaces a tu web");
+          assetKinds.push("links to your site");
           mutationLog.push(
             await logMutation(runId, campaignDbId, "addSitelinks", "done")
           );
@@ -1414,7 +1414,7 @@ async function activate(
             "addSitelinks",
             "failed",
             undefined,
-            e instanceof Error ? e.message : "fallo al añadir enlaces"
+            e instanceof Error ? e.message : "failed to add links"
           )
         );
       }
@@ -1445,7 +1445,7 @@ async function activate(
         );
         if (n > 0) {
           assetsLinked += n;
-          assetKinds.push("textos destacados");
+          assetKinds.push("callouts");
           mutationLog.push(
             await logMutation(runId, campaignDbId, "addCallouts", "done")
           );
@@ -1458,7 +1458,7 @@ async function activate(
             "addCallouts",
             "failed",
             undefined,
-            e instanceof Error ? e.message : "fallo al añadir textos destacados"
+            e instanceof Error ? e.message : "failed to add callouts"
           )
         );
       }
@@ -1496,7 +1496,7 @@ async function activate(
           );
           if (n > 0) {
             assetsLinked += n;
-            assetKinds.push("lista de servicios");
+            assetKinds.push("services list");
             mutationLog.push(
               await logMutation(
                 runId,
@@ -1514,7 +1514,7 @@ async function activate(
               "addStructuredSnippet",
               "failed",
               undefined,
-              e instanceof Error ? e.message : "fallo al añadir la lista"
+              e instanceof Error ? e.message : "failed to add the list"
             )
           );
         }
@@ -1529,14 +1529,14 @@ async function activate(
           "addAssets",
           "done",
           undefined,
-          `${assetsLinked} extensiones (${assetKinds.join(", ")})`
+          `${assetsLinked} extensions (${assetKinds.join(", ")})`
         )
       );
       await helpers.emit("decision", {
         agent: AGENT_ID,
-        summary: `Añadimos extensiones automáticas (${assetKinds.join(
+        summary: `We added automatic extensions (${assetKinds.join(
           ", "
-        )}) para que tu anuncio sea más completo y de mayor calidad, sin que tengas que hacer nada.`,
+        )}) to make your ad more complete and higher quality, without you having to do anything.`,
       });
     }
   }
@@ -1596,7 +1596,7 @@ async function activate(
 
 const a6Activator: AgentDefinition<ActivatorOutput> = {
   id: AGENT_ID,
-  title: "Activador",
+  title: "Activator",
   model: null, // code-only agent, no LLM
   kind: "code",
   promptVersion: PROMPT_VERSION,
@@ -1607,14 +1607,14 @@ const a6Activator: AgentDefinition<ActivatorOutput> = {
   ): Promise<AgentResult<ActivatorOutput>> {
     await helpers.emit("step_progress", {
       agent: AGENT_ID,
-      message: "Publicando la campaña en Google Ads (en PAUSA)...",
+      message: "Publishing the campaign to Google Ads (PAUSED)...",
     });
 
     const output = await activate(ctx, helpers);
 
     await helpers.emit("decision", {
       agent: AGENT_ID,
-      summary: `Campaña publicada EN PAUSA: ${output.adGroups.length} grupos, ${output.keywordsAdded} keywords, ${output.adsCreated} anuncios.`,
+      summary: `Campaign published PAUSED: ${output.adGroups.length} groups, ${output.keywordsAdded} keywords, ${output.adsCreated} ads.`,
     });
 
     await helpers.emit("artifact", { output });
@@ -1622,7 +1622,7 @@ const a6Activator: AgentDefinition<ActivatorOutput> = {
     return {
       output,
       rationale:
-        "Campaña creada en Google Ads en estado PAUSA. La activación real es un paso aparte y explícito.",
+        "Campaign created in Google Ads in PAUSED state. Actual activation is a separate, explicit step.",
       model: null,
       tokensIn: 0,
       tokensOut: 0,

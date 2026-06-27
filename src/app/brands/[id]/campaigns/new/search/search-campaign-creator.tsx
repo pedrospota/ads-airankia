@@ -27,12 +27,12 @@ import {
 // Plain-Spanish, friendly copy for each agent in the timeline.
 // ---------------------------------------------------------------------------
 const AGENT_BLURB: Record<AgentId, string> = {
-  planner: "Define tu objetivo, dónde anunciarte y cuánto invertir al día.",
-  keyword_researcher: "Busca las palabras que escribe tu cliente en Google.",
-  structure_architect: "Ordena todo en grupos para que cada anuncio encaje.",
-  rsa_copywriter: "Escribe los títulos y textos de tus anuncios.",
-  policy_qa: "Revisa que todo cumpla las reglas de Google antes de publicar.",
-  activator: "Crea la campaña en Google Ads (siempre en pausa).",
+  planner: "Sets your goal, where to advertise, and how much to spend per day.",
+  keyword_researcher: "Finds the words your customer types into Google.",
+  structure_architect: "Organizes everything into groups so each ad fits.",
+  rsa_copywriter: "Writes the headlines and text for your ads.",
+  policy_qa: "Checks that everything follows Google's rules before publishing.",
+  activator: "Creates the campaign in Google Ads (always paused).",
 };
 
 const AGENT_EMOJI: Record<AgentId, string> = {
@@ -46,12 +46,12 @@ const AGENT_EMOJI: Record<AgentId, string> = {
 
 // Short, friendly step titles for the timeline — no jargon, no anglicismos.
 const STEP_TITLE: Record<AgentId, string> = {
-  planner: "Tu plan",
-  keyword_researcher: "Lo que busca tu cliente",
-  structure_architect: "Organización de los anuncios",
-  rsa_copywriter: "Tus anuncios",
-  policy_qa: "Revisión final",
-  activator: "Crear en Google Ads",
+  planner: "Your plan",
+  keyword_researcher: "What your customer searches for",
+  structure_architect: "How your ads are organized",
+  rsa_copywriter: "Your ads",
+  policy_qa: "Final review",
+  activator: "Create in Google Ads",
 };
 
 // Symbol shown next to budgets. Google Ads charges in the account's own
@@ -164,7 +164,7 @@ export function SearchCampaignCreator({
           body: JSON.stringify(body ?? {}),
         });
         if (!r.ok && !opts?.silent) {
-          let msg = "No pudimos continuar. Inténtalo de nuevo en un momento.";
+          let msg = "We couldn't continue. Please try again in a moment.";
           try {
             const data = (await r.json()) as { error?: string };
             if (data?.error) msg = data.error;
@@ -176,7 +176,7 @@ export function SearchCampaignCreator({
       } catch {
         if (!opts?.silent) {
           setError(
-            "No pudimos continuar. Revisa tu conexión e inténtalo de nuevo.",
+            "We couldn't continue. Check your connection and try again.",
           );
         }
       } finally {
@@ -393,7 +393,7 @@ export function SearchCampaignCreator({
       };
       if (!r.ok || data.error) {
         throw new Error(
-          data.error || "No pudimos rellenarlo con IA. Inténtalo de nuevo.",
+          data.error || "We couldn't fill it in with AI. Please try again.",
         );
       }
       if (data.objective) setObjectiveHint(data.objective);
@@ -402,7 +402,7 @@ export function SearchCampaignCreator({
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
       setSuggestError(
-        e instanceof Error ? e.message : "No pudimos rellenarlo con IA.",
+        e instanceof Error ? e.message : "We couldn't fill it in with AI.",
       );
     } finally {
       setSuggesting(false);
@@ -439,7 +439,7 @@ export function SearchCampaignCreator({
       });
       const data = (await r.json()) as StartRunResponse & { error?: string };
       if (!r.ok || data.error || !data.runId) {
-        throw new Error(data.error || "No se pudo crear la campaña. Inténtalo de nuevo.");
+        throw new Error(data.error || "We couldn't create the campaign. Please try again.");
       }
       setRunId(data.runId);
       // Keep the run id in the URL so a reload resumes instead of losing it.
@@ -451,7 +451,7 @@ export function SearchCampaignCreator({
       await advance(data.runId, { action: "run_next" });
       await refreshState(data.runId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Algo salió mal al empezar.");
+      setError(e instanceof Error ? e.message : "Something went wrong getting started.");
     } finally {
       setStarting(false);
     }
@@ -482,7 +482,7 @@ export function SearchCampaignCreator({
     // accident — especially for someone doing this for the first time.
     if (typeof window !== "undefined") {
       const ok = window.confirm(
-        "Vamos a crear tu campaña en tu cuenta de Google Ads.\n\nQuedará EN PAUSA, así que todavía NO se gasta nada: tú decides cuándo ponerla en marcha.\n\n¿Continuamos?",
+        "We're going to create your campaign in your Google Ads account.\n\nIt will stay PAUSED, so nothing is spent yet: you decide when to turn it on.\n\nShall we continue?",
       );
       if (!ok) return;
     }
@@ -499,12 +499,12 @@ export function SearchCampaignCreator({
       });
       const data = (await r.json()) as ActivateResponse;
       if (!r.ok || data.error) {
-        throw new Error(data.error || "No se pudo crear la campaña en Google Ads.");
+        throw new Error(data.error || "We couldn't create the campaign in Google Ads.");
       }
       setActivateResult(data);
       await refreshState(runId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo activar.");
+      setError(e instanceof Error ? e.message : "We couldn't activate it.");
     } finally {
       setActivating(false);
     }
@@ -517,7 +517,7 @@ export function SearchCampaignCreator({
     // Always confirm before crossing it.
     if (typeof window !== "undefined") {
       const ok = window.confirm(
-        "Tu campaña pasará a estar ACTIVA: empezará a mostrarse en Google y a gastar como mucho tu presupuesto del día.\n\n¿Seguro que quieres ponerla en marcha ahora?",
+        "Your campaign will become ACTIVE: it will start showing on Google and spending up to your daily budget.\n\nAre you sure you want to turn it on now?",
       );
       if (!ok) return;
     }
@@ -531,12 +531,12 @@ export function SearchCampaignCreator({
       });
       const data = (await r.json()) as ActivateResponse;
       if (!r.ok || data.error) {
-        throw new Error(data.error || "No se pudo poner en marcha.");
+        throw new Error(data.error || "We couldn't turn it on.");
       }
       setActivateResult(data);
       await refreshState(runId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo poner en marcha.");
+      setError(e instanceof Error ? e.message : "We couldn't turn it on.");
     } finally {
       setEnabling(false);
     }
@@ -549,7 +549,7 @@ export function SearchCampaignCreator({
     if (!runId) return;
     if (typeof window !== "undefined") {
       const ok = window.confirm(
-        "Vamos a eliminar esta campaña de tu cuenta de Google Ads.\n\nNo se ha gastado nada (estaba en pausa) y podrás crear otra cuando quieras.\n\n¿Seguro que quieres descartarla?",
+        "We're going to delete this campaign from your Google Ads account.\n\nNothing has been spent (it was paused) and you can create another one whenever you want.\n\nAre you sure you want to discard it?",
       );
       if (!ok) return;
     }
@@ -563,12 +563,12 @@ export function SearchCampaignCreator({
       });
       const data = (await r.json()) as { ok?: boolean; error?: string };
       if (!r.ok || !data.ok) {
-        throw new Error(data.error || "No se pudo descartar la campaña.");
+        throw new Error(data.error || "We couldn't discard the campaign.");
       }
       // Clean slate — the discarded run is gone; let them start over.
       reset();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo descartar.");
+      setError(e instanceof Error ? e.message : "We couldn't discard it.");
     } finally {
       setDiscarding(false);
     }
@@ -601,7 +601,7 @@ export function SearchCampaignCreator({
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        "¿Seguro que quieres empezar de cero? Se perderá la campaña que la IA ha preparado.",
+        "Are you sure you want to start over? You'll lose the campaign the AI has prepared.",
       )
     ) {
       return;
@@ -622,9 +622,9 @@ export function SearchCampaignCreator({
     <div className="min-h-screen">
       <Header
         breadcrumbs={[
-          { label: "Marcas", href: "/brands" },
+          { label: "Brands", href: "/brands" },
           { label: brandName, href: `/brands/${brandId}/citations` },
-          { label: "Campaña de Búsqueda" },
+          { label: "Search Campaign" },
         ]}
       />
 
@@ -632,22 +632,22 @@ export function SearchCampaignCreator({
         {/* ---------------- START CARD ---------------- */}
         {showStart && (
           <div>
-            <h1 className="text-2xl font-bold mb-1">Nueva campaña de búsqueda</h1>
+            <h1 className="text-2xl font-bold mb-1">New Search campaign</h1>
             <p style={{ color: colors.textMuted, marginBottom: 24, fontSize: 14 }}>
-              No necesitas rellenar nada: la IA usa la información de tu negocio
-              para preparar la campaña. Si quieres, ajusta algo antes de empezar.
+              You don't need to fill in anything: the AI uses your business info
+              to prepare the campaign. If you want, tweak something before you start.
             </p>
 
             <div style={styles.card}>
               <div style={{ marginBottom: 18 }}>
                 <label htmlFor="campaign-brand-name" style={styles.lbl}>
-                  Nombre de tu marca
+                  Your brand name
                 </label>
                 <input
                   id="campaign-brand-name"
                   value={brandName}
                   onChange={(e) => setBrandName(e.target.value)}
-                  placeholder="Mi negocio"
+                  placeholder="My business"
                   style={styles.inp}
                 />
               </div>
@@ -663,7 +663,7 @@ export function SearchCampaignCreator({
                   }}
                 >
                   <label htmlFor="campaign-objective" style={{ ...styles.lbl, marginBottom: 0 }}>
-                    ¿Qué quieres conseguir? (opcional)
+                    What do you want to achieve? (optional)
                   </label>
                   <button
                     type="button"
@@ -678,7 +678,7 @@ export function SearchCampaignCreator({
                       cursor: suggesting ? "not-allowed" : "pointer",
                     }}
                   >
-                    {suggesting ? "Pensando…" : "✨ Rellenar con IA"}
+                    {suggesting ? "Thinking…" : "✨ Fill in with AI"}
                   </button>
                 </div>
                 <textarea
@@ -686,13 +686,13 @@ export function SearchCampaignCreator({
                   value={objectiveHint}
                   onChange={(e) => setObjectiveHint(e.target.value)}
                   rows={3}
-                  placeholder="Ej.: Quiero más reservas para mi restaurante en Madrid"
+                  placeholder="E.g.: I want more bookings for my restaurant in Madrid"
                   style={{ ...styles.inp, resize: "vertical" }}
                 />
                 <p style={styles.hint}>
-                  No hace falta que rellenes nada: si lo dejas vacío, la IA decide
-                  el objetivo, la zona y el presupuesto, y te enseña su propuesta
-                  antes de activar. O pulsa “✨ Rellenar con IA”.
+                  You don't have to fill in anything: if you leave it blank, the AI
+                  decides the goal, the area, and the budget, and shows you its
+                  proposal before activating. Or press “✨ Fill in with AI”.
                 </p>
                 {suggestError && (
                   <p role="alert" style={{ ...styles.hint, color: "#ef4444" }}>
@@ -703,7 +703,7 @@ export function SearchCampaignCreator({
 
               <div style={{ marginBottom: 22 }}>
                 <label htmlFor="campaign-budget" style={styles.lbl}>
-                  Presupuesto al día (opcional)
+                  Daily budget (optional)
                 </label>
                 <input
                   id="campaign-budget"
@@ -712,11 +712,11 @@ export function SearchCampaignCreator({
                   step={1}
                   value={budgetHint}
                   onChange={(e) => setBudgetHint(e.target.value)}
-                  placeholder="Ej.: 10"
+                  placeholder="E.g.: 10"
                   style={styles.inp}
                 />
                 <p style={styles.hint}>
-                  Si lo dejas vacío, lo proponemos por ti. Mínimo {BUDGET.minDailyUsd} {CURRENCY} al día.
+                  If you leave it blank, we'll suggest one for you. Minimum {BUDGET.minDailyUsd} {CURRENCY} per day.
                 </p>
                 {budgetReason && (
                   <p style={{ ...styles.hint, marginTop: 6, color: "#0f766e" }}>
@@ -727,7 +727,7 @@ export function SearchCampaignCreator({
 
               {/* MODE TOGGLE — big and visual */}
               <div style={styles.lbl} id="campaign-mode-label">
-                ¿Cómo quieres hacerlo?
+                How do you want to do it?
               </div>
               <div
                 role="group"
@@ -738,8 +738,8 @@ export function SearchCampaignCreator({
                   active={mode === "auto"}
                   onClick={() => setMode("auto")}
                   emoji="🚀"
-                  title="Automático (un clic)"
-                  desc="Los 6 ayudantes lo hacen todo y te enseñan el resultado para activar."
+                  title="Automatic (one click)"
+                  desc="The 6 helpers do everything and show you the result to activate."
                   recommended
                   colors={colors}
                 />
@@ -747,8 +747,8 @@ export function SearchCampaignCreator({
                   active={mode === "assisted"}
                   onClick={() => setMode("assisted")}
                   emoji="✍️"
-                  title="Asistido (paso a paso)"
-                  desc="Revisas y ajustas cada paso antes de continuar al siguiente."
+                  title="Step by step"
+                  desc="You review and tweak each step before moving on to the next."
                   colors={colors}
                 />
               </div>
@@ -767,7 +767,7 @@ export function SearchCampaignCreator({
                 cursor: starting ? "not-allowed" : "pointer",
               }}
             >
-              {starting ? "Empezando…" : "Crear mi campaña"}
+              {starting ? "Starting…" : "Create my campaign"}
             </button>
           </div>
         )}
@@ -780,8 +780,8 @@ export function SearchCampaignCreator({
                 <h1 className="text-2xl font-bold">{brandName}</h1>
                 <p style={{ color: colors.textMuted, fontSize: 13 }}>
                   {state?.run.mode === "auto"
-                    ? "Modo automático — preparando tu campaña…"
-                    : "Modo asistido — revisa cada paso."}
+                    ? "Automatic mode — preparing your campaign…"
+                    : "Step-by-step mode — review each step."}
                 </p>
               </div>
               <div className="flex items-center" style={{ gap: 8 }}>
@@ -789,10 +789,10 @@ export function SearchCampaignCreator({
                   href={`/brands/${brandId}/citations`}
                   style={{ ...styles.ghostBtn, textDecoration: "none" }}
                 >
-                  ← Volver a la marca
+                  ← Back to brand
                 </Link>
                 <button onClick={confirmReset} style={styles.ghostBtn}>
-                  Empezar de nuevo
+                  Start over
                 </button>
               </div>
             </div>
@@ -824,7 +824,7 @@ export function SearchCampaignCreator({
                   }}
                 />
                 <span style={{ fontSize: 13.5, color: colors.textMuted }}>
-                  Preparando tu campaña… esto tarda solo unos segundos.
+                  Preparing your campaign… this only takes a few seconds.
                 </span>
               </div>
             )}
@@ -833,13 +833,13 @@ export function SearchCampaignCreator({
             {failed && (
               <div style={{ marginBottom: 24 }}>
                 <ErrorBox>
-                  {state?.run.error || "La campaña no se pudo completar."}
+                  {state?.run.error || "The campaign couldn't be completed."}
                 </ErrorBox>
                 <button
                   onClick={reset}
                   style={{ ...styles.primaryBtn, marginTop: 12 }}
                 >
-                  Reintentar
+                  Try again
                 </button>
               </div>
             )}
@@ -876,12 +876,12 @@ export function SearchCampaignCreator({
                 </div>
                 <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>
                   {enabledNow
-                    ? "¡Tu campaña está en marcha!"
-                    : "¡Campaña creada en Google Ads!"}
+                    ? "Your campaign is live!"
+                    : "Campaign created in Google Ads!"}
                 </h2>
                 {activateResult.googleCampaignId && (
                   <p style={{ fontSize: 12, color: colors.textFaint, marginBottom: 8 }}>
-                    ID de Google Ads: {activateResult.googleCampaignId}
+                    Google Ads ID: {activateResult.googleCampaignId}
                   </p>
                 )}
                 {activateResult.summary && (
@@ -897,7 +897,7 @@ export function SearchCampaignCreator({
                     }}
                   >
                     <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                      Esto es lo que creamos en tu campaña:
+                      Here's what we created in your campaign:
                     </p>
                     <ul
                       style={{
@@ -908,16 +908,16 @@ export function SearchCampaignCreator({
                         margin: 0,
                       }}
                     >
-                      <li>{activateResult.summary.adGroupsCount} grupos de anuncios</li>
-                      <li>{activateResult.summary.keywordsCount} palabras clave</li>
+                      <li>{activateResult.summary.adGroupsCount} ad groups</li>
+                      <li>{activateResult.summary.keywordsCount} keywords</li>
                       <li>
-                        {activateResult.summary.negativesCount} palabras clave
-                        negativas (para no gastar de más)
+                        {activateResult.summary.negativesCount} negative
+                        keywords (to avoid overspending)
                       </li>
-                      <li>{activateResult.summary.adsCount} anuncios</li>
+                      <li>{activateResult.summary.adsCount} ads</li>
                       {activateResult.summary.assetsCount > 0 && (
                         <li>
-                          {activateResult.summary.assetsCount} extensiones
+                          {activateResult.summary.assetsCount} extensions
                           {activateResult.summary.assetKinds.length > 0
                             ? ` (${activateResult.summary.assetKinds.join(", ")})`
                             : ""}
@@ -939,7 +939,7 @@ export function SearchCampaignCreator({
                         textDecoration: "underline",
                       }}
                     >
-                      Ver en Google Ads ↗
+                      View in Google Ads ↗
                     </a>
                   </p>
                 )}
@@ -970,18 +970,18 @@ export function SearchCampaignCreator({
                   };
                   const rung = activateResult.biddingRung;
                   const labels = activateResult.optimizedObjectiveLabels ?? [];
-                  const what = labels.length > 0 ? labels.join(" y ") : "tus resultados";
+                  const what = labels.length > 0 ? labels.join(" and ") : "your results";
 
                   if (rung === "R3") {
                     return (
                       <div style={greenBox}>
                         <p style={textStyle}>
-                          ✓ Tu campaña ya busca clientes, no solo visitas. Tu
-                          cuenta mide bien {what} —cosas que de verdad ocurren— y
-                          le hemos dicho a Google que dé prioridad a conseguir
-                          más. Lo que mides pero aún no ha pasado nunca lo
-                          añadiremos solos en cuanto empiece a ocurrir. No tienes
-                          que tocar nada.
+                          ✓ Your campaign already looks for customers, not just
+                          visits. Your account is properly measuring {what}
+                          —things that really happen— and we've told Google to
+                          prioritize getting more. Anything you measure but hasn't
+                          happened yet, we'll add automatically as soon as it
+                          starts happening. You don't have to touch a thing.
                         </p>
                       </div>
                     );
@@ -990,13 +990,12 @@ export function SearchCampaignCreator({
                     return (
                       <div style={amberBox}>
                         <p style={textStyle}>
-                          Tu cuenta ya está preparada para medir resultados, pero
-                          todavía no hay datos suficientes para optimizar con
-                          seguridad. Mientras tanto, tu campaña consigue el máximo
-                          de visitas de calidad con tu presupuesto y seguimos
-                          contando cada resultado. En cuanto haya datos,
-                          cambiaremos solos a buscar clientes. No tienes que hacer
-                          nada.
+                          Your account is already set up to measure results, but
+                          there isn't enough data yet to optimize safely. In the
+                          meantime, your campaign gets the most quality visits it
+                          can with your budget, and we keep counting every result.
+                          As soon as there's enough data, we'll switch to looking
+                          for customers on our own. You don't have to do anything.
                         </p>
                       </div>
                     );
@@ -1005,12 +1004,12 @@ export function SearchCampaignCreator({
                     return (
                       <div style={amberBox}>
                         <p style={textStyle}>
-                          Tu cuenta todavía no mide ningún resultado (registros,
-                          ventas, contactos...), así que aún no podemos optimizar
-                          para conseguir clientes. Por ahora tu campaña consigue
-                          el máximo de visitas de calidad con tu presupuesto.
-                          Cuando empieces a medir, pasará sola a buscar clientes.
-                          No tienes que decidir nada.
+                          Your account isn't measuring any results yet (sign-ups,
+                          sales, contacts...), so we can't optimize for getting
+                          customers yet. For now your campaign gets the most
+                          quality visits it can with your budget. Once you start
+                          measuring, it'll switch to looking for customers on its
+                          own. You don't have to decide anything.
                         </p>
                       </div>
                     );
@@ -1020,19 +1019,19 @@ export function SearchCampaignCreator({
                   return activateResult.conversionTrackingEnabled ? (
                     <div style={greenBox}>
                       <p style={textStyle}>
-                        ✓ Tu campaña ya mide resultados de verdad (ventas o
-                        contactos), no solo visitas. La optimizaremos hacia lo que
-                        de verdad te importa.
+                        ✓ Your campaign already measures real results (sales or
+                        contacts), not just visits. We'll optimize it toward what
+                        truly matters to you.
                       </p>
                     </div>
                   ) : (
                     <div style={amberBox}>
                       <p style={textStyle}>
-                        Por ahora tu web todavía no mide resultados (ventas o
-                        contactos), así que pujamos por clics para que tu anuncio
-                        se vea desde el primer día. Más adelante podremos medir
-                        esos resultados y optimizar hacia ellos: lo dejaremos
-                        listo por ti, sin que tengas que tocar nada.
+                        For now your site isn't measuring results yet (sales or
+                        contacts), so we bid for clicks so your ad shows from day
+                        one. Later we'll be able to measure those results and
+                        optimize toward them: we'll set it up for you, without you
+                        having to touch a thing.
                       </p>
                     </div>
                   );
@@ -1047,12 +1046,12 @@ export function SearchCampaignCreator({
                         marginBottom: 8,
                       }}
                     >
-                      Está en pausa. No se gasta nada hasta que la pongas en marcha.
+                      It's paused. Nothing is spent until you turn it on.
                     </p>
                     <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
-                      Cuando la pongas en marcha, empezará a mostrarse en Google y
-                      a gastar como mucho tu presupuesto del día. Puedes volver a
-                      pausarla cuando quieras, sin coste.
+                      When you turn it on, it'll start showing on Google and
+                      spending up to your daily budget. You can pause it again
+                      whenever you want, at no cost.
                     </p>
                     <button
                       onClick={enableCampaign}
@@ -1063,7 +1062,7 @@ export function SearchCampaignCreator({
                         cursor: enabling || discarding ? "not-allowed" : "pointer",
                       }}
                     >
-                      {enabling ? "Poniendo en marcha…" : "Ponerla en marcha"}
+                      {enabling ? "Turning it on…" : "Turn it on"}
                     </button>
                     <div style={{ marginTop: 14 }}>
                       <button
@@ -1080,8 +1079,8 @@ export function SearchCampaignCreator({
                         }}
                       >
                         {discarding
-                          ? "Descartando…"
-                          : "Descartar esta campaña (la elimina de Google Ads)"}
+                          ? "Discarding…"
+                          : "Discard this campaign (removes it from Google Ads)"}
                       </button>
                     </div>
                   </>
@@ -1089,12 +1088,12 @@ export function SearchCampaignCreator({
                 {enabledNow && (
                   <>
                     <p style={{ fontSize: 14, color: colors.accent, fontWeight: 600 }}>
-                      Ya está activa y mostrándose en Google.
+                      It's now active and showing on Google.
                     </p>
                     <p style={{ fontSize: 13, color: colors.textMuted, marginTop: 8 }}>
-                      A partir de ahora puede gastar como mucho tu presupuesto del
-                      día. Si quieres pararla, entra en tu cuenta de Google Ads y
-                      ponla en pausa cuando quieras.
+                      From now on it can spend up to your daily budget. If you
+                      want to stop it, go into your Google Ads account and pause
+                      it whenever you want.
                     </p>
                   </>
                 )}
@@ -1108,7 +1107,7 @@ export function SearchCampaignCreator({
                   }}
                 >
                   <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                    Próximos pasos:
+                    Next steps:
                   </p>
                   <ul
                     style={{
@@ -1121,26 +1120,25 @@ export function SearchCampaignCreator({
                   >
                     {enabledNow ? (
                       <>
-                        <li>⏱️ Revisa tus primeros clics en 24-48 horas.</li>
-                        <li>📊 Fíjate en si te llegan clientes de calidad.</li>
+                        <li>⏱️ Check your first clicks in 24-48 hours.</li>
+                        <li>📊 See whether quality customers are coming in.</li>
                         <li>
-                          🔧 Si hace falta, ajusta tus palabras clave o el
-                          presupuesto.
+                          🔧 If needed, adjust your keywords or your budget.
                         </li>
                       </>
                     ) : (
                       <>
                         <li>
-                          👀 Revisa la propuesta con calma: el nombre, las
-                          palabras clave y los anuncios.
+                          👀 Review the proposal at your own pace: the name, the
+                          keywords, and the ads.
                         </li>
                         <li>
-                          ▶️ Cuando estés listo, pulsa «Ponerla en marcha» para
-                          empezar a mostrarla en Google.
+                          ▶️ When you're ready, press “Turn it on” to start
+                          showing it on Google.
                         </li>
                         <li>
-                          📊 En cuanto reciba sus primeros clics, te ayudo a
-                          mejorarla.
+                          📊 As soon as it gets its first clicks, I'll help you
+                          improve it.
                         </li>
                       </>
                     )}
@@ -1244,27 +1242,27 @@ function ModeCard({
 // segmentar. La IA decide el valor por defecto; esto es solo para enseñarlo
 // claro y dejar que el usuario lo corrija si hace falta.
 const COUNTRY_LABELS: Record<string, { name: string; flag: string }> = {
-  ES: { name: "España", flag: "🇪🇸" },
-  MX: { name: "México", flag: "🇲🇽" },
+  ES: { name: "Spain", flag: "🇪🇸" },
+  MX: { name: "Mexico", flag: "🇲🇽" },
   AR: { name: "Argentina", flag: "🇦🇷" },
   CO: { name: "Colombia", flag: "🇨🇴" },
   CL: { name: "Chile", flag: "🇨🇱" },
-  PE: { name: "Perú", flag: "🇵🇪" },
-  US: { name: "Estados Unidos", flag: "🇺🇸" },
-  GB: { name: "Reino Unido", flag: "🇬🇧" },
-  FR: { name: "Francia", flag: "🇫🇷" },
-  DE: { name: "Alemania", flag: "🇩🇪" },
-  IT: { name: "Italia", flag: "🇮🇹" },
+  PE: { name: "Peru", flag: "🇵🇪" },
+  US: { name: "United States", flag: "🇺🇸" },
+  GB: { name: "United Kingdom", flag: "🇬🇧" },
+  FR: { name: "France", flag: "🇫🇷" },
+  DE: { name: "Germany", flag: "🇩🇪" },
+  IT: { name: "Italy", flag: "🇮🇹" },
   PT: { name: "Portugal", flag: "🇵🇹" },
 };
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  es: "Español",
-  en: "Inglés",
-  fr: "Francés",
-  de: "Alemán",
-  it: "Italiano",
-  pt: "Portugués",
+  es: "Spanish",
+  en: "English",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
 };
 
 function countryLabel(code?: string): { name: string; flag: string } {
@@ -1291,11 +1289,11 @@ const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_LABELS).map(([code, name]) => (
 // enseñamos claro y dejamos que el usuario lo cambie con un clic si quiere.
 // Las claves coinciden con ObjectiveType de src/lib/engine/types.ts.
 const OBJECTIVE_LABELS: Record<ObjectiveType, string> = {
-  leads: "Conseguir contactos (clientes potenciales)",
-  sales: "Vender o conseguir compras en tu web",
-  calls: "Recibir llamadas de teléfono",
-  traffic: "Llevar más visitas a tu web",
-  awareness: "Dar a conocer tu marca",
+  leads: "Get contacts (potential customers)",
+  sales: "Sell or get purchases on your website",
+  calls: "Get phone calls",
+  traffic: "Bring more visitors to your website",
+  awareness: "Get your brand known",
 };
 
 function objectiveLabel(type?: string): string {
@@ -1333,7 +1331,7 @@ function GeoBanner({
         }}
       >
         <span style={{ fontSize: 13, color: colors.textMuted }}>
-          🌍 Estamos detectando el país de tu marca…
+          🌍 We're detecting your brand's country…
         </span>
       </div>
     );
@@ -1354,18 +1352,18 @@ function GeoBanner({
       }}
     >
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "baseline" }}>
-        <span style={{ fontSize: 12.5, color: colors.textMuted }}>Tu campaña apunta a</span>
+        <span style={{ fontSize: 12.5, color: colors.textMuted }}>Your campaign targets</span>
         <span style={{ fontSize: 15, fontWeight: 700 }}>
           {primary.flag} {primary.name}
           {extra > 0 ? ` +${extra}` : ""}
         </span>
         <span style={{ fontSize: 12.5, color: colors.textMuted }}>
-          · anuncios en {lang}
+          · ads in {lang}
         </span>
       </div>
       <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 5 }}>
-        Lo eligió la IA por la web de tu marca, y por eso las palabras clave salen
-        en {lang.toLowerCase()}. Si no es correcto, puedes cambiarlo en «
+        The AI chose this based on your brand's website, which is why the keywords
+        come out in {lang.toLowerCase()}. If it's not right, you can change it in «
         {STEP_TITLE.planner}».
       </p>
     </div>
@@ -1405,12 +1403,12 @@ function Timeline({
     (a) => dotStateFor(stepByAgent.get(a)) === "working",
   );
   const liveStatusText = activationGate
-    ? "Tu campaña está lista. Revisa el resumen y actívala cuando quieras."
+    ? "Your campaign is ready. Review the summary and activate it whenever you want."
     : state?.run.status === "failed"
-      ? "Hubo un problema al preparar la campaña."
+      ? "There was a problem preparing the campaign."
       : workingAgent
-        ? `Preparando: ${STEP_TITLE[workingAgent]}.`
-        : "Preparando tu campaña…";
+        ? `Preparing: ${STEP_TITLE[workingAgent]}.`
+        : "Preparing your campaign…";
 
   return (
     <div style={{ position: "relative" }}>
@@ -1560,9 +1558,9 @@ function StatusPill({
   colors: ReturnType<typeof useTheme>["colors"];
 }) {
   const map: Record<DotState, { t: string; bg: string; c: string }> = {
-    pending: { t: "Pendiente", bg: "rgba(161,161,170,0.12)", c: colors.textMuted },
-    working: { t: "Trabajando…", bg: "rgba(59,130,246,0.15)", c: "#60A5FA" },
-    done: { t: "Listo", bg: "rgba(16,185,129,0.15)", c: colors.accent },
+    pending: { t: "Pending", bg: "rgba(161,161,170,0.12)", c: colors.textMuted },
+    working: { t: "Working…", bg: "rgba(59,130,246,0.15)", c: "#60A5FA" },
+    done: { t: "Ready", bg: "rgba(16,185,129,0.15)", c: colors.accent },
     failed: { t: "Error", bg: "rgba(239,68,68,0.15)", c: "#F87171" },
   };
   const s = map[state];
@@ -1671,8 +1669,8 @@ function KeywordDetails({
         }}
       >
         {open
-          ? "Ocultar la lista completa"
-          : `Ver la lista completa (${keywords.length + negatives.length})`}
+          ? "Hide the full list"
+          : `See the full list (${keywords.length + negatives.length})`}
       </button>
       {open && (
         <div style={{ marginTop: 10, maxHeight: 320, overflow: "auto" }}>
@@ -1686,7 +1684,7 @@ function KeywordDetails({
                   marginBottom: 6,
                 }}
               >
-                🔑 Palabras por las que aparecerás ({keywords.length})
+                🔑 Keywords you'll show up for ({keywords.length})
               </p>
               <div>{keywords.map((k) => chip(k.text, "kw"))}</div>
             </div>
@@ -1701,7 +1699,7 @@ function KeywordDetails({
                   marginBottom: 6,
                 }}
               >
-                🚫 Palabras que evitaremos ({negatives.length})
+                🚫 Keywords we'll avoid ({negatives.length})
               </p>
               <div>{negatives.map((n) => chip(n.text, "neg"))}</div>
             </div>
@@ -1777,7 +1775,7 @@ function ApprovalBlock({
         setParseError(null);
         cb(step.id, parsed);
       } catch {
-        setParseError("No pudimos leer los cambios. Revisa el formato.");
+        setParseError("We couldn't read the changes. Check the format.");
         setAccepting(false);
       }
       return;
@@ -1828,14 +1826,14 @@ function ApprovalBlock({
   return (
     <div style={styles.approval}>
       <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-        ¿Te parece bien? Puedes aceptarlo o ajustarlo.
+        Does this look right? You can accept it or tweak it.
       </p>
 
       {isPlanner && planner && !editing && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
           <div>
             <label htmlFor="planner-objective-type" style={styles.lbl}>
-              ¿Qué quieres conseguir?
+              What do you want to achieve?
             </label>
             <select
               id="planner-objective-type"
@@ -1853,13 +1851,13 @@ function ApprovalBlock({
               ))}
             </select>
             <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6 }}>
-              La IA eligió esto por ti mirando tu web. Si lo cambias, ajustará
-              los anuncios y la forma de pujar para ese objetivo.
+              The AI chose this for you by looking at your website. If you change
+              it, it'll adjust the ads and the bidding for that goal.
             </p>
           </div>
           <div>
             <label htmlFor="planner-objective" style={styles.lbl}>
-              En tus palabras (opcional)
+              In your own words (optional)
             </label>
             <textarea
               id="planner-objective"
@@ -1871,7 +1869,7 @@ function ApprovalBlock({
           </div>
           <div>
             <label htmlFor="planner-budget" style={styles.lbl}>
-              Presupuesto al día ({CURRENCY})
+              Daily budget ({CURRENCY})
             </label>
             <input
               id="planner-budget"
@@ -1885,7 +1883,7 @@ function ApprovalBlock({
           </div>
           <div>
             <label htmlFor="planner-country" style={styles.lbl}>
-              País al que apuntar
+              Target country
             </label>
             <select
               id="planner-country"
@@ -1905,7 +1903,7 @@ function ApprovalBlock({
           </div>
           <div>
             <label htmlFor="planner-language" style={styles.lbl}>
-              Idioma de los anuncios
+              Ad language
             </label>
             <select
               id="planner-language"
@@ -1923,8 +1921,8 @@ function ApprovalBlock({
               ))}
             </select>
             <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6 }}>
-              Si cambias el país o el idioma, la IA buscará las palabras clave
-              para esa zona y en ese idioma.
+              If you change the country or the language, the AI will look for
+              keywords for that area and in that language.
             </p>
           </div>
         </div>
@@ -1932,7 +1930,7 @@ function ApprovalBlock({
 
       {editing && (
         <div style={{ marginBottom: 12 }}>
-          <label style={styles.lbl}>Ajustes (avanzado)</label>
+          <label style={styles.lbl}>Settings (advanced)</label>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -1955,7 +1953,7 @@ function ApprovalBlock({
             cursor: accepting ? "not-allowed" : "pointer",
           }}
         >
-          {accepting ? "Aceptando…" : "Aceptar y continuar"}
+          {accepting ? "Accepting…" : "Accept and continue"}
         </button>
         <button
           onClick={handleAcceptAndFinish}
@@ -1966,19 +1964,20 @@ function ApprovalBlock({
             cursor: accepting ? "not-allowed" : "pointer",
           }}
         >
-          ✨ Acepta y que la IA termine el resto
+          ✨ Accept and let the AI finish the rest
         </button>
       </div>
       <div style={{ marginTop: 8 }}>
         {!isPlanner && (
           <span style={{ fontSize: 11.5, color: colors.textFaint }}>
-            ¿Quieres cambiarlo? Pulsa “Empezar de nuevo” y ajusta tus datos; la IA
-            lo rehará por ti.{" "}
+            Want to change it? Press “Start over” and adjust your details; the AI
+            will redo it for you.{" "}
           </span>
         )}
         <span style={{ fontSize: 11, color: colors.textFaint }}>
-          Nada se publica todavía. Con “que la IA termine” preparará todo y se
-          detendrá en el último paso para que tú decidas si activarla.
+          Nothing is published yet. With “let the AI finish” it'll prepare
+          everything and stop at the last step so you can decide whether to
+          activate it.
         </span>
       </div>
     </div>
@@ -2015,7 +2014,7 @@ function ActivationReview({
   // The AI always names the campaign; the fallback only matters if the
   // structure step is somehow missing. Use a human label, never a raw run-id
   // slug (which would read as a meaningless code to the user).
-  const campaignName = structure?.campaignName?.trim() || "Campaña de Búsqueda";
+  const campaignName = structure?.campaignName?.trim() || "Search Campaign";
 
   // The user may rename the campaign before it's created (optional — it comes
   // pre-filled with the name the AI already chose, so doing nothing is fine).
@@ -2036,13 +2035,13 @@ function ActivationReview({
     return (
       <div style={{ ...styles.card, marginTop: 12, borderColor: "#F87171" }}>
         <h2 style={{ fontSize: 19, fontWeight: 700, marginBottom: 4 }}>
-          Casi listo: hay que corregir algo antes de publicar ⚠️
+          Almost there: something needs fixing before publishing ⚠️
         </h2>
         <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
-          La revisión final encontró{" "}
-          {shown.length === 1 ? "un punto" : `${shown.length} puntos`} que conviene
-          arreglar para cumplir las reglas de Google. Por seguridad, no la
-          publicamos hasta que esté bien. No se ha creado nada en Google.
+          The final review found{" "}
+          {shown.length === 1 ? "one item" : `${shown.length} items`} worth fixing
+          to comply with Google's rules. To be safe, we won't publish it until
+          it's right. Nothing has been created in Google.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
           {shown.map((issue, i) => (
@@ -2055,7 +2054,7 @@ function ActivationReview({
               </p>
               {issue.suggestion && (
                 <p style={{ fontSize: 12.5, color: colors.textMuted, marginTop: 4 }}>
-                  Cómo arreglarlo: {issue.suggestion}
+                  How to fix it: {issue.suggestion}
                 </p>
               )}
             </div>
@@ -2070,10 +2069,10 @@ function ActivationReview({
             padding: "13px 24px",
           }}
         >
-          Empezar de nuevo
+          Start over
         </button>
         <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 10, textAlign: "center" }}>
-          Vuelve a crearla ajustando los datos (por ejemplo, la web o el presupuesto).
+          Create it again by adjusting the details (for example, the website or the budget).
         </p>
       </div>
     );
@@ -2082,16 +2081,16 @@ function ActivationReview({
   return (
     <div style={{ ...styles.card, marginTop: 12, borderColor: colors.accent }}>
       <h2 style={{ fontSize: 19, fontWeight: 700, marginBottom: 4 }}>
-        Todo listo para activar 🎉
+        All set to activate 🎉
       </h2>
       <p style={{ fontSize: 13, color: colors.textMuted, marginBottom: 16 }}>
-        Este es el resumen de tu campaña. Revísalo y actívala cuando quieras.
+        Here's the summary of your campaign. Review it and activate it whenever you want.
       </p>
 
       {/* Editable campaign name — pre-filled with the AI's choice. */}
       <div style={{ marginBottom: 16 }}>
         <label style={styles.lbl} htmlFor="campaign-name">
-          Nombre de la campaña
+          Campaign name
         </label>
         <input
           id="campaign-name"
@@ -2112,17 +2111,17 @@ function ActivationReview({
           }}
         />
         <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6 }}>
-          Le pusimos este nombre por ti. Puedes cambiarlo o dejarlo como está —
-          es solo para que la reconozcas; tus clientes no lo ven.
+          We named it for you. You can change it or leave it as is — it's just so
+          you recognize it; your customers don't see it.
         </p>
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <Stat label="Grupos de anuncios" value={String(adGroupCount)} colors={colors} />
-        <Stat label="Palabras clave" value={String(keywordCount)} colors={colors} />
+        <Stat label="Ad groups" value={String(adGroupCount)} colors={colors} />
+        <Stat label="Keywords" value={String(keywordCount)} colors={colors} />
         {planner?.geo?.countryCodes?.[0] && (
           <Stat
-            label="País"
+            label="Country"
             value={`${countryLabel(planner.geo.countryCodes[0]).flag} ${
               countryLabel(planner.geo.countryCodes[0]).name
             }`}
@@ -2131,8 +2130,8 @@ function ActivationReview({
         )}
         {planner?.budget?.dailyUsd != null && (
           <Stat
-            label="Presupuesto"
-            value={`${planner.budget.dailyUsd} ${CURRENCY}/día`}
+            label="Budget"
+            value={`${planner.budget.dailyUsd} ${CURRENCY}/day`}
             colors={colors}
           />
         )}
@@ -2140,7 +2139,7 @@ function ActivationReview({
 
       {sampleAd && (
         <div style={{ marginBottom: 16 }}>
-          <p style={styles.lbl}>Ejemplo de anuncio</p>
+          <p style={styles.lbl}>Sample ad</p>
           <div style={styles.adPreview}>
             <div style={{ fontSize: 14, color: "#60A5FA", fontWeight: 600 }}>
               {sampleAd.headlines
@@ -2172,7 +2171,7 @@ function ActivationReview({
           }}
         >
           <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-            Sugerencias para mejorarla (opcionales):
+            Suggestions to improve it (optional):
           </p>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {fixIssues.slice(0, 4).map((issue, i) => (
@@ -2199,10 +2198,10 @@ function ActivationReview({
           cursor: activating ? "not-allowed" : "pointer",
         }}
       >
-        {activating ? "Creando en Google Ads…" : "Activar campaña"}
+        {activating ? "Creating in Google Ads…" : "Activate campaign"}
       </button>
       <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 10, textAlign: "center" }}>
-        Se crea en Google Ads en PAUSA; tú decides cuándo ponerla en marcha.
+        It's created in Google Ads PAUSED; you decide when to turn it on.
       </p>
     </div>
   );
@@ -2335,7 +2334,7 @@ function pickText(data: unknown): string | null {
     data.delta;
   if (typeof t === "string") return t;
   // The activator streams per-ad-group ticks carrying only the group name.
-  if (typeof data.adGroup === "string") return `Creando grupo: ${data.adGroup}`;
+  if (typeof data.adGroup === "string") return `Creating group: ${data.adGroup}`;
   return null;
 }
 
@@ -2407,30 +2406,30 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
       const o = out as Partial<PlannerOutput>;
       const lines: string[] = [];
       if (o.objectiveType)
-        lines.push(`🎯 Objetivo: ${objectiveLabel(o.objectiveType)}`);
+        lines.push(`🎯 Goal: ${objectiveLabel(o.objectiveType)}`);
       if (o.objectiveSummary) lines.push(`💬 ${o.objectiveSummary}`);
       if (o.geo?.countryCodes?.length) {
         const c = countryLabel(o.geo.countryCodes[0]);
         const more = o.geo.countryCodes.length - 1;
         lines.push(
-          `📍 País: ${c.flag} ${c.name}${more > 0 ? ` +${more}` : ""} · anuncios en ${languageLabel(o.geo.languageCode)}`,
+          `📍 Country: ${c.flag} ${c.name}${more > 0 ? ` +${more}` : ""} · ads in ${languageLabel(o.geo.languageCode)}`,
         );
       } else if (o.geo?.locations?.length) {
-        lines.push(`📍 Zona: ${o.geo.locations.join(", ")}`);
+        lines.push(`📍 Area: ${o.geo.locations.join(", ")}`);
       }
       if (o.budget?.dailyUsd != null)
-        lines.push(`💰 Presupuesto: ${o.budget.dailyUsd} ${CURRENCY} al día`);
+        lines.push(`💰 Budget: ${o.budget.dailyUsd} ${CURRENCY} per day`);
       if (o.themes?.length)
-        lines.push(`🗂️ Temas: ${o.themes.map((t) => t.name).join(", ")}`);
+        lines.push(`🗂️ Themes: ${o.themes.map((t) => t.name).join(", ")}`);
       return lines;
     }
     case "keyword_researcher": {
       const o = out as Partial<KeywordResearchOutput>;
       const lines: string[] = [];
       if (o.keywords?.length)
-        lines.push(`🔑 ${o.keywords.length} palabras clave encontradas`);
+        lines.push(`🔑 ${o.keywords.length} keywords found`);
       if (o.negatives?.length)
-        lines.push(`🚫 ${o.negatives.length} palabras a evitar`);
+        lines.push(`🚫 ${o.negatives.length} negative keywords`);
       // The full, scrollable list is rendered separately by <KeywordDetails>
       // (Pedro asked to see EVERY keyword, not just a few examples).
       return lines;
@@ -2438,31 +2437,31 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
     case "structure_architect": {
       const o = out as Partial<StructureOutput>;
       const lines: string[] = [];
-      if (o.campaignName) lines.push(`📛 Campaña: ${o.campaignName}`);
+      if (o.campaignName) lines.push(`📛 Campaign: ${o.campaignName}`);
       if (o.adGroups?.length)
-        lines.push(`🧩 ${o.adGroups.length} grupos de anuncios`);
+        lines.push(`🧩 ${o.adGroups.length} ad groups`);
       const names = o.adGroups?.slice(0, 4).map((g) => g.name);
-      if (names?.length) lines.push(`Grupos: ${names.join(", ")}`);
+      if (names?.length) lines.push(`Groups: ${names.join(", ")}`);
       return lines;
     }
     case "rsa_copywriter": {
       const o = out as Partial<RSAOutput>;
       const lines: string[] = [];
-      if (o.ads?.length) lines.push(`✍️ Anuncios para ${o.ads.length} grupos`);
+      if (o.ads?.length) lines.push(`✍️ Ads for ${o.ads.length} groups`);
       const first = o.ads?.[0]?.headlines?.slice(0, 2).map((h) => h.text);
-      if (first?.length) lines.push(`Ejemplo: "${first.join(" · ")}"`);
+      if (first?.length) lines.push(`Example: "${first.join(" · ")}"`);
       return lines;
     }
     case "policy_qa": {
       const o = out as { verdict?: string; issues?: unknown[] };
       const lines: string[] = [];
       const verdictMap: Record<string, string> = {
-        pass: "✅ Todo correcto, listo para publicar",
-        fix: "⚠️ Pequeños ajustes recomendados",
-        block: "⛔ Hay algo que corregir antes de publicar",
+        pass: "✅ All good, ready to publish",
+        fix: "⚠️ Small tweaks recommended",
+        block: "⛔ Something needs fixing before publishing",
       };
-      if (o.verdict) lines.push(verdictMap[o.verdict] ?? `Resultado: ${o.verdict}`);
-      if (o.issues?.length) lines.push(`${o.issues.length} cosas revisadas`);
+      if (o.verdict) lines.push(verdictMap[o.verdict] ?? `Result: ${o.verdict}`);
+      if (o.issues?.length) lines.push(`${o.issues.length} things checked`);
       return lines;
     }
     case "activator": {
@@ -2470,15 +2469,15 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
       const lines: string[] = [];
       if (o.status) {
         const statusMap: Record<string, string> = {
-          PAUSED: "En pausa (lista, sin gastar todavía)",
-          ENABLED: "Activa (ya puede mostrarse)",
-          REMOVED: "Eliminada",
+          PAUSED: "Paused (ready, not spending yet)",
+          ENABLED: "Active (can now show)",
+          REMOVED: "Removed",
         };
-        lines.push(`Estado: ${statusMap[o.status] ?? o.status}`);
+        lines.push(`Status: ${statusMap[o.status] ?? o.status}`);
       }
-      if (o.adsCreated != null) lines.push(`📢 ${o.adsCreated} anuncios creados`);
+      if (o.adsCreated != null) lines.push(`📢 ${o.adsCreated} ads created`);
       if (o.keywordsAdded != null)
-        lines.push(`🔑 ${o.keywordsAdded} palabras clave añadidas`);
+        lines.push(`🔑 ${o.keywordsAdded} keywords added`);
       return lines;
     }
     default:

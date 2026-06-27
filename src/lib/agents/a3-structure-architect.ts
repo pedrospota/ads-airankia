@@ -19,6 +19,7 @@ import { adsDb } from "@/lib/ads-db";
 import { adGroups, keywords, negativeKeywords } from "@/lib/schema";
 import {
   MICROS_PER_UNIT,
+  languageName,
   type AgentDefinition,
   type RunContext,
   type AgentHelpers,
@@ -42,7 +43,7 @@ const plannedKeywordSchema: JSONSchema = {
   additionalProperties: false,
   required: ["text", "matchType"],
   properties: {
-    text: { type: "string", description: "El término de la keyword, sin operadores de concordancia." },
+    text: { type: "string", description: "The keyword term, without any match-type operators." },
     matchType: { type: "string", enum: ["EXACT", "PHRASE", "BROAD"] },
   },
 };
@@ -55,13 +56,13 @@ const STRUCTURE_SCHEMA: JSONSchema = {
     campaignName: {
       type: "string",
       description:
-        "Nombre claro de la campaña de Search. Patrón recomendado: 'Marca | Search | Objetivo | Geo'.",
+        "Clear name for the Search campaign. Recommended pattern: 'Brand | Search | Objective | Geo'.",
     },
     adGroups: {
       type: "array",
       minItems: 1,
       maxItems: 12,
-      description: "Grupos de anuncios, cada uno con UN solo tema (STAG).",
+      description: "Ad groups, each covering a SINGLE theme (STAG).",
       items: {
         type: "object",
         additionalProperties: false,
@@ -75,10 +76,10 @@ const STRUCTURE_SCHEMA: JSONSchema = {
           "landingPageUrl",
         ],
         properties: {
-          name: { type: "string", description: "Nombre corto y descriptivo del grupo." },
+          name: { type: "string", description: "Short, descriptive name for the ad group." },
           theme: {
             type: "string",
-            description: "El único tema/intención que cubre este grupo (1 sola idea).",
+            description: "The single theme/intent this ad group covers (one idea only).",
           },
           archetype: {
             type: "string",
@@ -97,17 +98,17 @@ const STRUCTURE_SCHEMA: JSONSchema = {
           negativeKeywords: {
             type: "array",
             description:
-              "Negativas a nivel de grupo: bloquean términos de OTROS grupos (cross-group) e intenciones equivocadas.",
+              "Ad-group-level negatives: block terms from OTHER groups (cross-group) and the wrong intents.",
             items: plannedKeywordSchema,
           },
           defaultCpcUsd: {
             type: "number",
             description:
-              "CPC máximo por defecto del grupo en USD (opcional). Omitir si la estrategia de puja es automática.",
+              "Default max CPC for the ad group in USD (optional). Omit when the bidding strategy is automated.",
           },
           landingPageUrl: {
             type: "string",
-            description: "URL de destino más relevante para el tema del grupo.",
+            description: "Most relevant landing page URL for the ad group's theme.",
           },
         },
       },
@@ -115,7 +116,7 @@ const STRUCTURE_SCHEMA: JSONSchema = {
     sharedNegatives: {
       type: "array",
       description:
-        "Negativas a nivel de campaña (compartidas): basura universal, intención libre/gratis, geo incorrecta, etc.",
+        "Campaign-level (shared) negatives: universal junk, free/gratis intent, wrong geo, etc.",
       items: plannedKeywordSchema,
     },
     biddingStrategy: {
@@ -128,12 +129,12 @@ const STRUCTURE_SCHEMA: JSONSchema = {
         "MAXIMIZE_CONVERSION_VALUE",
         "TARGET_ROAS",
       ],
-      description: "Estrategia de puja de la campaña (normalmente la que fijó el estratega A1).",
+      description: "The campaign's bidding strategy (normally the one set by strategist A1).",
     },
     rationale: {
       type: "string",
       description:
-        "Explicación breve, en español sencillo, de por qué esta estructura es la correcta.",
+        "Short, plain explanation of why this structure is the right one, written in the brand's main language (the one specified in the user prompt).",
     },
   },
 };
@@ -144,106 +145,109 @@ const STRUCTURE_SCHEMA: JSONSchema = {
 
 function buildSystemPrompt(): string {
   return [
-    "Eres un especialista senior en Google Ads (Search) con 15 años optimizando cuentas de PPC.",
-    "Tu trabajo es diseñar la ESTRUCTURA de una campaña de Búsqueda: el árbol campaña → grupos de anuncios,",
-    "y el andamiaje de palabras clave negativas que mantiene cada grupo limpio y enfocado.",
+    "You are a senior Google Ads (Search) specialist with 15 years optimizing PPC accounts.",
+    "Your job is to design the STRUCTURE of a Search campaign: the campaign → ad-groups tree,",
+    "and the negative-keyword scaffolding that keeps each group clean and focused.",
     "",
-    "PRINCIPIOS QUE DEFIENDES SIEMPRE:",
-    "1. STAG (Single Theme Ad Group): cada grupo cubre UNA sola intención/tema. Si dos keywords",
-    "   pedirían anuncios distintos, van en grupos distintos. Grupos enfocados = anuncios más relevantes",
-    "   = mejor Quality Score = menor CPC.",
-    "2. Mezcla sensata de concordancias. Por defecto prioriza PHRASE y EXACT para control de intención;",
-    "   usa BROAD solo cuando la estrategia de puja es automática (Smart Bidding) y con buenas negativas.",
-    "   Marca el matchTypePolicy del grupo como MIXED si combinas tipos, o el tipo concreto si es uno solo.",
-    "3. Deduplica. Una misma keyword nunca debe aparecer en dos grupos: causa competencia interna.",
-    "4. Negativas cruzadas (cross-group): añade como negativas de grupo los términos núcleo de los OTROS",
-    "   grupos, para que cada búsqueda caiga en el grupo correcto. Esto es obligatorio en estructuras STAG.",
-    "5. Negativas compartidas de campaña: bloquea ruido universal (gratis, empleo, 'cómo se hace', PDF,",
-    "   ubicaciones fuera del geo objetivo, marcas que no quieres pujar) según el objetivo del negocio.",
-    "6. Archetipos: usa 'brand' para términos de la propia marca, 'competitor' para competidores,",
-    "   'category'/'non_brand_stag' para términos genéricos de producto/servicio, 'dsa' solo si procede.",
-    "7. Nombres consistentes y legibles para humanos. La campaña sigue el patrón 'Marca | Search | Objetivo | Geo'.",
+    "PRINCIPLES YOU ALWAYS DEFEND:",
+    "1. STAG (Single Theme Ad Group): each group covers ONE intent/theme. If two keywords",
+    "   would call for different ads, they go in different groups. Focused groups = more relevant ads",
+    "   = better Quality Score = lower CPC.",
+    "2. Sensible match-type mix. By default prioritize PHRASE and EXACT for intent control;",
+    "   use BROAD only when the bidding strategy is automated (Smart Bidding) and backed by good negatives.",
+    "   Set the group's matchTypePolicy to MIXED if you combine types, or the specific type if it is just one.",
+    "3. Deduplicate. The same keyword must never appear in two groups: it causes internal competition.",
+    "4. Cross-group negatives: add the core terms of the OTHER groups as ad-group negatives,",
+    "   so each search lands in the correct group. This is mandatory in STAG structures.",
+    "5. Campaign shared negatives: block universal noise (free, jobs, 'how to', PDF,",
+    "   locations outside the target geo, brands you do not want to bid on) according to the business objective.",
+    "6. Archetypes: use 'brand' for the brand's own terms, 'competitor' for competitors,",
+    "   'category'/'non_brand_stag' for generic product/service terms, 'dsa' only when appropriate.",
+    "7. Consistent, human-readable names. The campaign follows the pattern 'Brand | Search | Objective | Geo'.",
     "",
-    "REGLAS DURAS:",
-    "- Usa SOLO las keywords aportadas por la investigación (A2). No inventes keywords nuevas.",
-    "- Cada keyword va exactamente en UN grupo (el más relevante por su tema/intención).",
-    "- defaultCpcUsd es opcional: inclúyelo solo si la puja es manual; si es automática, omítelo.",
-    "- landingPageUrl de cada grupo debe ser una URL real del sitio de la marca (usa la de destino por defecto si no hay una mejor).",
-    "- Devuelve la estructura mediante la herramienta estructurada; no escribas texto libre fuera de ella.",
-    "- Todos los textos visibles (nombres, rationale) en español claro y sencillo.",
+    "HARD RULES:",
+    "- Use ONLY the keywords provided by the research step (A2). Do not invent new keywords.",
+    "- Each keyword goes in exactly ONE group (the most relevant by its theme/intent).",
+    "- defaultCpcUsd is optional: include it only if bidding is manual; omit it if bidding is automated.",
+    "- Each group's landingPageUrl must be a real URL on the brand's site (use the default landing URL if there is no better one).",
+    "- Return the structure via the structured tool; do not write free text outside of it.",
+    "- Write all user-facing text in the brand's MAIN language — the one specified in the user prompt.",
   ].join("\n");
 }
 
 function buildUserPrompt(ctx: RunContext): string {
   const { brand, planner, keywords: kw } = ctx;
 
+  const lang = languageName(ctx.planner?.geo.languageCode);
+
   const landingDefault =
-    brand.landingPageUrl ?? brand.brandWebsite ?? "(sin URL — usa la del sitio de la marca)";
+    brand.landingPageUrl ?? brand.brandWebsite ?? "(no URL — use the brand's site URL)";
 
   const themesBlock =
     planner?.themes
       .map((t, i) => `  ${i + 1}. ${t.name} [${t.intent}] — ${t.description}`)
-      .join("\n") ?? "  (el estratega no aportó temas)";
+      .join("\n") ?? "  (the strategist provided no themes)";
 
   const kpisBlock =
-    planner?.kpis.map((k) => `  - ${k.primary}: ${k.target}`).join("\n") ?? "  (sin KPIs)";
+    planner?.kpis.map((k) => `  - ${k.primary}: ${k.target}`).join("\n") ?? "  (no KPIs)";
 
   // Compact keyword table so the model can assign every keyword to a group.
   const kwBlock =
     kw?.keywords
       .map((k) => {
-        const vol = k.avgMonthlySearches != null ? `~${k.avgMonthlySearches}/mes` : "vol?";
+        const vol = k.avgMonthlySearches != null ? `~${k.avgMonthlySearches}/mo` : "vol?";
         const comp = k.competition ? k.competition : "comp?";
         const rel = k.relevanceScore != null ? `rel ${k.relevanceScore.toFixed(2)}` : "rel?";
-        return `  - "${k.text}" [${k.matchType}] tema=${k.theme} intención=${k.intent} ${vol} ${comp} ${rel}`;
+        return `  - "${k.text}" [${k.matchType}] theme=${k.theme} intent=${k.intent} ${vol} ${comp} ${rel}`;
       })
-      .join("\n") ?? "  (sin keywords del investigador)";
+      .join("\n") ?? "  (no keywords from the researcher)";
 
   const negBlock =
     kw?.negatives && kw.negatives.length > 0
       ? kw.negatives
-          .map((n) => `  - "${n.text}" [${n.matchType}] clase=${n.negativeClass} scope=${n.scope ?? "?"}`)
+          .map((n) => `  - "${n.text}" [${n.matchType}] class=${n.negativeClass} scope=${n.scope ?? "?"}`)
           .join("\n")
-      : "  (el investigador no propuso negativas; deriva las necesarias del contexto)";
+      : "  (the researcher proposed no negatives; derive the ones you need from the context)";
 
   return [
-    "Diseña la estructura de la campaña de Search con la información siguiente.",
+    "Design the Search campaign structure using the information below.",
     "",
-    "=== MARCA ===",
-    `Nombre: ${brand.brandName}`,
-    `Web: ${brand.brandWebsite ?? "(no informada)"}`,
-    `URL de destino por defecto: ${landingDefault}`,
-    brand.description ? `Descripción: ${brand.description}` : "",
+    "=== BRAND ===",
+    `Name: ${brand.brandName}`,
+    `Website: ${brand.brandWebsite ?? "(not provided)"}`,
+    `Default landing URL: ${landingDefault}`,
+    brand.description ? `Description: ${brand.description}` : "",
     "",
-    "=== PLAN DEL ESTRATEGA (A1) ===",
-    planner ? `Objetivo: ${planner.objectiveType} — ${planner.objectiveSummary}` : "(sin plan)",
+    "=== STRATEGIST PLAN (A1) ===",
+    planner ? `Objective: ${planner.objectiveType} — ${planner.objectiveSummary}` : "(no plan)",
     planner
-      ? `Geo: ${planner.geo.locations.join(", ")} (${planner.geo.countryCodes.join(", ")}) idioma=${planner.geo.languageCode}`
+      ? `Geo: ${planner.geo.locations.join(", ")} (${planner.geo.countryCodes.join(", ")}) language=${planner.geo.languageCode}`
       : "",
-    planner ? `Presupuesto diario: $${planner.budget.dailyUsd}` : "",
-    planner ? `Estrategia de puja elegida: ${planner.biddingStrategy}` : "",
+    planner ? `Daily budget: $${planner.budget.dailyUsd}` : "",
+    planner ? `Chosen bidding strategy: ${planner.biddingStrategy}` : "",
     planner?.targetCpaUsd != null ? `Target CPA: $${planner.targetCpaUsd}` : "",
     planner?.targetRoas != null ? `Target ROAS: ${planner.targetRoas}` : "",
-    "Temas semilla (se convierten en grupos):",
+    "Seed themes (they become ad groups):",
     themesBlock,
     "KPIs:",
     kpisBlock,
     "",
-    "=== KEYWORDS APROBADAS POR EL INVESTIGADOR (A2) — usa SOLO estas ===",
+    "=== KEYWORDS APPROVED BY THE RESEARCHER (A2) — use ONLY these ===",
     kwBlock,
     "",
-    "=== NEGATIVAS SUGERIDAS POR EL INVESTIGADOR (A2) ===",
+    "=== NEGATIVES SUGGESTED BY THE RESEARCHER (A2) ===",
     negBlock,
     "",
-    "=== TU TAREA ===",
-    "1. Agrupa las keywords en grupos STAG (una sola intención por grupo). Deduplica: cada keyword en UN grupo.",
-    "2. Asigna a cada grupo un matchTypePolicy coherente con su mezcla de concordancias.",
-    "3. Para cada grupo, añade negativas cruzadas (los términos núcleo de los OTROS grupos) más las del A2 que apliquen.",
-    "4. Define sharedNegatives a nivel de campaña con el ruido universal y lo que el objetivo del negocio exige excluir.",
-    `5. Mantén la estrategia de puja del estratega (${planner?.biddingStrategy ?? "la del plan"}) salvo que haya una razón fuerte para cambiarla; explícala si la cambias.`,
-    "6. Pon a cada grupo una landingPageUrl real y relevante (usa la de destino por defecto si no hay una mejor).",
-    "7. Nombra la campaña con el patrón 'Marca | Search | Objetivo | Geo'.",
-    "Devuelve TODO mediante la herramienta estructurada.",
+    "=== YOUR TASK ===",
+    "1. Group the keywords into STAG ad groups (one intent per group). Deduplicate: each keyword in ONE group.",
+    "2. Assign each group a matchTypePolicy consistent with its mix of match types.",
+    "3. For each group, add cross-group negatives (the core terms of the OTHER groups) plus the applicable A2 negatives.",
+    "4. Define campaign-level sharedNegatives with the universal noise and whatever the business objective requires excluding.",
+    `5. Keep the strategist's bidding strategy (${planner?.biddingStrategy ?? "the one from the plan"}) unless there is a strong reason to change it; explain it if you do.`,
+    "6. Give each group a real, relevant landingPageUrl (use the default landing URL if there is no better one).",
+    "7. Name the campaign with the pattern 'Brand | Search | Objective | Geo'.",
+    `8. Write all user-facing text (ad group names, rationale and any notes) in ${lang}.`,
+    "Return EVERYTHING via the structured tool.",
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -375,7 +379,7 @@ async function persistStructure(
 
 const a3StructureArchitect: AgentDefinition<StructureOutput> = {
   id: AGENT_ID,
-  title: "Arquitecto de estructura",
+  title: "Structure architect",
   model: defaultAnthropicModel("structure_architect"),
   kind: "llm",
   promptVersion: PROMPT_VERSION,
@@ -396,7 +400,7 @@ const a3StructureArchitect: AgentDefinition<StructureOutput> = {
         schema: STRUCTURE_SCHEMA,
         toolName: "submit_structure",
         toolDescription:
-          "Devuelve la estructura completa de la campaña de Search (campaña, grupos STAG, keywords, negativas y estrategia de puja).",
+          "Return the complete Search campaign structure (campaign, STAG ad groups, keywords, negatives and bidding strategy).",
         temperature: 0.3,
         maxTokens: 8192,
         signal: helpers.signal,
@@ -431,9 +435,9 @@ const a3StructureArchitect: AgentDefinition<StructureOutput> = {
 
     await helpers.emit("decision", {
       agent: AGENT_ID,
-      summary: `Campaña "${output.campaignName}": ${output.adGroups.length} grupos, ${totalKeywords} keywords, ${
+      summary: `Campaign "${output.campaignName}": ${output.adGroups.length} ad groups, ${totalKeywords} keywords, ${
         totalGroupNegatives + output.sharedNegatives.length
-      } negativas. Puja: ${output.biddingStrategy}.`,
+      } negatives. Bidding: ${output.biddingStrategy}.`,
       campaignName: output.campaignName,
       adGroups: output.adGroups.length,
       keywords: totalKeywords,

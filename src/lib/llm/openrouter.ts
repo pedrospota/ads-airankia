@@ -155,7 +155,7 @@ async function postChat(
         (e.name === "TimeoutError" || e.name === "AbortError");
       lastErr = isTimeout
         ? new OpenRouterError(
-            `OpenRouter no respondió en ${PER_ATTEMPT_TIMEOUT_MS / 1000}s`
+            `OpenRouter didn't respond within ${PER_ATTEMPT_TIMEOUT_MS / 1000}s`
           )
         : e;
       if (attempt < maxAttempts - 1) {
@@ -318,8 +318,8 @@ export async function callOpenRouterStructured<T>(
       role: "user",
       content:
         messages3[lastIdx].content +
-        "\n\nResponde ÚNICAMENTE con un objeto JSON válido que cumpla el esquema " +
-        "solicitado. No incluyas texto adicional, explicaciones ni vallas de código.",
+        "\n\nRespond ONLY with a valid JSON object that matches the requested " +
+        "schema. Do not include any extra text, explanations, or code fences.",
     };
     const json = await postChat(
       p.apiKey,
@@ -335,10 +335,10 @@ export async function callOpenRouterStructured<T>(
 
   throw lastErr instanceof Error
     ? new OpenRouterError(
-        `El modelo ${p.model} no devolvió un objeto válido. ${lastErr.message}`
+        `Model ${p.model} didn't return a valid object. ${lastErr.message}`
       )
     : new OpenRouterError(
-        `El modelo ${p.model} no devolvió un objeto estructurado válido.`
+        `Model ${p.model} didn't return a valid structured object.`
       );
 }
 

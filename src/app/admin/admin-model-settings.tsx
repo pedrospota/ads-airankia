@@ -32,11 +32,11 @@ interface SettingsResp {
 // ----------------------------------------------------------------------------
 
 const AGENTS: { id: string; label: string; hint: string }[] = [
-  { id: "planner", label: "Estratega", hint: "Planifica objetivo, zona y presupuesto" },
-  { id: "keyword_researcher", label: "Investigador de keywords", hint: "Busca y filtra palabras clave" },
-  { id: "structure_architect", label: "Arquitecto de estructura", hint: "Arma los grupos y la estrategia de puja" },
-  { id: "rsa_copywriter", label: "Redactor de anuncios", hint: "Escribe títulos y descripciones" },
-  { id: "policy_qa", label: "Revisor de calidad", hint: "Revisa políticas y errores antes de activar" },
+  { id: "planner", label: "Strategist", hint: "Plans objective, area and budget" },
+  { id: "keyword_researcher", label: "Keyword researcher", hint: "Finds and filters keywords" },
+  { id: "structure_architect", label: "Structure architect", hint: "Builds the groups and the bidding strategy" },
+  { id: "rsa_copywriter", label: "Ad copywriter", hint: "Writes headlines and descriptions" },
+  { id: "policy_qa", label: "Quality reviewer", hint: "Checks policies and errors before activating" },
 ];
 
 const QUICK_FILTERS = ["glm", "kimi", "gemini", "gpt", "claude", "deepseek", "qwen", "grok"];
@@ -74,11 +74,11 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
 });
 
 function priceShort(m: ORModel): string {
-  if (m.promptPrice === 0 && m.completionPrice === 0) return "gratis";
+  if (m.promptPrice === 0 && m.completionPrice === 0) return "free";
   if (m.promptPrice == null || m.completionPrice == null) return "";
   const inM = (m.promptPrice * 1_000_000).toFixed(2);
   const outM = (m.completionPrice * 1_000_000).toFixed(2);
-  return `$${inM}/$${outM} por 1M`;
+  return `$${inM}/$${outM} per 1M`;
 }
 
 function optionLabel(m: ORModel): string {
@@ -96,7 +96,7 @@ function ModelSelect({
   models,
   showChips = false,
   allowNone = false,
-  noneLabel = "(usar el modelo por defecto)",
+  noneLabel = "(use the default model)",
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -124,7 +124,7 @@ function ModelSelect({
     <div>
       <input
         style={{ ...inputStyle, marginBottom: 8 }}
-        placeholder="Buscar modelo (ej. glm, kimi, gemini)…"
+        placeholder="Search model (e.g. glm, kimi, gemini)…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -148,7 +148,7 @@ function ModelSelect({
       >
         {allowNone && <option value="">{noneLabel}</option>}
         {value && !selectedKnown && (
-          <option value={value}>{value} (no está en la lista)</option>
+          <option value={value}>{value} (not in the list)</option>
         )}
         {filtered.map((m) => (
           <option key={m.id} value={m.id}>
@@ -195,7 +195,7 @@ export function AdminModelSettings() {
     settingsAbort.current = ac;
     try {
       const res = await fetch("/api/admin/settings", { signal: ac.signal });
-      if (!res.ok) throw new Error(`No se pudieron cargar los ajustes (${res.status})`);
+      if (!res.ok) throw new Error(`Could not load settings (${res.status})`);
       const data = (await res.json()) as SettingsResp;
       setProvider(data.provider);
       setDefaultModel(data.defaultModel ?? "");
@@ -205,7 +205,7 @@ export function AdminModelSettings() {
       setError(null);
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
-      setError(e instanceof Error ? e.message : "Error cargando los ajustes");
+      setError(e instanceof Error ? e.message : "Error loading settings");
     } finally {
       if (settingsAbort.current === ac) setLoading(false);
     }
@@ -226,7 +226,7 @@ export function AdminModelSettings() {
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
       setModelsError(
-        e instanceof Error ? e.message : "No se pudo cargar la lista de modelos"
+        e instanceof Error ? e.message : "Could not load the model list"
       );
     } finally {
       if (modelsAbort.current === ac) setModelsLoading(false);
@@ -270,10 +270,10 @@ export function AdminModelSettings() {
       setKeyInput("");
       setKeySet(data.openrouterKeySet);
       setKeyFromEnv(data.openrouterKeyFromEnv);
-      setSaveMsg("Guardado ✓");
+      setSaveMsg("Saved ✓");
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
-      setSaveMsg(e instanceof Error ? e.message : "No se pudo guardar");
+      setSaveMsg(e instanceof Error ? e.message : "Could not save");
     } finally {
       if (saveAbort.current === ac) setSaving(false);
     }
@@ -285,7 +285,7 @@ export function AdminModelSettings() {
   );
 
   if (loading) {
-    return <div style={{ opacity: 0.5 }}>Cargando ajustes…</div>;
+    return <div style={{ opacity: 0.5 }}>Loading settings…</div>;
   }
 
   return (
@@ -306,11 +306,11 @@ export function AdminModelSettings() {
       {/* PROVIDER -------------------------------------------------------- */}
       <div style={card}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
-          ¿Qué cerebro usamos?
+          Which brain do we use?
         </h2>
         <p style={{ opacity: 0.5, fontSize: 13, marginBottom: 14 }}>
-          Claude directo es lo más estable. OpenRouter te deja elegir entre
-          cientos de modelos (GLM, Kimi, Gemini, GPT…).
+          Claude direct is the most stable. OpenRouter lets you choose between
+          hundreds of models (GLM, Kimi, Gemini, GPT…).
         </p>
         <div style={{ display: "flex", gap: 10 }}>
           <button
@@ -327,7 +327,7 @@ export function AdminModelSettings() {
                 provider === "anthropic" ? "#6366F1" : "rgba(255,255,255,0.12)",
             }}
           >
-            Claude (directo)
+            Claude (direct)
           </button>
           <button
             onClick={() => setProvider("openrouter")}
@@ -343,7 +343,7 @@ export function AdminModelSettings() {
                 provider === "openrouter" ? "#6366F1" : "rgba(255,255,255,0.12)",
             }}
           >
-            OpenRouter (muchos modelos)
+            OpenRouter (many models)
           </button>
         </div>
       </div>
@@ -354,20 +354,20 @@ export function AdminModelSettings() {
           {/* KEY */}
           <div style={card}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
-              Clave de OpenRouter
+              OpenRouter key
             </h2>
             <p style={{ opacity: 0.5, fontSize: 13, marginBottom: 12 }}>
               {keyFromEnv
-                ? "Hay una clave fijada en el servidor (no se puede cambiar desde aquí)."
+                ? "There is a key set on the server (it can't be changed from here)."
                 : keySet
-                ? "Hay una clave guardada. Escribe una nueva solo si quieres cambiarla."
-                : "Aún no hay clave. Pégala para que los agentes puedan funcionar."}
+                ? "There is a saved key. Type a new one only if you want to change it."
+                : "There is no key yet. Paste it so the agents can work."}
             </p>
             <input
               style={inputStyle}
               type="password"
               placeholder={
-                keySet ? "•••••••••••••••• (ya configurada)" : "sk-or-v1-…"
+                keySet ? "•••••••••••••••• (already set)" : "sk-or-v1-…"
               }
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
@@ -380,7 +380,7 @@ export function AdminModelSettings() {
                   color: keySet ? "#4ADE80" : "#FBBF24",
                 }}
               >
-                {keySet ? "● Clave configurada" : "● Sin clave"}
+                {keySet ? "● Key set" : "● No key"}
               </span>
             </div>
           </div>
@@ -388,16 +388,16 @@ export function AdminModelSettings() {
           {/* DEFAULT MODEL */}
           <div style={card}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
-              Modelo por defecto
+              Default model
             </h2>
             <p style={{ opacity: 0.5, fontSize: 13, marginBottom: 12 }}>
-              Lo usan todos los agentes salvo que pongas uno distinto abajo. El
-              icono 🔧 indica que el modelo admite herramientas (recomendado).
+              All the agents use it unless you set a different one below. The
+              🔧 icon means the model supports tools (recommended).
             </p>
 
             {modelsLoading && (
               <div style={{ opacity: 0.5, fontSize: 13, marginBottom: 8 }}>
-                Cargando modelos de OpenRouter…
+                Loading OpenRouter models…
               </div>
             )}
             {modelsError && (
@@ -407,7 +407,7 @@ export function AdminModelSettings() {
                   onClick={loadModels}
                   style={{ textDecoration: "underline", cursor: "pointer" }}
                 >
-                  reintentar
+                  retry
                 </button>
               </div>
             )}
@@ -431,14 +431,14 @@ export function AdminModelSettings() {
                   padding: "8px 10px",
                 }}
               >
-                Aviso: este modelo no marca soporte de “herramientas”.
-                Intentaremos otras formas de obtener la respuesta, pero puede
-                fallar. Mejor elige uno con 🔧.
+                Warning: this model doesn't mark “tools” support. We'll try
+                other ways to get the answer, but it may fail. Better choose
+                one with 🔧.
               </div>
             )}
             <div style={{ marginTop: 8, fontSize: 12, opacity: 0.45 }}>
               {models.length > 0
-                ? `${models.length} modelos disponibles · ordenados del más nuevo al más antiguo`
+                ? `${models.length} models available · sorted from newest to oldest`
                 : ""}
             </div>
           </div>
@@ -454,12 +454,12 @@ export function AdminModelSettings() {
                 color: "#A5B4FC",
               }}
             >
-              {showAdvanced ? "▾" : "▸"} Avanzado: un modelo por agente
+              {showAdvanced ? "▾" : "▸"} Advanced: one model per agent
             </button>
             {showAdvanced && (
               <div style={{ marginTop: 14, display: "grid", gap: 16 }}>
                 <p style={{ opacity: 0.5, fontSize: 13 }}>
-                  Opcional. Deja “por defecto” para que use el modelo de arriba.
+                  Optional. Leave “default” so it uses the model above.
                 </p>
                 {AGENTS.map((a) => (
                   <div key={a.id}>
@@ -491,9 +491,9 @@ export function AdminModelSettings() {
       {provider === "anthropic" && (
         <div style={card}>
           <p style={{ opacity: 0.6, fontSize: 13 }}>
-            Usando Claude directo: Opus para los agentes que “piensan”
-            (estrategia, estructura, calidad) y Sonnet para los de mucho volumen
-            (keywords, redacción). No hay que configurar nada más.
+            Using Claude direct: Opus for the agents that “think” (strategy,
+            structure, quality) and Sonnet for the high-volume ones (keywords,
+            copywriting). There's nothing else to set up.
           </p>
         </div>
       )}
@@ -514,7 +514,7 @@ export function AdminModelSettings() {
             border: "none",
           }}
         >
-          {saving ? "Guardando…" : "Guardar"}
+          {saving ? "Saving…" : "Save"}
         </button>
         {saveMsg && (
           <span

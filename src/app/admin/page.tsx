@@ -16,9 +16,9 @@ export default async function AdminPage() {
       <Header breadcrumbs={[{ label: "Admin" }]} />
       <main className="max-w-3xl mx-auto px-6 py-10">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">Ajustes de administrador</h1>
+          <h1 className="text-3xl font-bold">Admin settings</h1>
           <p className="mt-2" style={{ opacity: 0.5 }}>
-            Elige el cerebro que usan los agentes para crear las campañas.
+            Choose the brain the agents use to create the campaigns.
           </p>
         </div>
         <AdminModelSettings />

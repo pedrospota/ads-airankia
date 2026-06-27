@@ -1,5 +1,5 @@
 // ============================================================================
-// A2 — KEYWORD RESEARCHER (Investigador de keywords)
+// A2 — KEYWORD RESEARCHER
 // ----------------------------------------------------------------------------
 // Second agent in the Search pipeline. From the Planner's themes + geo/language
 // it builds the curated keyword list (text, match type, theme mapping, intent,
@@ -27,6 +27,7 @@ import {
   type RunContext,
   type KeywordResearchOutput,
   type KeywordIdea,
+  languageName,
 } from "@/lib/engine/types";
 import { callStructured, LLMError, defaultAnthropicModel } from "@/lib/llm";
 import { generateKeywordIdeas, type KeywordPlanIdea } from "@/lib/google-ads";
@@ -73,7 +74,7 @@ const KEYWORD_RESEARCH_SCHEMA: Record<string, unknown> = {
       type: "array",
       minItems: 1,
       description:
-        "Curated keyword list across ALL planner themes (≈10-25 por tema), con tipos de concordancia mezclados.",
+        "Curated keyword list across ALL planner themes (~10-25 per theme), with mixed match types.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -82,58 +83,59 @@ const KEYWORD_RESEARCH_SCHEMA: Record<string, unknown> = {
           text: {
             type: "string",
             description:
-              "El término de búsqueda en minúsculas, sin operadores de concordancia (sin comillas ni corchetes).",
+              "The search term in lowercase, without match-type operators (no quotes or brackets).",
           },
           matchType: {
             type: "string",
             enum: MATCH_TYPE_ENUM,
             description:
-              "EXACT para términos de alta intención/marca, PHRASE para intención media, BROAD solo con Smart Bidding y vigilada con negativas.",
+              "EXACT for high-intent/brand terms, PHRASE for medium intent, BROAD only with Smart Bidding and guarded with negatives.",
           },
           theme: {
             type: "string",
             description:
-              "Nombre EXACTO del tema del Planner (PlannerTheme.name) al que pertenece esta keyword.",
+              "The EXACT Planner theme name (PlannerTheme.name) this keyword belongs to.",
           },
           intent: { type: "string", enum: INTENT_ENUM },
           avgMonthlySearches: {
             type: "number",
             description:
-              "Búsquedas medias mensuales estimadas. Si no hay datos reales, tu mejor estimación.",
+              "Estimated average monthly searches. If no real data is available, your best estimate.",
           },
           competition: {
             type: "string",
             enum: COMPETITION_ENUM,
-            description: "Competencia estimada (LOW/MEDIUM/HIGH).",
+            description: "Estimated competition (LOW/MEDIUM/HIGH).",
           },
           topOfPageBidLowMicros: {
             type: "number",
-            description: "Puja estimada parte baja del rango (en micros).",
+            description: "Estimated bid at the low end of the range (in micros).",
           },
           topOfPageBidHighMicros: {
             type: "number",
-            description: "Puja estimada parte alta del rango (en micros).",
+            description: "Estimated bid at the high end of the range (in micros).",
           },
           relevanceScore: {
             type: "number",
             minimum: 0,
             maximum: 1,
             description:
-              "Relevancia 0..1 respecto al negocio y la landing (1 = encaje perfecto).",
+              "Relevance 0..1 to the business and the landing page (1 = perfect fit).",
           },
           score: {
             type: "number",
             description:
-              "Puntuación compuesta (volumen × intención × relevancia × asequibilidad). Úsala para priorizar.",
+              "Composite score (volume × intent × relevance × affordability). Use it to prioritize.",
           },
           source: {
             type: "string",
             description:
-              "Origen de la idea: keyword_seed | url_seed | citation | llm | search_term | historical.",
+              "Origin of the idea: keyword_seed | url_seed | citation | llm | search_term | historical.",
           },
           rationale: {
             type: "string",
-            description: "Una frase en español que justifica por qué entra esta keyword.",
+            description:
+              "One sentence, in the brand's main language, justifying why this keyword is included.",
           },
         },
       },
@@ -142,7 +144,7 @@ const KEYWORD_RESEARCH_SCHEMA: Record<string, unknown> = {
       type: "array",
       minItems: 15,
       description:
-        "Lista fuerte de palabras clave negativas (≥15) para proteger el presupuesto desde el día 1.",
+        "Strong list of negative keywords (>=15) to protect the budget from day one.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -150,25 +152,25 @@ const KEYWORD_RESEARCH_SCHEMA: Record<string, unknown> = {
         properties: {
           text: {
             type: "string",
-            description: "Término negativo en minúsculas (sin operadores).",
+            description: "Negative term in lowercase (no operators).",
           },
           matchType: {
             type: "string",
             enum: MATCH_TYPE_ENUM,
             description:
-              "Tipo de concordancia de la negativa (normalmente PHRASE o EXACT).",
+              "Match type of the negative (usually PHRASE or EXACT).",
           },
           negativeClass: {
             type: "string",
             enum: NEGATIVE_CLASS_ENUM,
             description:
-              "Por qué es negativa: free_seeker (gratis/barato), wrong_intent, wrong_geo, competitor, brand_cross, cross_group.",
+              "Why it is negative: free_seeker (free/cheap), wrong_intent, wrong_geo, competitor, brand_cross, cross_group.",
           },
           scope: {
             type: "string",
             enum: NEGATIVE_SCOPE_ENUM,
             description:
-              "Alcance sugerido: campaign (recomendado para la mayoría), ad_group o shared.",
+              "Suggested scope: campaign (recommended for most), ad_group, or shared.",
           },
         },
       },
@@ -177,12 +179,12 @@ const KEYWORD_RESEARCH_SCHEMA: Record<string, unknown> = {
       type: "string",
       enum: ["google_keyword_planner", "llm_estimate"],
       description:
-        "Pon SIEMPRE 'llm_estimate'. El código lo cambia a 'google_keyword_planner' si adjunta métricas reales.",
+        "ALWAYS set 'llm_estimate'. The code switches it to 'google_keyword_planner' if it attaches real metrics.",
     },
     notes: {
       type: "string",
       description:
-        "Notas en español sencillo para el dueño del negocio: lógica de selección, riesgos y recomendaciones.",
+        "Notes for the business owner, in the brand's main language: selection logic, risks, and recommendations.",
     },
   },
 };
@@ -258,101 +260,101 @@ function attachMetrics(
 
 function buildSystemPrompt(): string {
   return [
-    "Eres el mejor especialista en Google Ads (Search) del mundo para investigación",
-    "de palabras clave, con dominio nativo del español y de cómo busca de verdad la",
-    "gente en España y Latinoamérica. Piensas como un estratega senior de PPC que",
-    "defiende cada keyword (y cada negativa) ante el dueño del negocio.",
+    "You are the world's best Google Ads (Search) specialist for keyword research,",
+    "with deep, native intuition for how people actually search. You think like a",
+    "senior PPC strategist who can defend every keyword (and every negative) to the",
+    "business owner.",
     "",
-    "Tu trabajo: a partir de los TEMAS del plan (cada tema = un futuro grupo de",
-    "anuncios de intención única) y de la marca, construir:",
-    "1. Una lista CURADA de keywords por tema (≈10-25 por tema), con tipos de",
-    "   concordancia mezclados y bien razonados.",
-    "2. Una lista FUERTE de negativas (≥15) que proteja el presupuesto desde el día 1.",
+    "Your job: starting from the plan's THEMES (each theme = a future single-intent",
+    "ad group) and the brand, build:",
+    "1. A CURATED keyword list per theme (~10-25 per theme), with mixed, well-reasoned",
+    "   match types.",
+    "2. A STRONG negative list (>=15) that protects the budget from day one.",
     "",
-    "PRINCIPIOS QUE SIEMPRE APLICAS:",
-    "1. INTENCIÓN ANTE TODO. Prioriza términos con intención comercial/transaccional",
-    "   real. La gente que va a contratar/comprar busca distinto a la que solo se",
-    "   informa. Mapea cada keyword al tema correcto (theme = PlannerTheme.name EXACTO).",
-    "2. CONCORDANCIAS con criterio:",
-    "   - EXACT para términos de marca y de altísima intención (presupuesto fino).",
-    "   - PHRASE para el grueso de intención media-alta (control + alcance).",
-    "   - BROAD solo cuando tenga sentido con Smart Bidding, y SIEMPRE acompañada de",
-    "     negativas que la contengan. No abuses de BROAD.",
-    "3. NEGATIVAS como arma. Mínimo 15. Cubre al menos:",
-    "   - free_seeker: 'gratis', 'gratuito', 'barato', 'segunda mano', 'opiniones',",
-    "     'curso', 'pdf', 'plantilla', 'cómo hacer'... (quien no va a pagar).",
-    "   - wrong_intent: búsquedas informativas/DIY que NO convierten.",
-    "   - wrong_geo: zonas o países fuera del objetivo.",
-    "   - competitor: marcas de la competencia (salvo estrategia de competidores).",
-    "   Usa la clase correcta en negativeClass y un scope sensato (campaign por defecto).",
-    "4. RELEVANCIA: relevanceScore 0..1 según el encaje real con el negocio y la",
-    "   landing. Penaliza términos ambiguos o tangenciales.",
-    "5. SCORE compuesto: combina volumen × intención × relevancia × asequibilidad",
-    "   (pujas) para que A3 pueda priorizar. Más alto = mejor candidata.",
-    "6. SIN operadores en 'text': nada de comillas ni corchetes; el matchType ya",
-    "   indica la concordancia. Todo en minúsculas.",
+    "PRINCIPLES YOU ALWAYS APPLY:",
+    "1. INTENT FIRST. Prioritize terms with real commercial/transactional intent.",
+    "   People about to hire/buy search differently from those just gathering info.",
+    "   Map each keyword to the correct theme (theme = the EXACT PlannerTheme.name).",
+    "2. MATCH TYPES with judgment:",
+    "   - EXACT for brand terms and very high intent (tight budget control).",
+    "   - PHRASE for the bulk of medium-high intent (control + reach).",
+    "   - BROAD only when it makes sense with Smart Bidding, and ALWAYS paired with",
+    "     negatives that contain it. Do not overuse BROAD.",
+    "3. NEGATIVES as a weapon. At least 15. Cover at minimum:",
+    "   - free_seeker: 'free', 'cheap', 'second-hand', 'reviews', 'course', 'pdf',",
+    "     'template', 'how to'... (people who will not pay).",
+    "   - wrong_intent: informational/DIY searches that do NOT convert.",
+    "   - wrong_geo: areas or countries outside the target.",
+    "   - competitor: competitor brands (unless running a competitor strategy).",
+    "   Use the correct negativeClass and a sensible scope (campaign by default).",
+    "4. RELEVANCE: relevanceScore 0..1 based on the real fit with the business and",
+    "   the landing page. Penalize ambiguous or tangential terms.",
+    "5. COMPOSITE SCORE: combine volume × intent × relevance × affordability (bids)",
+    "   so A3 can prioritize. Higher = stronger candidate.",
+    "6. NO operators in 'text': no quotes or brackets; the matchType already signals",
+    "   the match. Everything in lowercase.",
     "",
-    "MÉTRICAS: pon metricsSource = 'llm_estimate' y rellena avgMonthlySearches /",
-    "competition / pujas con tu MEJOR estimación. Si el sistema dispone de datos",
-    "reales del Planificador de Palabras Clave, el código los adjuntará después y",
-    "cambiará metricsSource a 'google_keyword_planner'. Aun así, da siempre tu",
-    "estimación para no dejar huecos.",
+    "METRICS: set metricsSource = 'llm_estimate' and fill avgMonthlySearches /",
+    "competition / bids with your BEST estimate. If the system has real data from the",
+    "Keyword Planner, the code will attach it afterward and switch metricsSource to",
+    "'google_keyword_planner'. Even so, always give your estimate so there are no gaps.",
     "",
-    "TONO DE LOS TEXTOS PARA EL USUARIO (rationale de cada keyword y notes):",
-    "español sencillo, cercano y claro, para un dueño de negocio NO técnico. Sin",
-    "jerga ni anglicismos innecesarios. Frases cortas.",
+    "Write all user-facing text (each keyword's rationale and notes) in the brand's",
+    "MAIN language -- the one the user prompt specifies. Keep it simple, warm, and",
+    "clear for a NON-technical business owner. No jargon, short sentences.",
     "",
-    "Devuelve EXCLUSIVAMENTE la herramienta estructurada. No añadas texto libre.",
+    "Return EXCLUSIVELY the structured tool. Do not add free-form text.",
   ].join("\n");
 }
 
 function buildUserPrompt(ctx: RunContext): string {
   const b = ctx.brand;
   const planner = ctx.planner;
-  const landing = landingSeed(ctx) ?? "(no indicada)";
+  const landing = landingSeed(ctx) ?? "(not provided)";
+  const lang = languageName(ctx.planner?.geo.languageCode);
 
   const lines: string[] = [
-    "Contexto para la investigación de palabras clave:",
+    "Context for the keyword research:",
     "",
-    `- Marca: ${b.brandName}`,
-    `- Sitio web: ${b.brandWebsite ?? "(no indicado)"}`,
-    `- Landing (a donde apuntarán los anuncios): ${landing}`,
+    `- Brand: ${b.brandName}`,
+    `- Website: ${b.brandWebsite ?? "(not provided)"}`,
+    `- Landing page (where the ads will point): ${landing}`,
   ];
-  if (b.description) lines.push(`- Descripción del negocio: ${b.description}`);
+  if (b.description) lines.push(`- Business description: ${b.description}`);
 
   if (planner) {
     lines.push(
       "",
-      `- Objetivo: ${planner.objectiveType} — ${planner.objectiveSummary}`,
-      `- Geo: ${planner.geo.locations.join(", ")} (países: ${planner.geo.countryCodes.join(", ")})`,
-      `- Idioma: ${planner.geo.languageCode}`,
-      `- Resumen de marca: ${planner.brandSummary}`,
+      `- Objective: ${planner.objectiveType} — ${planner.objectiveSummary}`,
+      `- Geo: ${planner.geo.locations.join(", ")} (countries: ${planner.geo.countryCodes.join(", ")})`,
+      `- Language: ${planner.geo.languageCode}`,
+      `- Brand summary: ${planner.brandSummary}`,
       "",
-      "TEMAS DEL PLAN (cada uno = un grupo de anuncios de intención única).",
-      "Usa el 'name' EXACTO en el campo 'theme' de cada keyword:"
+      "PLAN THEMES (each one = a single-intent ad group).",
+      "Use the EXACT 'name' in the 'theme' field of each keyword:"
     );
     for (const theme of planner.themes) {
       lines.push(
-        `  • ${theme.name} [intención: ${theme.intent}] — ${theme.description}`
+        `  • ${theme.name} [intent: ${theme.intent}] — ${theme.description}`
       );
     }
   } else {
     lines.push(
       "",
-      "- (No hay salida del Planner disponible; infiere temas razonables a partir de la marca.)"
+      "- (No Planner output available; infer reasonable themes from the brand.)"
     );
   }
 
   lines.push(
     "",
-    "Instrucciones:",
-    "- Genera ≈10-25 keywords por tema, con concordancias mezcladas y bien razonadas.",
-    "- Mapea cada keyword a su tema con el nombre EXACTO del tema.",
-    "- 'text' en minúsculas y SIN operadores (sin comillas ni corchetes).",
-    "- Crea al menos 15 negativas fuertes (free_seeker, wrong_intent, wrong_geo, competitor).",
-    "- Da tu mejor estimación de volumen, competencia y pujas (metricsSource = 'llm_estimate').",
-    "- Escribe los textos para el usuario en español sencillo y claro.",
-    `- Idioma de las keywords: ${planner?.geo.languageCode ?? b.languageHint ?? "es"}.`
+    "Instructions:",
+    "- Generate ~10-25 keywords per theme, with mixed, well-reasoned match types.",
+    "- Map each keyword to its theme using the EXACT theme name.",
+    "- 'text' in lowercase and WITHOUT operators (no quotes or brackets).",
+    "- Create at least 15 strong negatives (free_seeker, wrong_intent, wrong_geo, competitor).",
+    "- Give your best estimate of volume, competition, and bids (metricsSource = 'llm_estimate').",
+    `- Write all user-facing text (each keyword's rationale, and notes) in ${lang}.`,
+    `- The keywords and negatives themselves must be in ${lang} — the language real customers use to search.`
   );
 
   return lines.join("\n");
@@ -364,7 +366,7 @@ function buildUserPrompt(ctx: RunContext): string {
 
 const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
   id: "keyword_researcher",
-  title: "Investigador de keywords",
+  title: "Keyword Researcher",
   model: defaultAnthropicModel("keyword_researcher"),
   kind: "llm",
   promptVersion: PROMPT_VERSION,
@@ -412,7 +414,7 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
         schema: KEYWORD_RESEARCH_SCHEMA,
         toolName: "submit_keyword_research",
         toolDescription:
-          "Entrega la investigación de palabras clave (keywords curadas + negativas) como objeto estructurado.",
+          "Submit the keyword research (curated keywords + negatives) as a structured object.",
         temperature: TEMPERATURE,
         signal: helpers.signal,
       });
@@ -475,19 +477,19 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
     // --- 5) Emit + return -----------------------------------------------------
     const metricsLabel =
       metricsSource === "google_keyword_planner"
-        ? `métricas reales del Planner (${matched} coincidencias)`
-        : "métricas estimadas";
+        ? `real Planner metrics (${matched} matches)`
+        : "estimated metrics";
     await helpers.emit("decision", {
       agent: "keyword_researcher",
-      summary: `${output.keywords.length} keywords · ${output.negatives.length} negativas · ${metricsLabel}.`,
+      summary: `${output.keywords.length} keywords · ${output.negatives.length} negatives · ${metricsLabel}.`,
     });
     if (metricsSource === "llm_estimate") {
       await helpers.emit("decision", {
         agent: "keyword_researcher",
         summary:
           plannerIdeas.length === 0
-            ? "Google no devolvió datos de búsquedas esta vez, así que usamos nuestras propias estimaciones. Las cifras son aproximadas y se ajustarán solas con datos reales en cuanto la campaña empiece a mostrarse."
-            : "Algunas palabras clave no tienen datos exactos de Google, así que para esas usamos nuestras propias estimaciones. Las cifras se ajustarán solas cuando la campaña empiece a mostrarse.",
+            ? "Google didn't return search data this time, so we used our own estimates. The figures are approximate and will adjust automatically with real data as soon as the campaign starts running."
+            : "Some keywords don't have exact data from Google, so for those we used our own estimates. The figures will adjust automatically once the campaign starts running.",
       });
     }
     await helpers.emit("artifact", { output });

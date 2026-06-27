@@ -69,7 +69,7 @@ export function Header({
               padding: 8, borderRadius: 8, background: 'transparent',
               border: `1px solid ${colors.border}`, cursor: 'pointer', display: 'flex',
             }}
-            aria-label={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
           >
             {theme === "dark" ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -86,7 +86,7 @@ export function Header({
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              aria-label="Abrir menú de usuario"
+              aria-label="Open user menu"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               style={{
@@ -121,7 +121,7 @@ export function Header({
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
                     </svg>
-                    Cerrar sesión
+                    Log out
                   </button>
                 </div>
               </>

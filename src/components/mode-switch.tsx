@@ -4,8 +4,8 @@ import { useMode, type AppMode } from "@/components/mode-provider";
 import { useTheme } from "@/components/theme-provider";
 
 const OPTIONS: { value: AppMode; label: string }[] = [
-  { value: "clasico", label: "Clásico" },
-  { value: "nuevo", label: "Nuevo" },
+  { value: "clasico", label: "Classic" },
+  { value: "nuevo", label: "New" },
 ];
 
 export function ModeSwitch() {
@@ -16,7 +16,7 @@ export function ModeSwitch() {
     <div
       className="flex items-center"
       role="group"
-      aria-label="Cambiar interfaz"
+      aria-label="Switch interface"
       style={{
         background: colors.bg,
         border: `1px solid ${colors.border}`,

@@ -194,11 +194,11 @@ export function buildSanitizedPlan(
   const seenKeywordKeys = new Set<string>();
 
   for (const g of structure.adGroups ?? []) {
-    const name = g?.name ?? "(sin nombre)";
+    const name = g?.name ?? "(no name)";
 
     const groupKeywords = dedupeKeywords(g?.keywords);
     if (groupKeywords.length === 0) {
-      skipped.push({ name, reason: "sin palabras clave válidas" });
+      skipped.push({ name, reason: "no valid keywords" });
       continue;
     }
     const keywords = groupKeywords.filter((k) => {
@@ -210,7 +210,7 @@ export function buildSanitizedPlan(
     if (keywords.length === 0) {
       skipped.push({
         name,
-        reason: "sus palabras clave ya estaban en otro grupo",
+        reason: "its keywords were already in another group",
       });
       continue;
     }
@@ -219,7 +219,7 @@ export function buildSanitizedPlan(
     if (!rsaMeetsMinimums(ad0)) {
       skipped.push({
         name,
-        reason: "anuncio incompleto (mínimo 3 títulos y 2 descripciones)",
+        reason: "incomplete ad (minimum 3 headlines and 2 descriptions)",
       });
       continue;
     }
@@ -229,7 +229,7 @@ export function buildSanitizedPlan(
       normalizeFinalUrl(g.landingPageUrl) ??
       fallbackUrl;
     if (!url) {
-      skipped.push({ name, reason: "sin enlace de destino válido" });
+      skipped.push({ name, reason: "no valid landing page link" });
       continue;
     }
 

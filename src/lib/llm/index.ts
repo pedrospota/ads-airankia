@@ -97,7 +97,7 @@ export async function callStructured<T>(
     const apiKey = await getOpenRouterKey();
     if (!apiKey) {
       throw new LLMError(
-        "Falta la clave de OpenRouter. Añádela en /admin para que los agentes puedan pensar."
+        "The OpenRouter key is missing. Add it in /admin so the agents can think."
       );
     }
     try {
@@ -117,12 +117,12 @@ export async function callStructured<T>(
     } catch (e) {
       if (deadline.aborted) {
         throw new LLMError(
-          "La IA tardó demasiado en responder. Espera unos segundos y vuelve a intentarlo."
+          "The AI took too long to respond. Wait a few seconds and try again."
         );
       }
       if (e instanceof Error && e.name === "AbortError") throw e;
       throw new LLMError(
-        e instanceof Error ? e.message : "Fallo llamando a OpenRouter"
+        e instanceof Error ? e.message : "OpenRouter call failed"
       );
     }
   }
@@ -145,7 +145,7 @@ export async function callStructured<T>(
   } catch (e) {
     if (deadline.aborted) {
       throw new LLMError(
-        "La IA tardó demasiado en responder. Espera unos segundos y vuelve a intentarlo."
+        "The AI took too long to respond. Wait a few seconds and try again."
       );
     }
     if (e instanceof Error && e.name === "AbortError") throw e;

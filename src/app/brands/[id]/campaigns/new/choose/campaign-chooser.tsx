@@ -20,17 +20,17 @@ export function CampaignChooser({
     {
       href: `/brands/${brandId}/campaigns/new/search`,
       emoji: "🔎",
-      title: "Anuncios en Google",
-      desc: "Tu anuncio aparece cuando alguien busca en Google justo lo que tú ofreces. La IA lo prepara casi sola: tú solo revisas y activas.",
-      foot: "Lo más fácil y automático — recomendado",
+      title: "Google Search ads",
+      desc: "Your ad shows up when someone searches Google for exactly what you offer. The AI sets it up almost on its own: you just review and turn it on.",
+      foot: "The easiest, most automatic option — recommended",
       recommended: true,
     },
     {
       href: `/brands/${brandId}/campaigns/new`,
       emoji: "🖼️",
-      title: "Anuncios con imagen",
-      desc: "Creamos banners con tu marca y tus imágenes para que se muestren en webs, blogs y apps donde está tu público.",
-      foot: "Ideal si quieres que te vean con imágenes",
+      title: "Image ads",
+      desc: "We create banners with your brand and your images so they show up on websites, blogs, and apps where your audience hangs out.",
+      foot: "Great if you want people to see you with images",
       recommended: false,
     },
   ];
@@ -39,20 +39,20 @@ export function CampaignChooser({
     <div className="min-h-screen">
       <Header
         breadcrumbs={[
-          { label: "Marcas", href: "/brands" },
+          { label: "Brands", href: "/brands" },
           { label: brandName, href: `/brands/${brandId}/citations` },
-          { label: "Nueva campaña" },
+          { label: "New campaign" },
         ]}
       />
 
       <main className="max-w-3xl mx-auto px-6 py-12">
         <div style={{ textAlign: "center", marginBottom: 8 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.5px", color: colors.text }}>
-            ¿Qué quieres hacer?
+            What would you like to do?
           </h1>
           <p style={{ fontSize: 15, color: colors.textMuted, marginTop: 8 }}>
-            Elige cómo quieres anunciar <strong>{brandName}</strong>. Puedes
-            cambiar de idea cuando quieras.
+            Choose how you want to advertise <strong>{brandName}</strong>. You can
+            change your mind anytime.
           </p>
         </div>
 
@@ -95,7 +95,7 @@ export function CampaignChooser({
                     padding: "3px 10px",
                   }}
                 >
-                  RECOMENDADO
+                  RECOMMENDED
                 </span>
               )}
               <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
@@ -127,8 +127,8 @@ export function CampaignChooser({
         </div>
 
         <p style={{ textAlign: "center", fontSize: 12.5, color: colors.textFaint, marginTop: 22 }}>
-          ¿No estás seguro? Empieza por <strong>Anuncios en Google</strong>: es
-          la opción más sencilla y la IA hace casi todo por ti.
+          Not sure? Start with <strong>Google Search ads</strong>: it&apos;s
+          the simplest option and the AI does almost everything for you.
         </p>
       </main>
     </div>

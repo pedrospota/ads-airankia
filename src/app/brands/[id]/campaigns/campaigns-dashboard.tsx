@@ -42,59 +42,59 @@ function statusFor(item: CampaignListItem): StatusInfo {
   const inGoogle = item.googleCampaignId != null;
   if (inGoogle && item.campaignStatus === "active") {
     return {
-      label: "Activa",
+      label: "Active",
       color: "#10B981",
       bg: "rgba(16,185,129,0.12)",
-      action: "Ver detalles",
+      action: "View details",
     };
   }
   if (inGoogle) {
     // Created in Google but not enabled (paused / draft row).
     return {
-      label: "Creada · en pausa",
+      label: "Created · paused",
       color: "#FBBF24",
       bg: "rgba(251,191,36,0.12)",
-      action: "Ver y poner en marcha",
+      action: "View and turn on",
     };
   }
   // Not in Google yet → still being built or unfinished.
   if (item.runStatus === "running" || item.runStatus === "queued") {
     return {
-      label: "Creándose…",
+      label: "Being created…",
       color: "#3B82F6",
       bg: "rgba(59,130,246,0.12)",
-      action: "Continuar",
+      action: "Continue",
     };
   }
   if (item.runStatus === "awaiting_approval") {
     return {
-      label: "Esperando tu revisión",
+      label: "Waiting for your review",
       color: "#3B82F6",
       bg: "rgba(59,130,246,0.12)",
-      action: "Revisar",
+      action: "Review",
     };
   }
   if (item.runStatus === "failed" || item.runStatus === "aborted") {
     return {
-      label: "Sin terminar",
+      label: "Unfinished",
       color: "#F87171",
       bg: "rgba(248,113,113,0.12)",
-      action: "Retomar",
+      action: "Resume",
     };
   }
   // Completed-but-not-activated, or a fresh draft.
   return {
-    label: "Pendiente de activar",
+    label: "Ready to turn on",
     color: "#FBBF24",
     bg: "rgba(251,191,36,0.12)",
-    action: "Revisar y activar",
+    action: "Review and turn on",
   };
 }
 
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleDateString("es-ES", {
+    return new Date(iso).toLocaleDateString("en-US", {
       day: "numeric",
       month: "short",
       year: "numeric",
@@ -120,7 +120,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        "Vamos a eliminar esta campaña de tu cuenta de Google Ads.\n\nNo se ha gastado nada (estaba en pausa) y podrás crear otra cuando quieras.\n\n¿Seguro que quieres descartarla?",
+        "We're going to remove this campaign from your Google Ads account.\n\nNothing has been spent (it was paused) and you can create another one whenever you want.\n\nAre you sure you want to discard it?",
       )
     ) {
       return;
@@ -134,13 +134,13 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
       });
       const data = (await r.json()) as { ok?: boolean; error?: string };
       if (!r.ok || !data.ok) {
-        throw new Error(data.error || "No se pudo descartar la campaña.");
+        throw new Error(data.error || "We couldn't discard the campaign.");
       }
       router.refresh();
     } catch (e) {
       if (typeof window !== "undefined") {
         window.alert(
-          e instanceof Error ? e.message : "No se pudo descartar la campaña.",
+          e instanceof Error ? e.message : "We couldn't discard the campaign.",
         );
       }
     } finally {
@@ -152,9 +152,9 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
     <div className="min-h-screen">
       <Header
         breadcrumbs={[
-          { label: "Marcas", href: "/brands" },
+          { label: "Brands", href: "/brands" },
           { label: brandName, href: `/brands/${brandId}/citations` },
-          { label: "Campañas" },
+          { label: "Campaigns" },
         ]}
         action={
           <Link
@@ -169,7 +169,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
               textDecoration: "none",
             }}
           >
-            + Nueva campaña
+            + New campaign
           </Link>
         }
       />
@@ -177,12 +177,12 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
       <main className="max-w-3xl mx-auto px-6 py-8">
         <div style={{ marginBottom: 20 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-            Tus campañas de Búsqueda
+            Your Search campaigns
           </h1>
           <p style={{ fontSize: 14, color: colors.textMuted }}>
-            Aquí ves todas tus campañas y en qué punto está cada una. Puedes
-            volver cuando quieras para revisarlas, ponerlas en marcha o seguir
-            una que dejaste a medias.
+            Here you can see all your campaigns and where each one stands. You
+            can come back anytime to review them, turn them on, or pick up one
+            you left halfway.
           </p>
         </div>
 
@@ -198,7 +198,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
           >
             <div style={{ fontSize: 40, marginBottom: 12 }}>🚀</div>
             <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
-              Todavía no tienes campañas
+              You don't have any campaigns yet
             </h2>
             <p
               style={{
@@ -210,8 +210,8 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                 marginRight: "auto",
               }}
             >
-              Crea tu primera campaña en unos minutos. Nosotros nos encargamos de
-              todo y la dejamos en pausa para que tú decidas cuándo arrancar.
+              Create your first campaign in just a few minutes. We take care of
+              everything and leave it paused so you decide when to start.
             </p>
             <Link
               href={newHref}
@@ -226,7 +226,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                 textDecoration: "none",
               }}
             >
-              Crear mi primera campaña
+              Create my first campaign
             </Link>
           </div>
         ) : (
@@ -273,7 +273,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                         {item.dailyBudgetCents != null
                           ? ` · ${CURRENCY}${(item.dailyBudgetCents / 100).toFixed(
                               2
-                            )}/día`
+                            )}/day`
                           : ""}
                       </p>
                     </div>
@@ -340,7 +340,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                           textDecoration: "none",
                         }}
                       >
-                        Ver en Google Ads ↗
+                        View in Google Ads ↗
                       </a>
                     )}
                     {item.runId && item.campaignStatus !== "active" && (
@@ -364,8 +364,8 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                         }}
                       >
                         {discardingId === item.runId
-                          ? "Descartando…"
-                          : "Descartar"}
+                          ? "Discarding…"
+                          : "Discard"}
                       </button>
                     )}
                   </div>

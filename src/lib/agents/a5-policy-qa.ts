@@ -19,6 +19,7 @@ import { callStructured, LLMError, defaultAnthropicModel } from "@/lib/llm";
 import {
   RSA_LIMITS,
   BUDGET,
+  languageName,
   type AgentDefinition,
   type AgentResult,
   type AgentHelpers,
@@ -48,12 +49,12 @@ const QA_SCHEMA: Record<string, unknown> = {
       type: "string",
       enum: ["pass", "fix", "block"],
       description:
-        "block = al menos una violación de límite duro o política grave; fix = mejorable pero publicable; pass = todo correcto.",
+        "block = at least one hard-limit violation or serious policy issue; fix = improvable but publishable; pass = everything is correct.",
     },
     issues: {
       type: "array",
       description:
-        "Lista de problemas detectados. Vacía solo si el plan está impecable.",
+        "List of detected problems. Empty only if the plan is flawless.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -63,25 +64,27 @@ const QA_SCHEMA: Record<string, unknown> = {
             type: "string",
             enum: ["block", "fix", "warn"],
             description:
-              "block = impide publicar; fix = corregir antes de activar; warn = aviso menor.",
+              "block = prevents publishing; fix = correct before activating; warn = minor notice.",
           },
           area: {
             type: "string",
             description:
-              "Área afectada: budget | bidding | structure | rsa_limits | policy | landing_page | geo | language | negatives | keywords | urls.",
+              "Affected area: budget | bidding | structure | rsa_limits | policy | landing_page | geo | language | negatives | keywords | urls.",
           },
           message: {
             type: "string",
-            description: "Qué está mal, en español claro y concreto.",
+            description:
+              "What is wrong, in clear and concrete terms, written in the brand's main language.",
           },
           suggestion: {
             type: "string",
-            description: "Cómo arreglarlo, en español claro. Opcional.",
+            description:
+              "How to fix it, clearly, written in the brand's main language. Optional.",
           },
           locator: {
             type: "string",
             description:
-              'Dónde está, p. ej. "adGroup[0].headline[4]" o "campaign.budget". Opcional.',
+              'Where it is, e.g. "adGroup[0].headline[4]" or "campaign.budget". Optional.',
           },
         },
       },
@@ -89,7 +92,7 @@ const QA_SCHEMA: Record<string, unknown> = {
     checklist: {
       type: "array",
       description:
-        "Resumen verificable de cada control. Una entrada por chequeo realizado.",
+        "Verifiable summary of each control. One entry per check performed.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -97,15 +100,16 @@ const QA_SCHEMA: Record<string, unknown> = {
         properties: {
           name: {
             type: "string",
-            description: "Nombre corto del control en español.",
+            description:
+              "Short name of the control, written in the brand's main language.",
           },
           ok: {
             type: "boolean",
-            description: "true si el control pasa.",
+            description: "true if the control passes.",
           },
           detail: {
             type: "string",
-            description: "Detalle breve del resultado. Opcional.",
+            description: "Brief detail of the result. Optional.",
           },
         },
       },
@@ -113,7 +117,7 @@ const QA_SCHEMA: Record<string, unknown> = {
     rationale: {
       type: "string",
       description:
-        "Explicación final en español sencillo: por qué este veredicto y qué debe hacer la persona.",
+        "Final explanation in simple terms, written in the brand's main language: why this verdict and what the person should do.",
     },
   },
 };
@@ -124,42 +128,42 @@ const QA_SCHEMA: Record<string, unknown> = {
 
 function buildSystemPrompt(): string {
   return [
-    "Eres el revisor SENIOR de calidad y política de una cuenta de Google Ads (Búsqueda).",
-    "Llevas 15 años publicando campañas de Búsqueda y has visto rechazar miles por errores evitables.",
-    "Tu trabajo NO es opinar de marketing: es proteger la cuenta antes de que se publique nada.",
-    "Eres la última puerta antes de que el sistema empuje la campaña a Google (siempre EN PAUSA).",
+    "You are the SENIOR quality and policy reviewer of a Google Ads (Search) account.",
+    "You have 15 years publishing Search campaigns and have seen thousands rejected for avoidable mistakes.",
+    "Your job is NOT to give marketing opinions: it is to protect the account before anything is published.",
+    "You are the last gate before the system pushes the campaign to Google (always PAUSED).",
     "",
-    "Devuelves UN veredicto: pass | fix | block.",
-    "  - block  → hay al menos una violación de LÍMITE DURO de Google o una política grave. NO se puede publicar tal cual.",
-    "  - fix    → no hay violación dura, pero hay algo claramente mejorable que conviene corregir antes de activar.",
-    "  - pass   → todo está correcto y listo para activar.",
+    "You return ONE verdict: pass | fix | block.",
+    "  - block  → there is at least one Google HARD-LIMIT violation or a serious policy issue. It CANNOT be published as is.",
+    "  - fix    → there is no hard violation, but there is something clearly improvable that should be corrected before activating.",
+    "  - pass   → everything is correct and ready to activate.",
     "",
-    "Reglas de severidad (aplícalas sin excepción):",
-    `  1) PRESUPUESTO: el presupuesto diario debe ser >= $${BUDGET.minDailyUsd}/día. Menos que eso = 'block' (área "budget").`,
-    "  2) PUJA: la estrategia de puja debe ser coherente con el objetivo. Ej.: TARGET_CPA/MAXIMIZE_CONVERSIONS exigen objetivo de conversión (leads/sales/calls);",
-    "     TARGET_ROAS/MAXIMIZE_CONVERSION_VALUE exigen valor de conversión (sales). Para tráfico puro suele bastar MAXIMIZE_CLICKS o MANUAL_CPC.",
-    "     Si TARGET_CPA no trae targetCpaUsd, o TARGET_ROAS no trae targetRoas, eso es incoherente. Incoherencia razonable = 'fix'; sin sentido total = 'block' (área \"bidding\").",
-    "  3) ESTRUCTURA: cada grupo de anuncios debe tener >= 1 keyword Y exactamente UN RSA. Cero keywords o cero/duplicado de RSA = 'block' (área \"structure\").",
-    `  4) LÍMITES RSA (límites DUROS de Google): cada RSA con entre ${RSA_LIMITS.minHeadlines} y ${RSA_LIMITS.maxHeadlines} títulos y entre ${RSA_LIMITS.minDescriptions} y ${RSA_LIMITS.maxDescriptions} descripciones.`,
-    `     Cada título <= ${RSA_LIMITS.headlineMaxChars} caracteres. Cada descripción <= ${RSA_LIMITS.descriptionMaxChars} caracteres. Path1/Path2 <= ${RSA_LIMITS.path1MaxChars} caracteres.`,
-    "     CUALQUIER violación de carácter o de conteo mínimo/máximo = 'block' (área \"rsa_limits\"). Cuenta los caracteres tú mismo, uno a uno.",
-    "  5) URLS: la finalUrl de cada anuncio y la landingPageUrl de cada grupo deben ser absolutas y empezar por https://. URL relativa, http:// o vacía = 'block' (área \"urls\"/\"landing_page\").",
-    "  6) LANDING PAGE: debe existir una landing page (de campaña o por grupo). Si falta = 'block' (área \"landing_page\").",
-    "  7) NEGATIVAS: debe haber keywords negativas (a nivel campaña/compartidas o por grupo). Si NO hay ninguna negativa = 'fix' (área \"negatives\").",
-    "  8) DUPLICADOS: no puede haber la MISMA keyword exacta (mismo texto normalizado + mismo matchType EXACT) repetida en grupos distintos. Duplicado exacto = 'fix' (área \"keywords\"), porque compiten entre sí.",
-    "  9) GEO + IDIOMA: deben estar definidos. geo.locations o geo.countryCodes vacíos, o languageCode vacío = 'fix' (área \"geo\"/\"language\").",
-    " 10) POLÍTICA en el copy (títulos/descripciones): sin superlativos no respaldados (\"el mejor\", \"#1\", \"el número uno\") salvo que sean verificables;",
-    "     sin afirmaciones médicas o de salud (curas, garantías de resultado); sin afirmaciones financieras engañosas (rentabilidad garantizada);",
-    "     sin uso indebido de marcas de terceros; sin clickbait. Riesgo claro de rechazo = 'block'; riesgo leve/mejorable = 'fix' (área \"policy\").",
+    "Severity rules (apply them without exception):",
+    `  1) BUDGET: the daily budget must be >= $${BUDGET.minDailyUsd}/day. Less than that = 'block' (area "budget").`,
+    "  2) BIDDING: the bidding strategy must be consistent with the objective. E.g.: TARGET_CPA/MAXIMIZE_CONVERSIONS require a conversion objective (leads/sales/calls);",
+    "     TARGET_ROAS/MAXIMIZE_CONVERSION_VALUE require conversion value (sales). For pure traffic, MAXIMIZE_CLICKS or MANUAL_CPC is usually enough.",
+    "     If TARGET_CPA has no targetCpaUsd, or TARGET_ROAS has no targetRoas, that is inconsistent. Reasonable inconsistency = 'fix'; complete nonsense = 'block' (area \"bidding\").",
+    "  3) STRUCTURE: each ad group must have >= 1 keyword AND exactly ONE RSA. Zero keywords or zero/duplicate RSA = 'block' (area \"structure\").",
+    `  4) RSA LIMITS (Google HARD limits): each RSA with between ${RSA_LIMITS.minHeadlines} and ${RSA_LIMITS.maxHeadlines} headlines and between ${RSA_LIMITS.minDescriptions} and ${RSA_LIMITS.maxDescriptions} descriptions.`,
+    `     Each headline <= ${RSA_LIMITS.headlineMaxChars} characters. Each description <= ${RSA_LIMITS.descriptionMaxChars} characters. Path1/Path2 <= ${RSA_LIMITS.path1MaxChars} characters.`,
+    "     ANY character or min/max count violation = 'block' (area \"rsa_limits\"). Count the characters yourself, one by one.",
+    "  5) URLS: each ad's finalUrl and each group's landingPageUrl must be absolute and start with https://. Relative URL, http:// or empty = 'block' (area \"urls\"/\"landing_page\").",
+    "  6) LANDING PAGE: a landing page must exist (at campaign or group level). If missing = 'block' (area \"landing_page\").",
+    "  7) NEGATIVES: there must be negative keywords (at campaign/shared level or per group). If there is NO negative at all = 'fix' (area \"negatives\").",
+    "  8) DUPLICATES: the SAME exact keyword (same normalized text + same EXACT matchType) cannot be repeated across different groups. Exact duplicate = 'fix' (area \"keywords\"), because they compete with each other.",
+    "  9) GEO + LANGUAGE: they must be defined. Empty geo.locations or geo.countryCodes, or empty languageCode = 'fix' (area \"geo\"/\"language\").",
+    " 10) POLICY in the copy (headlines/descriptions): no unsupported superlatives (\"the best\", \"#1\", \"number one\") unless they are verifiable;",
+    "     no medical or health claims (cures, guaranteed results); no misleading financial claims (guaranteed returns);",
+    "     no improper use of third-party trademarks; no clickbait. Clear risk of rejection = 'block'; mild/improvable risk = 'fix' (area \"policy\").",
     "",
-    "Cómo decidir el veredicto global:",
-    "  - Si EXISTE cualquier issue con severity 'block' → verdict = 'block'.",
-    "  - Si no hay 'block' pero existe algún 'fix' → verdict = 'fix'.",
-    "  - Si solo hay 'warn' o nada → verdict = 'pass'.",
+    "How to decide the overall verdict:",
+    "  - If ANY issue with severity 'block' EXISTS → verdict = 'block'.",
+    "  - If there is no 'block' but there is some 'fix' → verdict = 'fix'.",
+    "  - If there is only 'warn' or nothing → verdict = 'pass'.",
     "",
-    "Devuelve también un checklist legible (una entrada por control) para que una persona no técnica entienda qué se revisó y si pasó.",
-    "Sé exhaustivo pero honesto: no inventes problemas que no existen ni dejes pasar violaciones reales.",
-    "TODO el texto que ve la persona (message, suggestion, detail, checklist.name, rationale) va en ESPAÑOL claro y sencillo.",
+    "Also return a readable checklist (one entry per control) so a non-technical person understands what was reviewed and whether it passed.",
+    "Be exhaustive but honest: do not invent problems that do not exist, nor let real violations slip through.",
+    "Write all user-facing text (message, suggestion, detail, checklist.name, rationale) in the brand's MAIN language, specified in the user prompt; the campaign content is expected to be in that language.",
   ].join("\n");
 }
 
@@ -168,6 +172,7 @@ function buildUserPrompt(ctx: RunContext): string {
   const keywords = ctx.keywords ?? null;
   const structure = ctx.structure ?? null;
   const rsa = ctx.rsa ?? null;
+  const lang = languageName(ctx.planner?.geo.languageCode);
 
   const limitsBlock = JSON.stringify(
     {
@@ -188,9 +193,12 @@ function buildUserPrompt(ctx: RunContext): string {
   );
 
   return [
-    "Revisa el plan COMPLETO de esta campaña de Búsqueda y emite tu veredicto.",
+    "Review the COMPLETE plan of this Search campaign and issue your verdict.",
     "",
-    "=== MARCA (seed) ===",
+    `LANGUAGE: All user-facing text you produce (issue descriptions, fix suggestions, notes, checklist names, and any summary the user reads) MUST be written in ${lang}.`,
+    `Also JUDGE the ad copy against ${lang}: the campaign content is expected to be in the brand's main language, ${lang}, NOT Spanish. Do NOT flag non-Spanish copy as wrong and do NOT "correct" ${lang} (or any other-language) copy back to Spanish.`,
+    "",
+    "=== BRAND (seed) ===",
     JSON.stringify(
       {
         brandName: ctx.brand?.brandName,
@@ -205,33 +213,33 @@ function buildUserPrompt(ctx: RunContext): string {
       2
     ),
     "",
-    "=== A1 — PLANNER (objetivo, geo/idioma, presupuesto, puja, temas, KPIs) ===",
+    "=== A1 — PLANNER (objective, geo/language, budget, bidding, themes, KPIs) ===",
     planner
       ? JSON.stringify(planner, null, 2)
-      : "FALTA la salida del Planner. Trátalo como un problema grave de estructura.",
+      : "The Planner output is MISSING. Treat it as a serious structural problem.",
     "",
-    "=== A2 — KEYWORDS (keywords + negativas) ===",
+    "=== A2 — KEYWORDS (keywords + negatives) ===",
     keywords
       ? JSON.stringify(keywords, null, 2)
-      : "FALTA la salida del investigador de keywords.",
+      : "The keyword researcher output is MISSING.",
     "",
-    "=== A3 — ESTRUCTURA (campaña → grupos, keywords por grupo, negativas, landing pages) ===",
+    "=== A3 — STRUCTURE (campaign → groups, keywords per group, negatives, landing pages) ===",
     structure
       ? JSON.stringify(structure, null, 2)
-      : "FALTA la salida del arquitecto de estructura. Sin grupos no se puede publicar.",
+      : "The structure architect output is MISSING. Without groups it cannot be published.",
     "",
-    "=== A4 — RSA (títulos y descripciones por grupo, paths, finalUrl) ===",
+    "=== A4 — RSA (headlines and descriptions per group, paths, finalUrl) ===",
     rsa
       ? JSON.stringify(rsa, null, 2)
-      : "FALTA la salida del redactor de anuncios. Sin anuncios no se puede publicar.",
+      : "The ad copywriter output is MISSING. Without ads it cannot be published.",
     "",
-    "=== LÍMITES DUROS DE REFERENCIA (úsalos al pie de la letra) ===",
+    "=== REFERENCE HARD LIMITS (apply them to the letter) ===",
     limitsBlock,
     "",
-    "Recuerda emparejar cada grupo de A3 con su RSA de A4 por el nombre del grupo (adGroupName === PlannedAdGroup.name).",
-    "Cuenta los caracteres de cada título, descripción y path uno a uno. Verifica que cada grupo tenga >= 1 keyword y exactamente 1 RSA.",
-    "Comprueba que todas las finalUrl y landingPageUrl sean absolutas y https. Busca keywords exactas duplicadas entre grupos.",
-    "Emite issues[] con locator preciso, un checklist[] legible y un veredicto final coherente con las reglas de severidad.",
+    "Remember to pair each group from A3 with its RSA from A4 by the group name (adGroupName === PlannedAdGroup.name).",
+    "Count the characters of each headline, description and path one by one. Verify that each group has >= 1 keyword and exactly 1 RSA.",
+    "Check that all finalUrl and landingPageUrl are absolute and https. Look for duplicate exact keywords across groups.",
+    "Emit issues[] with a precise locator, a readable checklist[] and a final verdict consistent with the severity rules.",
   ].join("\n");
 }
 
@@ -299,17 +307,17 @@ async function checkOneLanding(
       },
     });
     if (res.status === 404 || res.status === 410) {
-      return { url, reason: "no existe (página no encontrada)" };
+      return { url, reason: "does not exist (page not found)" };
     }
     if (res.status >= 500) {
-      return { url, reason: `el servidor devolvió un error (${res.status})` };
+      return { url, reason: `the server returned an error (${res.status})` };
     }
     // 2xx, 3xx and "gated" 4xx (401/403/405/429…) → the page exists.
     return null;
   } catch {
     // Network error, DNS failure, timeout or abort.
     if (parentSignal?.aborted) return null; // run cancelled — don't warn.
-    return { url, reason: "no respondió a tiempo o no se pudo abrir" };
+    return { url, reason: "did not respond in time or could not be opened" };
   } finally {
     clearTimeout(timeout);
     parentSignal?.removeEventListener("abort", onParentAbort);
@@ -322,7 +330,7 @@ async function checkOneLanding(
 
 const a5PolicyQa: AgentDefinition<QAOutput> = {
   id: AGENT_ID,
-  title: "Revisor de calidad y política",
+  title: "Quality and policy reviewer",
   model: defaultAnthropicModel("policy_qa"),
   kind: "llm",
   promptVersion: PROMPT_VERSION,
@@ -343,7 +351,7 @@ const a5PolicyQa: AgentDefinition<QAOutput> = {
         schema: QA_SCHEMA,
         toolName: "submit_qa_review",
         toolDescription:
-          "Devuelve el veredicto (pass|fix|block), los problemas detectados, el checklist y la explicación.",
+          "Returns the verdict (pass|fix|block), the detected problems, the checklist and the explanation.",
         temperature: 0.2,
         signal: helpers.signal,
       });
@@ -369,27 +377,27 @@ const a5PolicyQa: AgentDefinition<QAOutput> = {
         );
         const okCount = landingUrls.length - problems.length;
         output.checklist.push({
-          name: "Páginas de destino accesibles",
+          name: "Landing pages reachable",
           ok: problems.length === 0,
           detail:
             problems.length === 0
-              ? `${landingUrls.length} página(s) abren correctamente.`
-              : `${okCount} de ${landingUrls.length} abren bien; ${problems.length} con avisos.`,
+              ? `${landingUrls.length} page(s) open correctly.`
+              : `${okCount} of ${landingUrls.length} open fine; ${problems.length} with warnings.`,
         });
         for (const p of problems) {
           output.issues.push({
             severity: "warn",
             area: "landing_page",
-            message: `La página ${p.url} ${p.reason}. Si el enlace está mal o caído, quien haga clic no verá tu oferta y gastarías sin resultado.`,
+            message: `The page ${p.url} ${p.reason}. If the link is wrong or down, whoever clicks will not see your offer and you would spend without results.`,
             suggestion:
-              "Abre el enlace en tu navegador. Si no carga, corrige la dirección de la página de destino antes de poner la campaña en marcha.",
+              "Open the link in your browser. If it does not load, fix the landing page address before launching the campaign.",
             locator: "landingPageUrl",
           });
         }
         if (problems.length > 0) {
           await helpers.emit("decision", {
             agent: AGENT_ID,
-            summary: `Aviso: ${problems.length} página(s) de destino no respondieron bien al comprobarlas. La campaña se puede crear igualmente, pero conviene revisar el enlace.`,
+            summary: `Notice: ${problems.length} landing page(s) did not respond well when checked. The campaign can still be created, but the link should be reviewed.`,
           });
         }
       }
@@ -405,7 +413,7 @@ const a5PolicyQa: AgentDefinition<QAOutput> = {
     await helpers.emit("decision", {
       agent: AGENT_ID,
       verdict: output.verdict,
-      summary: `Veredicto: ${output.verdict.toUpperCase()} — ${blockers} bloqueante(s), ${fixes} a corregir, ${warns} aviso(s).`,
+      summary: `Verdict: ${output.verdict.toUpperCase()} — ${blockers} blocker(s), ${fixes} to fix, ${warns} notice(s).`,
     });
 
     // Gate event carrying the verdict (the orchestrator stops on 'block').

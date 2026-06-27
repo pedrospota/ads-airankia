@@ -1237,6 +1237,119 @@ function ModeCard({
   );
 }
 
+// ── País / idioma: nombres amables en español ───────────────────────────────
+// Alineado con GEO_TARGET_CONSTANTS / LANGUAGE_CONSTANTS de src/lib/google-ads.ts:
+// solo mostramos (y dejamos elegir) países e idiomas que Google Ads sabe
+// segmentar. La IA decide el valor por defecto; esto es solo para enseñarlo
+// claro y dejar que el usuario lo corrija si hace falta.
+const COUNTRY_LABELS: Record<string, { name: string; flag: string }> = {
+  ES: { name: "España", flag: "🇪🇸" },
+  MX: { name: "México", flag: "🇲🇽" },
+  AR: { name: "Argentina", flag: "🇦🇷" },
+  CO: { name: "Colombia", flag: "🇨🇴" },
+  CL: { name: "Chile", flag: "🇨🇱" },
+  PE: { name: "Perú", flag: "🇵🇪" },
+  US: { name: "Estados Unidos", flag: "🇺🇸" },
+  GB: { name: "Reino Unido", flag: "🇬🇧" },
+  FR: { name: "Francia", flag: "🇫🇷" },
+  DE: { name: "Alemania", flag: "🇩🇪" },
+  IT: { name: "Italia", flag: "🇮🇹" },
+  PT: { name: "Portugal", flag: "🇵🇹" },
+};
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  es: "Español",
+  en: "Inglés",
+  fr: "Francés",
+  de: "Alemán",
+  it: "Italiano",
+  pt: "Portugués",
+};
+
+function countryLabel(code?: string): { name: string; flag: string } {
+  const c = (code ?? "").toUpperCase();
+  return COUNTRY_LABELS[c] ?? { name: code || "—", flag: "🌍" };
+}
+
+function languageLabel(code?: string): string {
+  const l = (code ?? "").toLowerCase();
+  return LANGUAGE_LABELS[l] ?? (code || "—");
+}
+
+const COUNTRY_OPTIONS = Object.entries(COUNTRY_LABELS).map(([code, v]) => ({
+  code,
+  ...v,
+}));
+const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_LABELS).map(([code, name]) => ({
+  code,
+  name,
+}));
+
+// Prominent "this is the country/language we'll target" banner, shown at the
+// very top of the run so the user SEES it before the heavy steps run (Pedro
+// asked to show the country up front, per brand). It reads the planner's geo,
+// which the AI decides automatically; the user can change it below in "Tu plan".
+function GeoBanner({
+  state,
+  colors,
+}: {
+  state: RunStateDTO | null;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const planner = state ? readStep<PlannerOutput>(state, "planner") : null;
+  const geo = planner?.geo;
+
+  // Until the planner has decided, reassure that we're working it out.
+  if (!geo || !geo.countryCodes?.length) {
+    return (
+      <div
+        style={{
+          marginBottom: 18,
+          padding: "10px 14px",
+          borderRadius: 10,
+          border: `1px solid ${colors.border}`,
+        }}
+      >
+        <span style={{ fontSize: 13, color: colors.textMuted }}>
+          🌍 Estamos detectando el país de tu marca…
+        </span>
+      </div>
+    );
+  }
+
+  const primary = countryLabel(geo.countryCodes[0]);
+  const extra = geo.countryCodes.length - 1;
+  const lang = languageLabel(geo.languageCode);
+
+  return (
+    <div
+      style={{
+        marginBottom: 18,
+        padding: "12px 14px",
+        borderRadius: 10,
+        border: `1px solid ${colors.accent}`,
+        background: "rgba(16,185,129,0.06)",
+      }}
+    >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "baseline" }}>
+        <span style={{ fontSize: 12.5, color: colors.textMuted }}>Tu campaña apunta a</span>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>
+          {primary.flag} {primary.name}
+          {extra > 0 ? ` +${extra}` : ""}
+        </span>
+        <span style={{ fontSize: 12.5, color: colors.textMuted }}>
+          · anuncios en {lang}
+        </span>
+      </div>
+      <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 5 }}>
+        Lo eligió la IA por la web de tu marca, y por eso las palabras clave salen
+        en {lang.toLowerCase()}. Si no es correcto, puedes cambiarlo en «
+        {STEP_TITLE.planner}».
+      </p>
+    </div>
+  );
+}
+
 function Timeline({
   state,
   liveLog,
@@ -1282,6 +1395,7 @@ function Timeline({
       <span className="sr-only" role="status" aria-live="polite">
         {liveStatusText}
       </span>
+      <GeoBanner state={state} colors={colors} />
       {PIPELINE.map((agent, i) => {
         const step = stepByAgent.get(agent);
         const dot = dotStateFor(step);
@@ -1602,6 +1716,13 @@ function ApprovalBlock({
   const [objective, setObjective] = useState<string>(
     planner?.objectiveSummary ?? "",
   );
+  // País + idioma: la IA ya los eligió; aquí solo dejamos cambiarlos con un clic.
+  const [country, setCountry] = useState<string>(
+    planner?.geo?.countryCodes?.[0]?.toUpperCase() ?? "",
+  );
+  const [language, setLanguage] = useState<string>(
+    planner?.geo?.languageCode?.toLowerCase() ?? "",
+  );
 
   // Generic "Ajustar" fallback (editable JSON-ish textarea) for other steps.
   const [editing, setEditing] = useState(false);
@@ -1643,6 +1764,16 @@ function ApprovalBlock({
       const override: PlannerOutput = {
         ...planner,
         objectiveSummary: objective.trim() || planner.objectiveSummary,
+        geo: {
+          ...planner.geo,
+          countryCodes: country ? [country] : planner.geo.countryCodes,
+          // Keep the human-readable location label in step with the chosen
+          // country so downstream agents and summaries read consistently.
+          locations: country
+            ? [countryLabel(country).name]
+            : planner.geo.locations,
+          languageCode: language || planner.geo.languageCode,
+        },
         budget: {
           ...planner.budget,
           dailyUsd: parseBudget(budget) ?? planner.budget.dailyUsd,
@@ -1699,6 +1830,50 @@ function ApprovalBlock({
               onChange={(e) => setBudget(e.target.value)}
               style={styles.inp}
             />
+          </div>
+          <div>
+            <label htmlFor="planner-country" style={styles.lbl}>
+              País al que apuntar
+            </label>
+            <select
+              id="planner-country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              style={styles.inp}
+            >
+              {country && !COUNTRY_LABELS[country] && (
+                <option value={country}>{country}</option>
+              )}
+              {COUNTRY_OPTIONS.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.flag} {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="planner-language" style={styles.lbl}>
+              Idioma de los anuncios
+            </label>
+            <select
+              id="planner-language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              style={styles.inp}
+            >
+              {language && !LANGUAGE_LABELS[language] && (
+                <option value={language}>{language}</option>
+              )}
+              {LANGUAGE_OPTIONS.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6 }}>
+              Si cambias el país o el idioma, la IA buscará las palabras clave
+              para esa zona y en ese idioma.
+            </p>
           </div>
         </div>
       )}
@@ -1893,6 +2068,15 @@ function ActivationReview({
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <Stat label="Grupos de anuncios" value={String(adGroupCount)} colors={colors} />
         <Stat label="Palabras clave" value={String(keywordCount)} colors={colors} />
+        {planner?.geo?.countryCodes?.[0] && (
+          <Stat
+            label="País"
+            value={`${countryLabel(planner.geo.countryCodes[0]).flag} ${
+              countryLabel(planner.geo.countryCodes[0]).name
+            }`}
+            colors={colors}
+          />
+        )}
         {planner?.budget?.dailyUsd != null && (
           <Stat
             label="Presupuesto"
@@ -2171,8 +2355,15 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
       const o = out as Partial<PlannerOutput>;
       const lines: string[] = [];
       if (o.objectiveSummary) lines.push(`🎯 ${o.objectiveSummary}`);
-      if (o.geo?.locations?.length)
+      if (o.geo?.countryCodes?.length) {
+        const c = countryLabel(o.geo.countryCodes[0]);
+        const more = o.geo.countryCodes.length - 1;
+        lines.push(
+          `📍 País: ${c.flag} ${c.name}${more > 0 ? ` +${more}` : ""} · anuncios en ${languageLabel(o.geo.languageCode)}`,
+        );
+      } else if (o.geo?.locations?.length) {
         lines.push(`📍 Zona: ${o.geo.locations.join(", ")}`);
+      }
       if (o.budget?.dailyUsd != null)
         lines.push(`💰 Presupuesto: ${o.budget.dailyUsd} ${CURRENCY} al día`);
       if (o.themes?.length)

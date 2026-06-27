@@ -9,12 +9,31 @@ const REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN!;
 
 let cachedAccessToken: { token: string; expires: number } | null = null;
 
+// Node's fetch has NO default timeout: a slow/unreachable Google endpoint would
+// hang the request indefinitely. Inside the Search pipeline that means the whole
+// step blows past the reverse-proxy limit (Cloudflare ~100s) and the user gets a
+// generic gateway error. fetchWithTimeout bounds every Google Ads call so a slow
+// dependency fails fast instead of hanging the run.
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 20000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function getAccessToken(): Promise<string> {
   if (cachedAccessToken && Date.now() < cachedAccessToken.expires) {
     return cachedAccessToken.token;
   }
 
-  const resp = await fetch("https://oauth2.googleapis.com/token", {
+  const resp = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -23,7 +42,7 @@ async function getAccessToken(): Promise<string> {
       refresh_token: REFRESH_TOKEN,
       grant_type: "refresh_token",
     }),
-  });
+  }, 15000);
 
   if (!resp.ok) throw new Error(`OAuth token refresh failed: ${resp.status}`);
   const data = await resp.json();
@@ -324,11 +343,11 @@ export async function generateKeywordIdeas(params: {
     }[];
   };
   try {
-    const resp = await fetch(`${BASE}:generateKeywordIdeas`, {
+    const resp = await fetchWithTimeout(`${BASE}:generateKeywordIdeas`, {
       method: "POST",
       headers: headers(token),
       body: JSON.stringify(body),
-    });
+    }, 20000);
     data = await resp.json();
   } catch {
     return [];

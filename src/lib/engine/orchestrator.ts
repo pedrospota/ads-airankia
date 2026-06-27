@@ -301,6 +301,13 @@ export async function runStep(runId: string, stepId: string): Promise<void> {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Fallo del agente";
 
+    // Surface the real cause in the server logs (Coolify): the step error is
+    // otherwise only written to the DB + SSE, so a failure is invisible in stdout.
+    console.error(
+      `[runStep] agent "${agent}" FAILED (run ${runId}, step ${stepId}): ${message}`,
+      e instanceof Error ? e.stack : e
+    );
+
     await adsDb
       .update(agentSteps)
       .set({

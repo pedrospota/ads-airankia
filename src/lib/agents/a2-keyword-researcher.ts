@@ -382,7 +382,11 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
     const languageCode = ctx.planner?.geo.languageCode ?? "es";
     const countryCodes = ctx.planner?.geo.countryCodes ?? [];
 
+    // TEMP instrumentation (remove once the keyword-step latency incident is
+    // closed): time the Keyword Planner call and the LLM call separately so the
+    // logs show exactly where a slow run spends its time.
     let plannerIdeas: KeywordPlanIdea[] = [];
+    const tPlanner = Date.now();
     try {
       plannerIdeas = await generateKeywordIdeas({
         keywordSeeds,
@@ -393,9 +397,13 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
     } catch {
       plannerIdeas = [];
     }
+    console.log(
+      `[a2] keyword planner: ${plannerIdeas.length} ideas in ${Date.now() - tPlanner}ms`
+    );
 
     // --- 2) Curate the list with the LLM -------------------------------------
     let result;
+    const tLlm = Date.now();
     try {
       result = await callStructured<KeywordResearchOutput>({
         agentId: "keyword_researcher",
@@ -409,6 +417,10 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
         signal: helpers.signal,
       });
     } catch (err) {
+      console.error(
+        `[a2] LLM call FAILED after ${Date.now() - tLlm}ms:`,
+        err instanceof Error ? err.message : err
+      );
       if (err instanceof LLMError) {
         await helpers.emit("error", {
           agent: "keyword_researcher",
@@ -417,6 +429,7 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
       }
       throw err;
     }
+    console.log(`[a2] LLM call OK in ${Date.now() - tLlm}ms`);
 
     const llmOutput = result.data;
 

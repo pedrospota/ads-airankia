@@ -15,11 +15,11 @@ export function Header({
 }) {
   const { theme, toggleTheme, colors } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
-  // null = not checked yet; true/false once we know. The model/LLM settings page
-  // lives at /admin and is admin-gated server-side, but there was no link to it.
-  // We probe the admin-only settings endpoint the first time the menu opens and
-  // only reveal the link to admins (non-admins get a 403 → link stays hidden).
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  // The model/LLM settings page lives at /admin. We always show the link so it's
+  // easy to find; the page itself is admin-gated server-side, so a non-admin who
+  // clicks it just gets a friendly "not an admin" notice (no settings leaked).
+  // (We used to probe /api/admin/settings to hide the link, but that left admins
+  // unable to find the page when the probe didn't resolve.)
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -29,17 +29,6 @@ export function Header({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [menuOpen]);
-
-  useEffect(() => {
-    if (!menuOpen || isAdmin !== null) return;
-    const ac = new AbortController();
-    fetch("/api/admin/settings", { signal: ac.signal })
-      .then((r) => setIsAdmin(r.ok))
-      .catch(() => {
-        /* aborted on unmount, or network error → leave hidden */
-      });
-    return () => ac.abort();
-  }, [menuOpen, isAdmin]);
 
   async function handleLogout() {
     const supabase = createSupabaseBrowser();
@@ -122,26 +111,24 @@ export function Header({
                   background: colors.bgCard, border: `1px solid ${colors.border}`,
                   borderRadius: 10, padding: 4, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                 }}>
-                  {isAdmin && (
-                    <Link
-                      href="/admin"
-                      role="menuitem"
-                      onClick={() => setMenuOpen(false)}
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 6,
-                        background: 'transparent', cursor: 'pointer',
-                        fontSize: 13, color: colors.text, textAlign: 'left',
-                        display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(16,185,129,0.1)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                      </svg>
-                      Admin settings
-                    </Link>
-                  )}
+                  <Link
+                    href="/admin"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    style={{
+                      width: '100%', padding: '10px 14px', borderRadius: 6,
+                      background: 'transparent', cursor: 'pointer',
+                      fontSize: 13, color: colors.text, textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(16,185,129,0.1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    Admin settings
+                  </Link>
                   <button
                     onClick={handleLogout}
                     role="menuitem"

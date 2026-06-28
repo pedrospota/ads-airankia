@@ -61,6 +61,50 @@ export interface CompetitorAd {
 
 export type AdsStatus = "off" | "empty" | "ok" | "error";
 
+/** One keyword in a competitor's modeled spend, with its contribution. */
+export interface SpendKeyword {
+  text: string;
+  avgMonthlySearches: number;
+  cpcMicros: number; // mid top-of-page CPC (micros) — reuses the CPC formatter
+  estMonthlyClicks: number;
+  estMonthlyMid: number; // modeled monthly spend on this keyword, currency units
+}
+
+/**
+ * Modeled estimate of how much a competitor invests in Google Search per month.
+ * Nobody can see a competitor's real spend — this is inferred the same way the
+ * big tools do it: real Keyword Planner search volumes × real top-of-page CPC,
+ * times paid-CTR and competitive-share assumptions. A directional estimate,
+ * NOT actual spend. Sharpens to "medium" confidence when the gated ad-spy layer
+ * adds real creatives + landing pages.
+ */
+export interface SpendEstimate {
+  currency: string;
+  monthlyLow: number;
+  monthlyMid: number;
+  monthlyHigh: number;
+  confidence: "low" | "medium";
+  /** Keywords that carry a real CPC bid (the monetizable footprint). */
+  commercialKeywords: number;
+  /** Distinct ad destination URLs — a proxy for # of campaigns/landings (ad-spy only). */
+  landingsDetected: number | null;
+  /** Number of running creatives (ad-spy only). */
+  activeCreatives: number | null;
+  topSpendKeywords: SpendKeyword[];
+  basis: string;
+}
+
+/** Roll-up of modeled spend across all competitors analyzed in a run. */
+export interface SpendSummary {
+  currency: string;
+  monthlyLow: number;
+  monthlyMid: number;
+  monthlyHigh: number;
+  competitorsEstimated: number;
+  confidence: "low" | "medium";
+  note: string;
+}
+
 /** Everything we learned about one competitor domain. */
 export interface BenchmarkCompetitor {
   domain: string;
@@ -70,6 +114,8 @@ export interface BenchmarkCompetitor {
   landing: CompetitorLanding | null;
   ads: CompetitorAd[] | null;
   adsStatus: AdsStatus;
+  /** Modeled monthly Google Search investment (null when nothing is monetizable). */
+  spend?: SpendEstimate | null;
   /** Non-fatal notes (e.g. "landing fetch timed out"). */
   notes: string[];
 }
@@ -104,6 +150,8 @@ export interface BenchmarkReport {
   competitors: BenchmarkCompetitor[];
   keywordGaps: KeywordGap[];
   strategy: BenchmarkStrategy;
+  /** Modeled combined competitor investment (null when nothing could be estimated). */
+  spendSummary?: SpendSummary | null;
   meta: {
     liveAdSpy: boolean;
     domainsAnalyzed: number;

@@ -9,6 +9,8 @@ import type {
   KeywordGap,
   BenchmarkKeyword,
   CompetitorAd,
+  SpendEstimate,
+  SpendSummary,
 } from "@/lib/benchmark/types";
 
 // ----------------------------------------------------------------------------
@@ -44,6 +46,14 @@ const CUR = "€";
 function fmtVol(n: number): string {
   if (!n) return "0";
   return n.toLocaleString("en-US");
+}
+// Compact money: 1234 → €1.2K, 45000 → €45K, 1200000 → €1.2M.
+function fmtMoney(n: number, cur = CUR): string {
+  const v = Math.max(0, Math.round(n));
+  if (v >= 1_000_000) return `${cur}${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 10_000) return `${cur}${Math.round(v / 1000)}K`;
+  if (v >= 1000) return `${cur}${(v / 1000).toFixed(1)}K`;
+  return `${cur}${v.toLocaleString("en-US")}`;
 }
 function fmtCpc(low?: number, high?: number): string | null {
   const l = low != null ? low / 1_000_000 : null;
@@ -653,6 +663,7 @@ function ProgressPanel({
               }}
             >
               ✓ {c.domain} · {fmtVol(c.totalVolume)} vol
+              {c.spend ? ` · ~${fmtMoney(c.spend.monthlyMid, c.spend.currency)}/mo` : ""}
             </span>
           ))}
         </div>
@@ -678,6 +689,13 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
         <Stat colors={colors} label="Competitors" value={String(report.meta.domainsAnalyzed)} />
         <Stat colors={colors} label="Keywords found" value={fmtVol(report.meta.keywordsDiscovered)} />
         <Stat colors={colors} label="Gaps" value={String(report.keywordGaps.length)} />
+        {report.spendSummary && (
+          <Stat
+            colors={colors}
+            label="Est. spend/mo"
+            value={`~${fmtMoney(report.spendSummary.monthlyMid, report.spendSummary.currency)}`}
+          />
+        )}
         <Stat colors={colors} label="Market" value={report.country} />
         <Stat
           colors={colors}
@@ -685,6 +703,18 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
           value={report.meta.liveAdSpy ? "Live" : "Off"}
         />
       </div>
+
+      {/* estimated investment */}
+      {report.spendSummary && (
+        <>
+          <h2 style={sectionTitle}>💰 Estimated competitor investment</h2>
+          <SpendPanel
+            colors={colors}
+            summary={report.spendSummary}
+            competitors={report.competitors}
+          />
+        </>
+      )}
 
       {/* strategy */}
       <h2 style={sectionTitle}>🧠 Your strategy</h2>
@@ -741,6 +771,175 @@ function Stat({ colors, label, value }: { colors: Colors; label: string; value: 
       <div style={{ fontSize: 11.5, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
         {label}
       </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Estimated investment — the headline range + a who-outspends-whom comparison.
+// Framed honestly: nobody can see real competitor spend; this is modeled.
+// ----------------------------------------------------------------------------
+function SpendPanel({
+  colors,
+  summary,
+  competitors,
+}: {
+  colors: Colors;
+  summary: SpendSummary;
+  competitors: BenchmarkCompetitor[];
+}) {
+  const [how, setHow] = useState(false);
+  const cur = summary.currency;
+
+  // Competitors with an estimate, biggest spenders first.
+  const ranked = competitors
+    .filter((c): c is BenchmarkCompetitor & { spend: SpendEstimate } => !!c.spend)
+    .sort((a, b) => b.spend.monthlyMid - a.spend.monthlyMid);
+  const maxMid = Math.max(1, ...ranked.map((c) => c.spend.monthlyMid));
+
+  const confLabel =
+    summary.confidence === "medium"
+      ? { text: "Modeled + ad-spy", color: "#4ADE80", bg: "rgba(74,222,128,0.12)" }
+      : { text: "Directional estimate", color: "#FBBF24", bg: "rgba(251,191,36,0.12)" };
+
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(251,191,36,0.05), rgba(251,191,36,0))",
+        border: `1px solid ${colors.border}`,
+        borderRadius: 16,
+        padding: 22,
+      }}
+    >
+      {/* headline range */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12.5, color: colors.textMuted, marginBottom: 4 }}>
+            Your competitors are investing an estimated
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>
+            {fmtMoney(summary.monthlyLow, cur)}
+            <span style={{ color: colors.textFaint, fontWeight: 600 }}> – </span>
+            {fmtMoney(summary.monthlyHigh, cur)}
+            <span style={{ fontSize: 15, fontWeight: 600, color: colors.textMuted }}> /mo</span>
+          </div>
+          <div style={{ fontSize: 12.5, color: colors.textMuted, marginTop: 4 }}>
+            combined, across {summary.competitorsEstimated} competitor
+            {summary.competitorsEstimated === 1 ? "" : "s"} on Google Search
+          </div>
+        </div>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            padding: "5px 11px",
+            borderRadius: 999,
+            color: confLabel.color,
+            background: confLabel.bg,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {confLabel.text}
+        </span>
+      </div>
+
+      {/* per-competitor comparison bars */}
+      {ranked.length > 0 && (
+        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+          {ranked.map((c) => {
+            const pct = Math.max(4, Math.round((c.spend.monthlyMid / maxMid) * 100));
+            return (
+              <div key={c.domain}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    marginBottom: 5,
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 13.5, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.domain}
+                  </span>
+                  <span style={{ fontSize: 12.5, color: colors.textMuted, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                    ~{fmtMoney(c.spend.monthlyMid, cur)}/mo
+                    <span style={{ color: colors.textFaint }}>
+                      {" "}({fmtMoney(c.spend.monthlyLow, cur)}–{fmtMoney(c.spend.monthlyHigh, cur)})
+                    </span>
+                  </span>
+                </div>
+                <div style={{ height: 8, borderRadius: 999, background: colors.bgInput, overflow: "hidden" }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${pct}%`,
+                      borderRadius: 999,
+                      background:
+                        c.spend.confidence === "medium"
+                          ? "linear-gradient(90deg, #4ADE80, #10B981)"
+                          : "linear-gradient(90deg, #FBBF24, #F59E0B)",
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* honest methodology disclosure */}
+      <button
+        onClick={() => setHow((h) => !h)}
+        style={{
+          marginTop: 18,
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          color: colors.accent,
+          fontWeight: 600,
+          fontSize: 12.5,
+          cursor: "pointer",
+        }}
+      >
+        {how ? "Hide how this is calculated" : "ℹ️ How is this estimated?"}
+      </button>
+      {how && (
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 12.5,
+            color: colors.textMuted,
+            lineHeight: 1.55,
+            background: colors.bgInput,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 12,
+            padding: 14,
+          }}
+        >
+          Nobody can see a competitor&apos;s real Google Ads budget — it&apos;s
+          private. Like SEMrush, SpyFu and Similarweb, we <strong style={{ color: colors.text }}>model</strong> it
+          from public signals: for every keyword in their footprint we take the
+          real Keyword Planner <strong style={{ color: colors.text }}>search volume × top-of-page CPC</strong>,
+          then apply how often searchers click a paid ad and this advertiser&apos;s
+          likely share of those clicks (by competition level). Summed across the
+          footprint, that gives the range above.
+          <div style={{ marginTop: 8 }}>
+            Best read as <strong style={{ color: colors.text }}>who outspends whom</strong>, not
+            an exact euro. {summary.confidence === "medium"
+              ? "Live ad-spy is on, so real creatives and landing pages sharpen these numbers."
+              : "Turning on live ad-spy (admin) sharpens it with real creatives, advertiser counts and landing pages."}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -928,12 +1127,25 @@ function CompetitorCard({ colors, c }: { colors: Colors; c: BenchmarkCompetitor 
           )}
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-            {fmtVol(c.totalVolume)}
-          </div>
-          <div style={{ fontSize: 11, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
-            total volume
-          </div>
+          {c.spend ? (
+            <>
+              <div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "#FBBF24" }}>
+                ~{fmtMoney(c.spend.monthlyMid, c.spend.currency)}
+              </div>
+              <div style={{ fontSize: 11, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                est. spend/mo
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
+                {fmtVol(c.totalVolume)}
+              </div>
+              <div style={{ fontSize: 11, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                total volume
+              </div>
+            </>
+          )}
           <div style={{ marginTop: 8, fontSize: 18, color: colors.textFaint }}>
             {open ? "▾" : "▸"}
           </div>
@@ -942,6 +1154,9 @@ function CompetitorCard({ colors, c }: { colors: Colors; c: BenchmarkCompetitor 
 
       {open && (
         <div style={{ padding: "0 20px 20px" }}>
+          {/* estimated investment breakdown */}
+          {c.spend && <SpendBreakdown colors={colors} spend={c.spend} />}
+
           {/* top keywords */}
           {c.keywords.length > 0 && (
             <Detail colors={colors} title="Top keywords">
@@ -1024,6 +1239,63 @@ function CompetitorCard({ colors, c }: { colors: Colors; c: BenchmarkCompetitor 
         </div>
       )}
     </div>
+  );
+}
+
+function SpendBreakdown({ colors, spend }: { colors: Colors; spend: SpendEstimate }) {
+  const cur = spend.currency;
+  const maxKw = Math.max(1, ...spend.topSpendKeywords.map((k) => k.estMonthlyMid));
+  return (
+    <Detail colors={colors} title="Estimated monthly investment">
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+        <span style={{ fontSize: 22, fontWeight: 800, color: "#FBBF24", fontVariantNumeric: "tabular-nums" }}>
+          {fmtMoney(spend.monthlyLow, cur)}–{fmtMoney(spend.monthlyHigh, cur)}
+          <span style={{ fontSize: 13, fontWeight: 600, color: colors.textMuted }}> /mo</span>
+        </span>
+        <span style={{ fontSize: 12, color: colors.textFaint }}>
+          {spend.commercialKeywords} monetizable keyword
+          {spend.commercialKeywords === 1 ? "" : "s"}
+          {spend.landingsDetected != null && ` · ${spend.landingsDetected} landing${spend.landingsDetected === 1 ? "" : "s"} detected`}
+          {spend.activeCreatives != null && ` · ${spend.activeCreatives} live ad${spend.activeCreatives === 1 ? "" : "s"}`}
+        </span>
+      </div>
+
+      {spend.topSpendKeywords.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11.5, color: colors.textMuted, marginBottom: 8 }}>
+            Where their budget likely goes:
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {spend.topSpendKeywords.map((k, i) => {
+              const pct = Math.max(5, Math.round((k.estMonthlyMid / maxKw) * 100));
+              const cpc = fmtCpc(k.cpcMicros, k.cpcMicros);
+              return (
+                <div key={k.text + i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {k.text}
+                    </span>
+                    <span style={{ fontSize: 12, color: colors.textMuted, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                      ~{fmtMoney(k.estMonthlyMid, cur)}/mo
+                      <span style={{ color: colors.textFaint }}>
+                        {" "}· {fmtVol(k.estMonthlyClicks)} clicks{cpc ? ` · ${cpc}` : ""}
+                      </span>
+                    </span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 999, background: colors.bgInput, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: "rgba(251,191,36,0.7)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <p style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 12, lineHeight: 1.5 }}>
+        {spend.basis}
+      </p>
+    </Detail>
   );
 }
 

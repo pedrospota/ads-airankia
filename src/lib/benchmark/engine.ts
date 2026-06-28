@@ -31,6 +31,7 @@ import { getBenchmarkConfig } from "./config";
 import { fetchCompetitorAds } from "./searchapi";
 import { fetchPage, extractTracking, toDomain } from "./page-fetch";
 import { emitBenchmarkEvent } from "./events";
+import { estimateCompetitorSpend, summarizeSpend } from "./spend";
 import type {
   BenchmarkReport,
   BenchmarkKeyword,
@@ -321,6 +322,7 @@ export async function runBenchmark(
     competitors,
     keywordGaps,
     strategy,
+    spendSummary: summarizeSpend(competitors.map((c) => c.spend)),
     meta: {
       liveAdSpy: competitors.some((c) => c.adsStatus === "ok"),
       domainsAnalyzed: competitors.length,
@@ -430,7 +432,7 @@ async function analyzeCompetitor(
   // Ad-spy (PAID, gated OFF by default — returns status "off" without spending).
   const adResult = await fetchCompetitorAds(domain, country, cost);
 
-  return {
+  const comp: BenchmarkCompetitor = {
     domain,
     source: "brand_profile",
     keywords,
@@ -440,6 +442,10 @@ async function analyzeCompetitor(
     adsStatus: adResult.status,
     notes,
   };
+  // Modeled monthly investment from the (free) KP volumes × CPC. Null when the
+  // footprint carries no CPC bids (nothing monetizable to estimate).
+  comp.spend = estimateCompetitorSpend(comp);
+  return comp;
 }
 
 // ----------------------------------------------------------------------------
@@ -497,11 +503,21 @@ async function synthesizeStrategy(
     const offer = c.landing?.valueProposition || "(no landing read)";
     const offers = (c.landing?.offers ?? []).slice(0, 4).join("; ");
     const stack = (c.landing?.tracking.pixels ?? []).join(", ");
+    const spend = c.spend
+      ? `   estimated monthly Google Search spend: ~${c.spend.currency}${Math.round(
+          c.spend.monthlyMid
+        ).toLocaleString("en-US")} (range ${c.spend.currency}${Math.round(
+          c.spend.monthlyLow
+        ).toLocaleString("en-US")}–${c.spend.currency}${Math.round(
+          c.spend.monthlyHigh
+        ).toLocaleString("en-US")}, modeled, not exact)`
+      : "";
     return [
       `• ${c.domain} — top keywords: ${top || "(none)"}`,
       `   value prop: ${offer}`,
       offers ? `   offers: ${offers}` : "",
       stack ? `   marketing stack: ${stack}` : "",
+      spend,
     ]
       .filter(Boolean)
       .join("\n");

@@ -1,5 +1,7 @@
 // Direct Google Ads REST API client — no MCP dependency
 
+import { recordCost } from "@/lib/cost-ledger";
+
 const CUSTOMER_ID = process.env.GOOGLE_ADS_ACCOUNT_ID || "3531706003";
 const MCC_ID = process.env.GOOGLE_ADS_MCC_ID || "9539861409";
 const CLIENT_ID = process.env.GOOGLE_ADS_CLIENT_ID!;
@@ -293,6 +295,14 @@ export async function generateKeywordIdeas(params: {
   urlSeed?: string;
   languageCode: string;
   countryCodes: string[];
+  // Optional run linkage so the API usage shows up per-user in the cost ledger.
+  costContext?: {
+    userId?: string | null;
+    brandId?: string | null;
+    workspaceId?: string | null;
+    runId?: string | null;
+    stepId?: string | null;
+  };
 }): Promise<KeywordPlanIdea[]> {
   const seeds = (params.keywordSeeds ?? [])
     .map((s) => s.trim())
@@ -355,7 +365,7 @@ export async function generateKeywordIdeas(params: {
 
   if (data.error || !Array.isArray(data.results)) return [];
 
-  return data.results
+  const ideas = data.results
     .filter((r): r is { text: string; keywordIdeaMetrics?: NonNullable<typeof r.keywordIdeaMetrics> } =>
       Boolean(r.text)
     )
@@ -371,6 +381,31 @@ export async function generateKeywordIdeas(params: {
         topOfPageBidHighMicros: high !== undefined ? Number(high) : undefined,
       };
     });
+
+  // Meter the external API call (KeywordPlanIdeaService is free → costMicros 0;
+  // we still record the call volume for per-day/per-user observability).
+  // Fire-and-forget: never delays or fails the keyword fetch.
+  const cc = params.costContext;
+  void recordCost({
+    category: "external_api",
+    provider: "google_ads",
+    resource: "generateKeywordIdeas",
+    units: ideas.length,
+    costMicros: 0,
+    userId: cc?.userId ?? null,
+    brandId: cc?.brandId ?? null,
+    workspaceId: cc?.workspaceId ?? null,
+    runId: cc?.runId ?? null,
+    stepId: cc?.stepId ?? null,
+    meta: {
+      seeds: seeds.length,
+      hasUrl: Boolean(url),
+      languageCode: params.languageCode,
+      countries: params.countryCodes,
+    },
+  });
+
+  return ideas;
 }
 
 // Get campaign performance

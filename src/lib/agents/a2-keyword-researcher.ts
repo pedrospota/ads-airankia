@@ -421,6 +421,13 @@ const a2KeywordResearcher: AgentDefinition<KeywordResearchOutput> = {
         urlSeed,
         languageCode,
         countryCodes,
+        costContext: {
+          userId: ctx.run.userId,
+          brandId: ctx.run.brandId,
+          workspaceId: ctx.run.workspaceId,
+          runId: ctx.run.id,
+          stepId: helpers.stepId,
+        },
       });
     } catch {
       plannerIdeas = [];

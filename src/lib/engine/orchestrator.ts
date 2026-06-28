@@ -25,6 +25,7 @@ import {
   type EngineEvent,
 } from "@/lib/engine/events";
 import { buildRunContext } from "@/lib/engine/run-context";
+import { recordCost, inferLlmProvider } from "@/lib/cost-ledger";
 import {
   PIPELINE,
   AGENT_TITLES,
@@ -291,6 +292,32 @@ export async function runStep(runId: string, stepId: string): Promise<void> {
           updatedAt: new Date(),
         })
         .where(eq(agentRuns.id, runId));
+    }
+
+    // Append to the unified cost ledger (best-effort; never throws). Skip the
+    // code-only steps (e.g. the activator) that consume no tokens — only meter
+    // actual LLM spend here. External API spend is metered at its call site.
+    const usedLlm =
+      step.kind === "llm" ||
+      (result.tokensIn ?? 0) > 0 ||
+      (result.tokensOut ?? 0) > 0 ||
+      (result.costMicros ?? 0) > 0;
+    if (usedLlm) {
+      const model = result.model ?? step.model ?? null;
+      await recordCost({
+        category: "llm",
+        provider: inferLlmProvider(model),
+        resource: model,
+        costMicros: result.costMicros ?? 0,
+        tokensIn: result.tokensIn ?? 0,
+        tokensOut: result.tokensOut ?? 0,
+        userId: ctx.run.userId,
+        brandId: ctx.run.brandId,
+        workspaceId: ctx.run.workspaceId,
+        runId,
+        stepId,
+        meta: { agent },
+      });
     }
 
     await emitEvent(runId, stepId, "step_completed", {

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { isAdminEmail } from "@/lib/admin";
 import { Header } from "@/components/header";
 import { AdminModelSettings } from "./admin-model-settings";
+import { AdminCostsPanel } from "./admin-costs-panel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ export default async function AdminPage() {
   return (
     <div className="min-h-screen">
       <Header breadcrumbs={[{ label: "Admin" }]} />
-      <main className="max-w-3xl mx-auto px-6 py-10">
+      <main className="max-w-5xl mx-auto px-6 py-10">
         <div className="mb-8">
           <h1 className="text-3xl font-bold">Admin settings</h1>
           <p className="mt-2" style={{ opacity: 0.5 }}>
@@ -48,6 +49,14 @@ export default async function AdminPage() {
           </p>
         </div>
         <AdminModelSettings />
+
+        <div
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            margin: "40px 0 28px",
+          }}
+        />
+        <AdminCostsPanel />
       </main>
     </div>
   );

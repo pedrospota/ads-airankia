@@ -513,3 +513,44 @@ export const appSettings = pgTable("app_settings", {
     .defaultNow()
     .notNull(),
 });
+
+// ============================================================================
+// cost_events — the unified cost ledger. ONE append-only row per metered unit
+// of spend: every LLM step (tokens + $) and every external API call (Google
+// Ads, SearchApi, …). This is the single source of truth behind the /admin
+// Costs panel (per-day / per-user / per-provider rollups). Soft refs only (no
+// FKs) so a metering write can never block on a missing/late parent row, and
+// recording is always best-effort — a ledger failure must never break a build.
+// ============================================================================
+export const costEvents = pgTable(
+  "cost_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // Who/what incurred it (soft refs).
+    userId: uuid("user_id"),
+    brandId: uuid("brand_id"),
+    workspaceId: uuid("workspace_id"),
+    runId: uuid("run_id"),
+    stepId: uuid("step_id"),
+    // Taxonomy.
+    category: text("category").notNull(), // 'llm' | 'external_api'
+    provider: text("provider"), // 'anthropic' | 'openrouter' | 'google_ads' | 'searchapi'
+    resource: text("resource"), // model id, or API operation name
+    // Usage + cost.
+    tokensIn: integer("tokens_in").default(0).notNull(),
+    tokensOut: integer("tokens_out").default(0).notNull(),
+    units: integer("units").default(0).notNull(), // non-token calls: # of results/requests
+    costMicros: bigint("cost_micros", { mode: "number" }).default(0).notNull(),
+    meta: jsonb("meta"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_cost_events_occurred").on(table.occurredAt),
+    index("idx_cost_events_user").on(table.userId),
+    index("idx_cost_events_run").on(table.runId),
+    index("idx_cost_events_provider").on(table.provider),
+  ]
+);

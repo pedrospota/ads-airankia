@@ -423,6 +423,57 @@ export async function POST() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     sql`INSERT INTO schema_migrations (version) VALUES ('003_app_settings') ON CONFLICT (version) DO NOTHING`,
+
+    // ========================================================================
+    // COST EVENTS — unified cost ledger (per-day / per-user observability).
+    // One row per metered unit of spend (LLM step or external API call).
+    // ========================================================================
+    sql`CREATE TABLE IF NOT EXISTS cost_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      user_id UUID,
+      brand_id UUID,
+      workspace_id UUID,
+      run_id UUID,
+      step_id UUID,
+      category TEXT NOT NULL,
+      provider TEXT,
+      resource TEXT,
+      tokens_in INT NOT NULL DEFAULT 0,
+      tokens_out INT NOT NULL DEFAULT 0,
+      units INT NOT NULL DEFAULT 0,
+      cost_micros BIGINT NOT NULL DEFAULT 0,
+      meta JSONB,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`,
+    sql`CREATE INDEX IF NOT EXISTS idx_cost_events_occurred ON cost_events(occurred_at)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_cost_events_user ON cost_events(user_id)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_cost_events_run ON cost_events(run_id)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_cost_events_provider ON cost_events(provider)`,
+    // One-time, IDEMPOTENT backfill: seed the ledger from the LLM costs already
+    // recorded per agent step so the panel shows history immediately. The
+    // NOT EXISTS guard (matched on step_id) makes re-running /api/migrate a
+    // no-op and prevents collisions with rows the orchestrator writes going
+    // forward (it stamps each event with its step_id).
+    sql`INSERT INTO cost_events
+          (occurred_at, user_id, brand_id, workspace_id, run_id, step_id,
+           category, provider, resource, tokens_in, tokens_out, cost_micros, meta)
+        SELECT COALESCE(s.finished_at, s.created_at, now()),
+               r.user_id, r.brand_id, r.workspace_id, s.run_id, s.id,
+               'llm',
+               CASE WHEN s.model LIKE 'claude%' THEN 'anthropic'
+                    WHEN s.model IS NULL THEN NULL
+                    ELSE 'openrouter' END,
+               s.model,
+               COALESCE(s.tokens_in, 0), COALESCE(s.tokens_out, 0),
+               COALESCE(s.cost_micros_llm, 0),
+               jsonb_build_object('agent', s.agent, 'backfilled', true)
+        FROM agent_steps s
+        JOIN agent_runs r ON r.id = s.run_id
+        WHERE s.kind = 'llm'
+          AND (COALESCE(s.cost_micros_llm, 0) > 0 OR COALESCE(s.tokens_in, 0) > 0)
+          AND NOT EXISTS (SELECT 1 FROM cost_events ce WHERE ce.step_id = s.id)`,
+    sql`INSERT INTO schema_migrations (version) VALUES ('004_cost_events') ON CONFLICT (version) DO NOTHING`,
   ];
 
   const results = [];

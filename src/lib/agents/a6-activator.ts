@@ -59,7 +59,12 @@ const CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET ?? "";
 const DEVELOPER_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? "";
 const REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN ?? "";
 
-const BASE = `https://googleads.googleapis.com/v19/customers/${CUSTOMER_ID}`;
+// Google Ads API version — kept in lockstep with src/lib/google-ads.ts. v19/v20
+// are sunset/blocked; v21 is current stable. Single env-overridable constant so
+// a future sunset is a config change, not a code change.
+const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v21";
+
+const BASE = `https://googleads.googleapis.com/${API_VERSION}/customers/${CUSTOMER_ID}`;
 
 // ISO-3166 alpha-2 -> Google Ads geoTargetConstant id (country level).
 // Google's country-level geoTargetConstant id == 2000 + the ISO-3166-1 numeric

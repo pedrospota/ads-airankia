@@ -9,6 +9,13 @@ const CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET!;
 const DEVELOPER_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN!;
 const REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN!;
 
+// Google Ads API version. Google sunsets versions ~yearly: v19 and earlier now
+// return 404, and v20 is deprecated/blocked ("Version v20 ... Requests will be
+// blocked"). v21 is the current stable. The ENTIRE REST client speaks one
+// version, so bumping this single constant migrates everything. Override via env
+// when Google rotates again so we don't need a deploy to follow a sunset.
+const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v21";
+
 let cachedAccessToken: { token: string; expires: number } | null = null;
 
 // Node's fetch has NO default timeout: a slow/unreachable Google endpoint would
@@ -66,7 +73,7 @@ function headers(token: string) {
   };
 }
 
-const BASE = `https://googleads.googleapis.com/v19/customers/${CUSTOMER_ID}`;
+const BASE = `https://googleads.googleapis.com/${API_VERSION}/customers/${CUSTOMER_ID}`;
 
 // ---------------------------------------------------------------------------
 // Keyword Planner credential (OPTIONAL, planner-ONLY).
@@ -142,7 +149,7 @@ function plannerHeaders(token: string) {
   };
 }
 
-const PLANNER_BASE = `https://googleads.googleapis.com/v19/customers/${PLANNER_CUSTOMER_ID}`;
+const PLANNER_BASE = `https://googleads.googleapis.com/${API_VERSION}/customers/${PLANNER_CUSTOMER_ID}`;
 
 // Create a campaign budget
 export async function createBudget(name: string, dailyAmountMicros: number): Promise<string> {

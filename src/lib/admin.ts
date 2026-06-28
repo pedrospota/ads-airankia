@@ -1,15 +1,19 @@
 // ============================================================================
 // Admin gate. Admins are identified by their Supabase session email.
-// Default allow-list: hello@airankia.com. Override / extend via ADMIN_EMAILS
-// (comma-separated) in the server env.
+// Built-in admins are ALWAYS allowed (so the owner can never get locked out of
+// /admin even if the env var is unset or set to something else); ADMIN_EMAILS
+// (comma-separated) in the server env ADDS more emails on top.
 // ============================================================================
 
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 
-export const ADMIN_EMAILS: string[] = (
-  process.env.ADMIN_EMAILS ?? "hello@airankia.com"
-)
-  .split(",")
+// Owner accounts that are always admins, regardless of env config.
+const BUILT_IN_ADMINS = ["pedro@spota.mx", "hello@airankia.com"];
+
+export const ADMIN_EMAILS: string[] = [
+  ...BUILT_IN_ADMINS,
+  ...(process.env.ADMIN_EMAILS ?? "").split(","),
+]
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
 

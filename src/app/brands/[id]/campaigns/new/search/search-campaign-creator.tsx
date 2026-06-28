@@ -1628,6 +1628,156 @@ function AgentSummary({
 // Full, expandable keyword + negative list for the keyword step. Pedro asked to
 // see EVERY keyword (not just a handful of examples), so the whole list is here
 // behind one click — the timeline stays compact until you want the detail.
+// ----------------------------------------------------------------------------
+// Keyword metric display (surfaces a2's real numbers). a2 attaches real Google
+// Keyword Planner metrics (search volume / competition / top-of-page CPC) when
+// Google returns them, or LLM estimates otherwise. These helpers render them
+// read-only so a non-expert can see the demand behind each keyword. Every helper
+// degrades to "—"/null on missing data (metrics are optional and absent on
+// estimate rows) — never "€NaN"/"undefinedK".
+// ----------------------------------------------------------------------------
+
+function fmtVolume(n?: number): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return "—";
+  return new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+function fmtMicros(micros?: number): string | null {
+  if (micros == null || !Number.isFinite(micros) || micros <= 0) return null;
+  const v = micros / 1_000_000;
+  return `${CURRENCY}${v.toFixed(v >= 10 ? 0 : 2)}`;
+}
+
+function fmtCpcRange(lowMicros?: number, highMicros?: number): string {
+  const lo = fmtMicros(lowMicros);
+  const hi = fmtMicros(highMicros);
+  if (lo && hi) return lo === hi ? lo : `${lo}–${hi}`;
+  return lo || hi || "—";
+}
+
+function fmtScore(score?: number): string | null {
+  if (score == null || !Number.isFinite(score)) return null;
+  return String(score <= 1 ? Math.round(score * 100) : Math.round(score));
+}
+
+function competitionChip(
+  level?: "LOW" | "MEDIUM" | "HIGH"
+): { bg: string; border: string; label: string } | null {
+  if (level === "LOW")
+    return { bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.35)", label: "Low" };
+  if (level === "MEDIUM")
+    return { bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.35)", label: "Medium" };
+  if (level === "HIGH")
+    return { bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.35)", label: "High" };
+  return null;
+}
+
+// AI default ordering: highest composite score first; rows with no score sink to
+// the bottom (estimates often lack one). MUST be applied to the underlying state
+// ONCE (not a per-render derived view) wherever rows are edited by index, or
+// index-based edits target the wrong row.
+function sortKeywordsByScore(keywords: KeywordIdea[]): KeywordIdea[] {
+  return keywords.slice().sort((a, b) => {
+    const sa = a.score ?? -1;
+    const sb = b.score ?? -1;
+    if (sb !== sa) return sb - sa;
+    return (b.avgMonthlySearches ?? -1) - (a.avgMonthlySearches ?? -1);
+  });
+}
+
+function MetricsSourceBadge({
+  source,
+  colors,
+}: {
+  source?: KeywordResearchOutput["metricsSource"];
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const real = source === "google_keyword_planner";
+  return (
+    <span
+      title={
+        real
+          ? "Search volume, competition and CPC come straight from Google's Keyword Planner."
+          : "Google didn't return data for these terms, so the numbers are AI estimates."
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: 11,
+        fontWeight: 600,
+        padding: "2px 8px",
+        borderRadius: 99,
+        whiteSpace: "nowrap",
+        background: real ? "rgba(16,185,129,0.12)" : "rgba(148,163,184,0.14)",
+        border: `1px solid ${real ? "rgba(16,185,129,0.35)" : "rgba(148,163,184,0.35)"}`,
+        color: real ? "#10B981" : colors.textMuted,
+      }}
+    >
+      {real ? "Real Google data ✓" : "AI estimate"}
+    </span>
+  );
+}
+
+// Compact, read-only metric chips shown next to a keyword. Renders nothing when
+// the keyword has no metrics at all (so estimate rows don't show empty boxes).
+function KeywordMetricChips({
+  k,
+  colors,
+}: {
+  k: KeywordIdea;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const vol = fmtVolume(k.avgMonthlySearches);
+  const comp = competitionChip(k.competition);
+  const cpc = fmtCpcRange(k.topOfPageBidLowMicros, k.topOfPageBidHighMicros);
+  const score = fmtScore(k.score);
+  if (vol === "—" && !comp && cpc === "—" && !score) return null;
+
+  const pill: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    fontSize: 11,
+    padding: "2px 7px",
+    borderRadius: 99,
+    background: "rgba(148,163,184,0.10)",
+    border: `1px solid ${colors.border}`,
+    color: colors.textMuted,
+    whiteSpace: "nowrap",
+  };
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+      {vol !== "—" && (
+        <span style={pill} title="Average monthly searches on Google">
+          🔍 {vol}/mo
+        </span>
+      )}
+      {comp && (
+        <span
+          style={{ ...pill, background: comp.bg, border: `1px solid ${comp.border}`, color: colors.text }}
+          title="How many advertisers compete for this term"
+        >
+          {comp.label} comp.
+        </span>
+      )}
+      {cpc !== "—" && (
+        <span style={pill} title="Estimated top-of-page bid (cost per click)">
+          {cpc} CPC
+        </span>
+      )}
+      {score && (
+        <span style={pill} title="Priority score = volume × intent × relevance × affordability">
+          ★ {score}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function KeywordDetails({
   data,
   colors,
@@ -1686,17 +1836,43 @@ function KeywordDetails({
         <div style={{ marginTop: 10, maxHeight: 320, overflow: "auto" }}>
           {keywords.length > 0 && (
             <div style={{ marginBottom: negatives.length ? 14 : 0 }}>
-              <p
+              <div
                 style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: colors.textMuted,
-                  marginBottom: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  marginBottom: 8,
                 }}
               >
-                🔑 Keywords you'll show up for ({keywords.length})
-              </p>
-              <div>{keywords.map((k) => chip(k.text, "kw"))}</div>
+                <p
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: colors.textMuted,
+                    margin: 0,
+                  }}
+                >
+                  🔑 Keywords you&apos;ll show up for ({keywords.length})
+                </p>
+                <MetricsSourceBadge source={data.metricsSource} colors={colors} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {sortKeywordsByScore(keywords).map((k, i) => (
+                  <div
+                    key={"kw" + i + k.text}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: 6,
+                    }}
+                  >
+                    {chip(k.text, "kw")}
+                    <KeywordMetricChips k={k} colors={colors} />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {negatives.length > 0 && (
@@ -1744,7 +1920,12 @@ function KeywordEditor({
   styles: Styles;
   onChange: (v: KeywordResearchOutput) => void;
 }) {
-  const [kws, setKws] = useState<KeywordIdea[]>(() => value.keywords ?? []);
+  // Seed sorted by score ONCE (not a per-render derived view): the rows below are
+  // edited by array index, so the underlying state itself must be in display order
+  // or an edit would target the wrong row.
+  const [kws, setKws] = useState<KeywordIdea[]>(
+    () => sortKeywordsByScore(value.keywords ?? [])
+  );
   const [negs, setNegs] = useState<NegativeKeywordIdea[]>(
     () => value.negatives ?? []
   );
@@ -1811,12 +1992,24 @@ function KeywordEditor({
 
   return (
     <div style={{ marginBottom: 12 }}>
-      <p style={{ ...styles.lbl, marginBottom: 8 }}>
-        🔑 Keywords you&apos;ll show up for ({kws.length})
-      </p>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        <p style={{ ...styles.lbl, margin: 0 }}>
+          🔑 Keywords you&apos;ll show up for ({kws.length})
+        </p>
+        <MetricsSourceBadge source={value.metricsSource} colors={colors} />
+      </div>
       <div style={{ maxHeight: 280, overflow: "auto", paddingRight: 4 }}>
         {kws.map((k, i) => (
-          <div key={i} style={rowStyle}>
+          <div key={i} style={{ marginBottom: 10 }}>
+            <div style={{ ...rowStyle, marginBottom: 0 }}>
             <input
               value={k.text}
               onChange={(e) =>
@@ -1855,6 +2048,10 @@ function KeywordEditor({
             >
               ×
             </button>
+            </div>
+            <div style={{ marginTop: 5, paddingLeft: 2 }}>
+              <KeywordMetricChips k={k} colors={colors} />
+            </div>
           </div>
         ))}
       </div>
@@ -2880,6 +3077,21 @@ function summarizeAgent(agent: AgentId, out: unknown): string[] {
         lines.push(`🔑 ${o.keywords.length} keywords found`);
       if (o.negatives?.length)
         lines.push(`🚫 ${o.negatives.length} negative keywords`);
+      // At-a-glance: total real demand behind the keyword set + where the numbers
+      // came from (Google Keyword Planner vs AI estimate).
+      const withVol =
+        o.keywords?.filter((k) => (k.avgMonthlySearches ?? 0) > 0) ?? [];
+      if (withVol.length) {
+        const total = withVol.reduce(
+          (s, k) => s + (k.avgMonthlySearches ?? 0),
+          0
+        );
+        const src =
+          o.metricsSource === "google_keyword_planner"
+            ? "real Google data"
+            : "AI estimates";
+        lines.push(`📊 ~${fmtVolume(total)} searches/mo total (${src})`);
+      }
       // The full, scrollable list is rendered separately by <KeywordDetails>
       // (Pedro asked to see EVERY keyword, not just a few examples).
       return lines;

@@ -554,3 +554,59 @@ export const costEvents = pgTable(
     index("idx_cost_events_provider").on(table.provider),
   ]
 );
+
+// ============================================================================
+// benchmark_runs — the premium competitor-benchmark suite. One async job per
+// run that crosses a brand with its competitors: Keyword Planner volumes/CPC
+// (free), landing-page teardown + tracking extraction (free), and an OPTIONAL,
+// admin-gated paid ad-spy. The final strategic report is stored in `result`.
+// Soft refs only (no FKs) so a run can never block on a missing parent and is
+// trivially purgeable. Progress is streamed via benchmark_events (below).
+// ============================================================================
+export const benchmarkRuns = pgTable(
+  "benchmark_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id").notNull(),
+    workspaceId: uuid("workspace_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    status: text("status").default("queued").notNull(), // queued|running|completed|failed
+    // How the run was seeded — 'auto' (from the brand profile), or a manual
+    // 'keyword' / 'domain' entry the user typed to steer the analysis.
+    entryMode: text("entry_mode").default("auto").notNull(),
+    seedKeywords: text("seed_keywords").array(),
+    seedDomains: text("seed_domains").array(),
+    countryCode: text("country_code"),
+    languageCode: text("language_code"),
+    // Whether the paid ad-spy block actually ran (admin gate + key present).
+    liveEnabled: boolean("live_enabled").default(false).notNull(),
+    stage: text("stage"), // human-readable current stage, mirrored in events
+    progress: integer("progress").default(0).notNull(), // 0..100
+    error: text("error"),
+    result: jsonb("result"), // the full BenchmarkReport once completed
+    costMicros: bigint("cost_micros", { mode: "number" }).default(0).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_benchmark_runs_brand").on(table.brandId),
+    index("idx_benchmark_runs_status").on(table.status),
+  ]
+);
+
+// Append-only event log for a benchmark run. `seq` is the monotonic cursor the
+// SSE reader tails (same shape/contract as agent_events). Soft ref to the run.
+export const benchmarkEvents = pgTable(
+  "benchmark_events",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    id: uuid("id").defaultRandom().notNull(),
+    runId: uuid("run_id").notNull(),
+    type: text("type").notNull(), // stage|progress|partial|done|error
+    data: jsonb("data"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("idx_benchmark_events_run_seq").on(table.runId, table.seq)]
+);

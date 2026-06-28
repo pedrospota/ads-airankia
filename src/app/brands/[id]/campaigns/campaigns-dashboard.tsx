@@ -300,6 +300,21 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                 </button>
               ))}
             <Link
+              href={`/brands/${brandId}/benchmark`}
+              style={{
+                padding: "8px 14px",
+                borderRadius: 10,
+                background: "transparent",
+                border: `1px solid ${colors.border}`,
+                color: colors.text,
+                fontWeight: 600,
+                fontSize: 13,
+                textDecoration: "none",
+              }}
+            >
+              🔍 Spy on competitors
+            </Link>
+            <Link
               href={newHref}
               style={{
                 padding: "8px 16px",

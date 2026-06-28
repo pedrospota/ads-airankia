@@ -474,6 +474,45 @@ export async function POST() {
           AND (COALESCE(s.cost_micros_llm, 0) > 0 OR COALESCE(s.tokens_in, 0) > 0)
           AND NOT EXISTS (SELECT 1 FROM cost_events ce WHERE ce.step_id = s.id)`,
     sql`INSERT INTO schema_migrations (version) VALUES ('004_cost_events') ON CONFLICT (version) DO NOTHING`,
+
+    // ========================================================================
+    // 006 — benchmark suite (competitor analysis). 005 is reserved for the
+    // keyword forecast phase, not yet shipped; versions need not be contiguous.
+    // ========================================================================
+    sql`CREATE TABLE IF NOT EXISTS benchmark_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      brand_id UUID NOT NULL,
+      workspace_id UUID NOT NULL,
+      user_id UUID NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      entry_mode TEXT NOT NULL DEFAULT 'auto',
+      seed_keywords TEXT[],
+      seed_domains TEXT[],
+      country_code TEXT,
+      language_code TEXT,
+      live_enabled BOOLEAN NOT NULL DEFAULT false,
+      stage TEXT,
+      progress INT NOT NULL DEFAULT 0,
+      error TEXT,
+      result JSONB,
+      cost_micros BIGINT NOT NULL DEFAULT 0,
+      started_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`,
+    sql`CREATE INDEX IF NOT EXISTS idx_benchmark_runs_brand ON benchmark_runs(brand_id)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_benchmark_runs_status ON benchmark_runs(status)`,
+    sql`CREATE TABLE IF NOT EXISTS benchmark_events (
+      seq BIGSERIAL PRIMARY KEY,
+      id UUID NOT NULL DEFAULT gen_random_uuid(),
+      run_id UUID NOT NULL,
+      type TEXT NOT NULL,
+      data JSONB,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`,
+    sql`CREATE INDEX IF NOT EXISTS idx_benchmark_events_run_seq ON benchmark_events(run_id, seq)`,
+    sql`INSERT INTO schema_migrations (version) VALUES ('006_benchmark') ON CONFLICT (version) DO NOTHING`,
   ];
 
   const results = [];

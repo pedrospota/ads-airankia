@@ -4,6 +4,7 @@ import { isAdminEmail } from "@/lib/admin";
 import { Header } from "@/components/header";
 import { AdminModelSettings } from "./admin-model-settings";
 import { AdminCostsPanel } from "./admin-costs-panel";
+import { AdminBenchmarkSettings } from "./admin-benchmark-settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +50,14 @@ export default async function AdminPage() {
           </p>
         </div>
         <AdminModelSettings />
+
+        <div
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            margin: "40px 0 28px",
+          }}
+        />
+        <AdminBenchmarkSettings />
 
         <div
           style={{

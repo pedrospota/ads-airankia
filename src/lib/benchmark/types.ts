@@ -187,6 +187,23 @@ export interface BenchmarkReport {
     liveAdSpy: boolean;
     domainsAnalyzed: number;
     keywordsDiscovered: number;
+    /**
+     * Deterministic keyword-data availability — lets the UI tell real Keyword
+     * Planner metrics apart from an API-access gap, instead of silently showing
+     * zeros. Optional so reports generated before this field still render.
+     *   ok        — real volumes/CPC came back.
+     *   partial   — some real data, but at least one call failed.
+     *   no_access — dev token can't query the planner (Test access, needs Basic).
+     *   quota     — daily Google Ads API quota reached.
+     *   no_data   — calls succeeded but the planner had nothing for these seeds.
+     *   error     — other failure.
+     */
+    keywordData?: {
+      status: "ok" | "partial" | "no_access" | "quota" | "no_data" | "error";
+      hasRealKeywordData: boolean;
+      plannerCredential: "planner" | "default";
+      message?: string;
+    };
   };
 }
 

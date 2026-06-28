@@ -68,6 +68,82 @@ function headers(token: string) {
 
 const BASE = `https://googleads.googleapis.com/v19/customers/${CUSTOMER_ID}`;
 
+// ---------------------------------------------------------------------------
+// Keyword Planner credential (OPTIONAL, planner-ONLY).
+//
+// generateKeywordIdeas + generateKeywordForecast may use a SEPARATE Google Ads
+// credential dedicated to the Keyword Planner (KeywordPlanIdeaService) — e.g. a
+// developer token that has Basic access while the main account's token is still
+// on Test access (Test access can't query the planner). BY DESIGN this
+// credential is used ONLY for keyword planning / forecasting and is NEVER used
+// for campaign creation or any account mutation — every create/update/status
+// function above keeps using the main AI Rankia account creds. When the
+// GOOGLE_ADS_PLANNER_* vars are unset, these fall back to the main creds so
+// behaviour is identical to before.
+// ---------------------------------------------------------------------------
+const PLANNER_CLIENT_ID = process.env.GOOGLE_ADS_PLANNER_CLIENT_ID || CLIENT_ID;
+const PLANNER_CLIENT_SECRET = process.env.GOOGLE_ADS_PLANNER_CLIENT_SECRET || CLIENT_SECRET;
+const PLANNER_DEVELOPER_TOKEN = process.env.GOOGLE_ADS_PLANNER_DEVELOPER_TOKEN || DEVELOPER_TOKEN;
+const PLANNER_REFRESH_TOKEN = process.env.GOOGLE_ADS_PLANNER_REFRESH_TOKEN || REFRESH_TOKEN;
+const PLANNER_LOGIN_CUSTOMER_ID = process.env.GOOGLE_ADS_PLANNER_LOGIN_CUSTOMER_ID || MCC_ID;
+const PLANNER_CUSTOMER_ID = process.env.GOOGLE_ADS_PLANNER_CUSTOMER_ID || CUSTOMER_ID;
+
+/** True when a DISTINCT planner credential (separate dev token + refresh token) is configured. */
+export const PLANNER_CREDENTIAL_CONFIGURED = Boolean(
+  process.env.GOOGLE_ADS_PLANNER_DEVELOPER_TOKEN &&
+    process.env.GOOGLE_ADS_PLANNER_REFRESH_TOKEN
+);
+
+let cachedPlannerToken: { token: string; expires: number } | null = null;
+
+// Mint (and cache) an access token for the planner credential. When the planner
+// refresh token/client match the main creds we just reuse getAccessToken() so
+// there's a single OAuth refresh + cache.
+async function getPlannerAccessToken(): Promise<string> {
+  if (
+    PLANNER_REFRESH_TOKEN === REFRESH_TOKEN &&
+    PLANNER_CLIENT_ID === CLIENT_ID &&
+    PLANNER_CLIENT_SECRET === CLIENT_SECRET
+  ) {
+    return getAccessToken();
+  }
+  if (cachedPlannerToken && Date.now() < cachedPlannerToken.expires) {
+    return cachedPlannerToken.token;
+  }
+  const resp = await fetchWithTimeout(
+    "https://oauth2.googleapis.com/token",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: PLANNER_CLIENT_ID,
+        client_secret: PLANNER_CLIENT_SECRET,
+        refresh_token: PLANNER_REFRESH_TOKEN,
+        grant_type: "refresh_token",
+      }),
+    },
+    15000
+  );
+  if (!resp.ok) throw new Error(`Planner OAuth token refresh failed: ${resp.status}`);
+  const data = await resp.json();
+  cachedPlannerToken = {
+    token: data.access_token,
+    expires: Date.now() + (data.expires_in - 60) * 1000,
+  };
+  return data.access_token;
+}
+
+function plannerHeaders(token: string) {
+  return {
+    "Authorization": `Bearer ${token}`,
+    "developer-token": PLANNER_DEVELOPER_TOKEN,
+    "login-customer-id": PLANNER_LOGIN_CUSTOMER_ID,
+    "Content-Type": "application/json",
+  };
+}
+
+const PLANNER_BASE = `https://googleads.googleapis.com/v19/customers/${PLANNER_CUSTOMER_ID}`;
+
 // Create a campaign budget
 export async function createBudget(name: string, dailyAmountMicros: number): Promise<string> {
   const token = await getAccessToken();
@@ -290,6 +366,53 @@ function competitionFrom(raw: unknown): KeywordPlanIdea["competition"] {
   return "UNSPECIFIED";
 }
 
+// Why a Keyword Planner call returned no data. Surfaced via the optional onError
+// callback so callers (e.g. the benchmark) can tell "API access pending" apart
+// from "genuinely no data", instead of silently rendering zeros.
+export interface KeywordPlannerError {
+  kind: "access" | "quota" | "network" | "unknown";
+  status?: number;
+  message: string;
+}
+
+function classifyAdsError(
+  status: number | undefined,
+  body: unknown
+): KeywordPlannerError {
+  let text = "";
+  try {
+    text = JSON.stringify(body).toUpperCase();
+  } catch {
+    text = String(body).toUpperCase();
+  }
+  if (
+    status === 403 ||
+    text.includes("DEVELOPER_TOKEN_NOT_APPROVED") ||
+    text.includes("EXPLORER ACCESS") ||
+    text.includes("NOT ALLOWED FOR USE WITH") ||
+    text.includes("PERMISSION_DENIED")
+  ) {
+    return {
+      kind: "access",
+      status,
+      message:
+        "Google Ads API access pending: the developer token has Test access, which can't query the Keyword Planner. Basic access is required for real search volumes.",
+    };
+  }
+  if (status === 429 || text.includes("RESOURCE_EXHAUSTED")) {
+    return {
+      kind: "quota",
+      status,
+      message: "Google Ads API daily quota reached — real keyword data will be available again after the quota resets.",
+    };
+  }
+  return {
+    kind: "unknown",
+    status,
+    message: "The Google Ads Keyword Planner request failed.",
+  };
+}
+
 export async function generateKeywordIdeas(params: {
   keywordSeeds?: string[];
   urlSeed?: string;
@@ -303,6 +426,9 @@ export async function generateKeywordIdeas(params: {
     runId?: string | null;
     stepId?: string | null;
   };
+  // Called (once) when the planner can't serve metrics, so the caller can
+  // distinguish an API-access gap from a genuinely empty result.
+  onError?: (e: KeywordPlannerError) => void;
 }): Promise<KeywordPlanIdea[]> {
   const seeds = (params.keywordSeeds ?? [])
     .map((s) => s.trim())
@@ -311,7 +437,19 @@ export async function generateKeywordIdeas(params: {
   const url = params.urlSeed?.trim() || undefined;
   if (seeds.length === 0 && !url) return [];
 
-  const token = await getAccessToken();
+  // Keyword Planner uses the planner-only credential (falls back to the main
+  // creds when no separate planner credential is configured). Never used for
+  // campaign writes.
+  let token: string;
+  try {
+    token = await getPlannerAccessToken();
+  } catch (e) {
+    params.onError?.({
+      kind: "network",
+      message: e instanceof Error ? e.message : "Could not authenticate the Keyword Planner credential.",
+    });
+    return [];
+  }
 
   const language = `languageConstants/${
     LANGUAGE_CONSTANTS[params.languageCode?.toLowerCase()] ?? LANGUAGE_CONSTANTS.es
@@ -352,18 +490,27 @@ export async function generateKeywordIdeas(params: {
       };
     }[];
   };
+  let httpStatus: number | undefined;
   try {
-    const resp = await fetchWithTimeout(`${BASE}:generateKeywordIdeas`, {
+    const resp = await fetchWithTimeout(`${PLANNER_BASE}:generateKeywordIdeas`, {
       method: "POST",
-      headers: headers(token),
+      headers: plannerHeaders(token),
       body: JSON.stringify(body),
     }, 20000);
+    httpStatus = resp.status;
     data = await resp.json();
-  } catch {
+  } catch (e) {
+    params.onError?.({
+      kind: "network",
+      message: e instanceof Error ? e.message : "The Keyword Planner request timed out.",
+    });
     return [];
   }
 
-  if (data.error || !Array.isArray(data.results)) return [];
+  if (data.error || !Array.isArray(data.results)) {
+    params.onError?.(classifyAdsError(httpStatus, data.error ?? data));
+    return [];
+  }
 
   const ideas = data.results
     .filter((r): r is { text: string; keywordIdeaMetrics?: NonNullable<typeof r.keywordIdeaMetrics> } =>
@@ -524,6 +671,7 @@ export async function generateKeywordForecast(params: {
     runId?: string | null;
     stepId?: string | null;
   };
+  onError?: (e: KeywordPlannerError) => void;
 }): Promise<KeywordForecast | null> {
   const kws = params.keywords
     .map((k) => ({
@@ -594,22 +742,31 @@ export async function generateKeywordForecast(params: {
       averageCpaMicros?: string | number;
     };
   };
+  let httpStatus: number | undefined;
   try {
-    const token = await getAccessToken();
+    const token = await getPlannerAccessToken();
     const resp = await fetchWithTimeout(
-      `${BASE}:generateKeywordForecastMetrics`,
+      `${PLANNER_BASE}:generateKeywordForecastMetrics`,
       {
         method: "POST",
-        headers: headers(token),
+        headers: plannerHeaders(token),
         body: JSON.stringify(body),
       },
       20000
     );
+    httpStatus = resp.status;
     data = await resp.json();
-  } catch {
+  } catch (e) {
+    params.onError?.({
+      kind: "network",
+      message: e instanceof Error ? e.message : "The Keyword Planner forecast request timed out.",
+    });
     return null;
   }
-  if (!data || data.error || !data.campaignForecastMetrics) return null;
+  if (!data || data.error || !data.campaignForecastMetrics) {
+    params.onError?.(classifyAdsError(httpStatus, data?.error ?? data));
+    return null;
+  }
 
   const m = data.campaignForecastMetrics;
   const currencyCode = params.currencyCode ?? (await getAccountCurrency());

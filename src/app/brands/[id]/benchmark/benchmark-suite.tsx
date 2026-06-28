@@ -729,6 +729,35 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
         />
       </div>
 
+      {/* honest data-availability banner — why the numbers are / aren't here */}
+      <DataAvailabilityBanner colors={colors} report={report} />
+
+      {/* ===== Deterministic numbers first (the hero of the report) ===== */}
+
+      {/* keyword gaps */}
+      <h2 style={sectionTitle}>🎯 Keyword gaps</h2>
+      <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
+        Searches your competitors are associated with that you don&apos;t appear
+        to be — sorted by how many of them cover each one.
+      </p>
+      <KeywordGapTable colors={colors} gaps={report.keywordGaps} cur={report.currency} />
+
+      {/* projected results for the recommended plan */}
+      {report.forecast && (
+        <>
+          <h2 style={sectionTitle}>📈 What the recommended plan could get you</h2>
+          <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
+            Google&apos;s own forecast if you ran the recommended keywords for a
+            month — real numbers, not just advice.
+          </p>
+          <ForecastCard colors={colors} forecast={report.forecast} />
+        </>
+      )}
+
+      {/* brand footprint */}
+      <h2 style={sectionTitle}>📍 Your own keyword footprint</h2>
+      <KeywordChips colors={colors} keywords={report.brandKeywords.slice(0, 30)} />
+
       {/* estimated investment */}
       {report.spendSummary && (
         <>
@@ -741,31 +770,7 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
         </>
       )}
 
-      {/* strategy */}
-      <h2 style={sectionTitle}>🧠 Your strategy</h2>
-      <StrategyCard colors={colors} report={report} />
-
-      {/* projected results for the recommended plan */}
-      {report.forecast && (
-        <>
-          <h2 style={sectionTitle}>📈 What the recommended plan could get you</h2>
-          <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
-            Google&apos;s own forecast if you ran the recommended keywords for a
-            month — so the plan above isn&apos;t just advice, it has numbers.
-          </p>
-          <ForecastCard colors={colors} forecast={report.forecast} />
-        </>
-      )}
-
-      {/* keyword gaps */}
-      <h2 style={sectionTitle}>🎯 Keyword gaps</h2>
-      <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
-        Searches your competitors are associated with that you don&apos;t appear
-        to be — sorted by how many of them cover each one.
-      </p>
-      <KeywordGapTable colors={colors} gaps={report.keywordGaps} cur={report.currency} />
-
-      {/* competitors */}
+      {/* competitors (qualitative facts) */}
       <h2 style={sectionTitle}>🕵️ Competitor teardown</h2>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {report.competitors.map((c) => (
@@ -779,13 +784,120 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
         )}
       </div>
 
-      {/* brand footprint */}
-      <h2 style={sectionTitle}>📍 Your own keyword footprint</h2>
-      <KeywordChips colors={colors} keywords={report.brandKeywords.slice(0, 30)} />
+      {/* ===== AI synthesis LAST — layered on top of the numbers above ===== */}
+      <h2 style={sectionTitle}>🧠 AI strategy</h2>
+      <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
+        A synthesis of the numbers and teardowns above — the &quot;so what, do
+        this&quot; layer, in your brand&apos;s language.
+      </p>
+      <StrategyCard colors={colors} report={report} />
 
       <div style={{ marginTop: 24, fontSize: 12, color: colors.textFaint }}>
         Generated {fmtDate(report.generatedAt)} · content in{" "}
         {report.language.toUpperCase()}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Honest data-availability banner — instead of silently showing zeros when the
+// Keyword Planner can't be queried, we say exactly why the numbers are missing
+// and what still IS real in the report. Only renders when data isn't fully "ok".
+// ----------------------------------------------------------------------------
+function DataAvailabilityBanner({ colors, report }: { colors: Colors; report: BenchmarkReport }) {
+  const kd = report.meta.keywordData;
+  // Older reports (pre-field) and fully-OK runs show no banner.
+  if (!kd || kd.status === "ok") return null;
+
+  const AMBER = "#FBBF24";
+  const amberBg = "rgba(251,191,36,0.10)";
+  const amberBorder = "rgba(251,191,36,0.30)";
+
+  type Tone = { icon: string; color: string; bg: string; border: string; title: string; body: string };
+  const tones: Record<typeof kd.status, Tone> = {
+    no_access: {
+      icon: "🔌",
+      color: AMBER,
+      bg: amberBg,
+      border: amberBorder,
+      title: "Real keyword numbers aren't connected yet",
+      body:
+        "Google's Keyword Planner needs Basic API access to return search volumes, CPC and the traffic forecast — the current token only has Test access, so those figures are empty below. Everything that doesn't depend on it (the competitor teardowns) is fully real. The moment Basic access (or the dedicated planner credential) is connected, this report fills with real numbers automatically — no re-setup needed.",
+    },
+    quota: {
+      icon: "⏳",
+      color: AMBER,
+      bg: amberBg,
+      border: amberBorder,
+      title: "Daily Google Ads quota reached",
+      body:
+        "Google's free Keyword Planner quota for today is used up, so the search volumes and forecast below are empty. Re-run this benchmark tomorrow and the real numbers will populate.",
+    },
+    no_data: {
+      icon: "🔍",
+      color: colors.textMuted,
+      bg: "rgba(255,255,255,0.04)",
+      border: colors.border,
+      title: "No Keyword Planner data for these seeds",
+      body:
+        "Google's Keyword Planner answered but had nothing for this brand/competitor and market. Try a broader seed keyword, a different competitor domain, or a larger market — the competitor teardowns below are still real.",
+    },
+    partial: {
+      icon: "⚠️",
+      color: AMBER,
+      bg: amberBg,
+      border: amberBorder,
+      title: "Some keyword data is incomplete",
+      body:
+        "Most numbers came back, but at least one Keyword Planner call didn't — a few figures below may be missing or under-counted.",
+    },
+    error: {
+      icon: "⚠️",
+      color: AMBER,
+      bg: amberBg,
+      border: amberBorder,
+      title: "Keyword data couldn't be loaded",
+      body:
+        "Something went wrong fetching the Keyword Planner numbers, so the volumes and forecast below are empty. The competitor teardowns are still real — re-run to try again.",
+    },
+  };
+
+  const tone = tones[kd.status];
+
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        marginBottom: 4,
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+        background: tone.bg,
+        border: `1px solid ${tone.border}`,
+        borderRadius: 12,
+        padding: "14px 16px",
+      }}
+    >
+      <div style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>{tone.icon}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: tone.color, marginBottom: 4 }}>
+          {tone.title}
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: colors.textMuted }}>{tone.body}</div>
+        {kd.message && kd.status !== "no_data" && (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 11.5,
+              fontFamily: "var(--font-mono, ui-monospace, monospace)",
+              color: colors.textFaint,
+              wordBreak: "break-word",
+            }}
+          >
+            {kd.message}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -26,7 +26,9 @@ import {
   generateKeywordForecast,
   getAccountCurrency,
   currencySymbol,
+  PLANNER_CREDENTIAL_CONFIGURED,
   type KeywordPlanIdea,
+  type KeywordPlannerError,
 } from "@/lib/google-ads";
 import { languageName } from "@/lib/engine/types";
 import { benchmarkLlm } from "./llm";
@@ -254,6 +256,15 @@ export async function runBenchmark(
   const currencyCode = await getAccountCurrency();
   const currency = currencySymbol(currencyCode);
 
+  // Track the deterministic-data layer: the first planner failure (if any) is
+  // kept so the report can honestly say WHY numbers are missing instead of
+  // silently showing zeros. Held in an object so the closures can mutate it
+  // without TS narrowing it away.
+  const planner: { error: KeywordPlannerError | null } = { error: null };
+  const onPlannerError = (e: KeywordPlannerError) => {
+    if (!planner.error) planner.error = e;
+  };
+
   // ---- 1. Brand's own keyword footprint (URL-seeded + any manual keyword) ----
   await stage(runId, "Mapping your keyword footprint", 12);
   const brandIdeas = await generateKeywordIdeas({
@@ -262,6 +273,7 @@ export async function runBenchmark(
     languageCode: lang,
     countryCodes: [country],
     costContext: cost,
+    onError: onPlannerError,
   });
   const brandKeywords = topByVolume(brandIdeas.map(toBenchmarkKeyword), 60);
   const brandKwSet = new Set(brandKeywords.map((k) => normKw(k.text)));
@@ -286,7 +298,7 @@ export async function runBenchmark(
       progress
     );
 
-    const comp = await analyzeCompetitor(domain, ctx, country, currency, cost);
+    const comp = await analyzeCompetitor(domain, ctx, country, currency, cost, onPlannerError);
     competitors.push(comp);
     await emitBenchmarkEvent(runId, "partial", { kind: "competitor", competitor: comp });
   }
@@ -296,46 +308,78 @@ export async function runBenchmark(
   const keywordGaps = computeKeywordGaps(competitors, brandKwSet);
   await emitBenchmarkEvent(runId, "partial", { kind: "gaps", count: keywordGaps.length });
 
+  // ---- Deterministic-data availability --------------------------------------
+  // Real numbers (volumes / CPC / forecast) are the hero of this report. Decide
+  // honestly whether we actually have them — so we never render a confident AI
+  // strategy on top of all-zeros (the #1 ask: real numbers > AI prose).
+  const hasRealKeywordData =
+    brandKeywords.length > 0 || competitors.some((c) => c.keywords.length > 0);
+  const blockedByAccess =
+    !hasRealKeywordData &&
+    planner.error !== null &&
+    (planner.error.kind === "access" || planner.error.kind === "quota");
+
   // ---- 4. AI strategy synthesis ---------------------------------------------
   await stage(runId, "Writing your strategy", 90);
   let strategy: BenchmarkStrategy;
-  try {
-    strategy = await synthesizeStrategy(
-      ctx,
-      langLabel,
-      brandKeywords,
-      competitors,
-      keywordGaps,
-      cost
-    );
-  } catch (e) {
+  if (blockedByAccess) {
+    // No real search data came back → skip the heavyweight AI synthesis. We do
+    // NOT manufacture a full strategy on top of empty numbers; we say plainly
+    // why the data is missing. The (free, qualitative) competitor landing
+    // teardowns above are still complete.
     strategy = {
       summary:
-        "We gathered the competitor data below, but the AI summary couldn't be generated this time. The keyword gaps and landing teardowns are still complete.",
+        planner.error?.message ??
+        "Real keyword data isn't available yet, so we're not generating a full strategy on top of empty numbers. The competitor landing-page teardowns below are still complete.",
       positioning: "",
       opportunities: [],
       threats: [],
-      recommendedKeywords: keywordGaps.slice(0, 10).map((g) => g.text),
+      recommendedKeywords: [],
       recommendedAngles: [],
     };
-    console.error("[benchmark] strategy synthesis failed", runId, e);
+  } else {
+    try {
+      strategy = await synthesizeStrategy(
+        ctx,
+        langLabel,
+        brandKeywords,
+        competitors,
+        keywordGaps,
+        cost
+      );
+    } catch (e) {
+      strategy = {
+        summary:
+          "We gathered the competitor data below, but the AI summary couldn't be generated this time. The keyword gaps and landing teardowns are still complete.",
+        positioning: "",
+        opportunities: [],
+        threats: [],
+        recommendedKeywords: keywordGaps.slice(0, 10).map((g) => g.text),
+        recommendedAngles: [],
+      };
+      console.error("[benchmark] strategy synthesis failed", runId, e);
+    }
   }
 
   // ---- 5. Forecast the recommended plan (Google's own traffic projection) ----
   // So every recommendation carries real numbers (clicks/cost/CTR/CPC, and an
   // estimated conversions figure). Never throws → just null when unavailable.
+  // Skipped entirely when the planner data is blocked (nothing to forecast).
   await stage(runId, "Forecasting the recommended plan", 95);
-  const forecast = await buildForecast(
-    ctx,
-    country,
-    currency,
-    currencyCode,
-    strategy,
-    keywordGaps,
-    brandKeywords,
-    competitors,
-    cost
-  );
+  const forecast = blockedByAccess
+    ? null
+    : await buildForecast(
+        ctx,
+        country,
+        currency,
+        currencyCode,
+        strategy,
+        keywordGaps,
+        brandKeywords,
+        competitors,
+        cost,
+        onPlannerError
+      );
   if (forecast) {
     await emitBenchmarkEvent(runId, "partial", {
       kind: "forecast",
@@ -363,6 +407,22 @@ export async function runBenchmark(
       keywordsDiscovered:
         brandKeywords.length +
         competitors.reduce((n, c) => n + c.keywords.length, 0),
+      keywordData: {
+        status: hasRealKeywordData
+          ? planner.error
+            ? "partial"
+            : "ok"
+          : planner.error
+            ? planner.error.kind === "access"
+              ? "no_access"
+              : planner.error.kind === "quota"
+                ? "quota"
+                : "error"
+            : "no_data",
+        hasRealKeywordData,
+        plannerCredential: PLANNER_CREDENTIAL_CONFIGURED ? "planner" : "default",
+        message: planner.error?.message,
+      },
     },
   };
 
@@ -384,7 +444,8 @@ async function analyzeCompetitor(
   ctx: BenchmarkBrandContext,
   country: string,
   currency: string,
-  cost: BenchmarkCostContext
+  cost: BenchmarkCostContext,
+  onPlannerError?: (e: KeywordPlannerError) => void
 ): Promise<BenchmarkCompetitor> {
   const notes: string[] = [];
 
@@ -394,6 +455,7 @@ async function analyzeCompetitor(
     languageCode: ctx.languageCode,
     countryCodes: [country],
     costContext: cost,
+    onError: onPlannerError,
   });
   const keywords = topByVolume(ideas.map(toBenchmarkKeyword), 40);
   if (keywords.length === 0) notes.push("Keyword Planner returned no data for this domain.");
@@ -537,7 +599,8 @@ async function buildForecast(
   gaps: KeywordGap[],
   brandKeywords: BenchmarkKeyword[],
   competitors: BenchmarkCompetitor[],
-  cost: BenchmarkCostContext
+  cost: BenchmarkCostContext,
+  onError?: (e: KeywordPlannerError) => void
 ): Promise<ForecastProjection | null> {
   // Index every keyword we know CPC for, so recommended-keyword *strings* can
   // recover real CPC to ground the forecast bid.
@@ -596,6 +659,7 @@ async function buildForecast(
       maxCpcMicros,
       currencyCode,
       costContext: cost,
+      onError,
     });
   } catch {
     return null;

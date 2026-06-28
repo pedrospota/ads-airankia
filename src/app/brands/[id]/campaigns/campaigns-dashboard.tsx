@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/header";
@@ -112,6 +112,112 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
   // Which campaign (by run id) is currently being discarded.
   const [discardingId, setDiscardingId] = useState<string | null>(null);
 
+  // Clean-up mode: an opt-in multi-select for permanently deleting test
+  // campaigns. Hidden by default so the normal (non-expert) user never sees
+  // destructive controls — you turn it on explicitly when you want to tidy up.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  // In-flight bulk delete, cancelled if the component unmounts mid-run.
+  const bulkAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => bulkAbortRef.current?.abort(), []);
+
+  // Only campaigns with a run can be cleaned up here (the delete route is keyed
+  // by run id, exactly like Discard).
+  const selectable = items.filter((i) => i.runId);
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedRunIds(new Set());
+  }
+
+  function toggleSelected(runId: string) {
+    setSelectedRunIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedRunIds((prev) => {
+      if (prev.size === selectable.length) return new Set();
+      return new Set(selectable.map((i) => i.runId as string));
+    });
+  }
+
+  // Permanently delete every selected campaign. Each id is deleted independently
+  // (its own ownership check + transaction server-side); we report how many went
+  // through. Unlike Discard, this physically removes the rows — it can't be undone.
+  async function bulkDelete() {
+    const ids = Array.from(selectedRunIds);
+    if (ids.length === 0) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Permanently delete ${ids.length} campaign${ids.length === 1 ? "" : "s"}?\n\n` +
+          "This removes them from Google Ads (nothing was spent — they were paused) " +
+          "and erases them here for good. This can't be undone.",
+      )
+    ) {
+      return;
+    }
+
+    bulkAbortRef.current?.abort();
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
+
+    setBulkDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map((runId) =>
+          fetch(`/api/search/runs/${runId}/delete`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+          }).then(async (r) => {
+            const data = (await r.json()) as { ok?: boolean; error?: string };
+            if (!r.ok || !data.ok) {
+              throw new Error(data.error || "delete failed");
+            }
+            return runId;
+          }),
+        ),
+      );
+
+      if (controller.signal.aborted) return;
+
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0 && typeof window !== "undefined") {
+        const firstErr = results.find((r) => r.status === "rejected") as
+          | PromiseRejectedResult
+          | undefined;
+        window.alert(
+          `${ids.length - failed} of ${ids.length} deleted. ` +
+            `${failed} couldn't be deleted` +
+            (firstErr?.reason instanceof Error
+              ? ` (${firstErr.reason.message})`
+              : "") +
+            ".",
+        );
+      }
+      exitSelectMode();
+      router.refresh();
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      if (typeof window !== "undefined") {
+        window.alert(
+          e instanceof Error ? e.message : "We couldn't delete the campaigns.",
+        );
+      }
+    } finally {
+      if (bulkAbortRef.current === controller) bulkAbortRef.current = null;
+      setBulkDeleting(false);
+    }
+  }
+
   // Discard / undo: safe at any time because Search campaigns are created
   // PAUSED and never spend. Removes it from Google (if it got there) and drops
   // it from this list. The end user is the one clicking, so this is the only
@@ -157,20 +263,57 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
           { label: "Campaigns" },
         ]}
         action={
-          <Link
-            href={newHref}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 10,
-              background: colors.accent,
-              color: "#000",
-              fontWeight: 700,
-              fontSize: 13,
-              textDecoration: "none",
-            }}
-          >
-            + New campaign
-          </Link>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {selectable.length > 0 &&
+              (selectMode ? (
+                <button
+                  onClick={exitSelectMode}
+                  disabled={bulkDeleting}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 10,
+                    background: "transparent",
+                    border: `1px solid ${colors.border}`,
+                    color: colors.text,
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: bulkDeleting ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Done
+                </button>
+              ) : (
+                <button
+                  onClick={() => setSelectMode(true)}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 10,
+                    background: "transparent",
+                    border: `1px solid ${colors.border}`,
+                    color: colors.textMuted,
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  Select to clean up
+                </button>
+              ))}
+            <Link
+              href={newHref}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 10,
+                background: colors.accent,
+                color: "#000",
+                fontWeight: 700,
+                fontSize: 13,
+                textDecoration: "none",
+              }}
+            >
+              + New campaign
+            </Link>
+          </div>
         }
       />
 
@@ -230,22 +373,127 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
             </Link>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {items.map((item) => {
-              const s = statusFor(item);
-              const resumeHref = item.runId
-                ? `${newHref}?run=${item.runId}`
-                : newHref;
-              return (
-                <div
-                  key={item.campaignId}
+          <>
+            {selectMode && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginBottom: 12,
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  background: colors.bgCard,
+                  border: `1px solid ${colors.border}`,
+                }}
+              >
+                <span style={{ fontSize: 13, color: colors.textMuted }}>
+                  Pick the test campaigns you want to delete for good.
+                </span>
+                <button
+                  onClick={toggleSelectAll}
+                  disabled={bulkDeleting}
                   style={{
-                    background: colors.bgCard,
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    background: "transparent",
                     border: `1px solid ${colors.border}`,
-                    borderRadius: 14,
-                    padding: 18,
+                    color: colors.text,
+                    fontWeight: 600,
+                    fontSize: 12.5,
+                    whiteSpace: "nowrap",
+                    cursor: bulkDeleting ? "not-allowed" : "pointer",
                   }}
                 >
+                  {selectedRunIds.size === selectable.length
+                    ? "Clear all"
+                    : "Select all"}
+                </button>
+              </div>
+            )}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                paddingBottom: selectMode ? 88 : 0,
+              }}
+            >
+              {items.map((item) => {
+                const s = statusFor(item);
+                const resumeHref = item.runId
+                  ? `${newHref}?run=${item.runId}`
+                  : newHref;
+                const canSelect = Boolean(item.runId);
+                const isSelected = canSelect
+                  ? selectedRunIds.has(item.runId as string)
+                  : false;
+                return (
+                  <div
+                    key={item.campaignId}
+                    onClick={
+                      selectMode && canSelect
+                        ? () => toggleSelected(item.runId as string)
+                        : undefined
+                    }
+                    style={{
+                      background: isSelected
+                        ? "rgba(248,113,113,0.08)"
+                        : colors.bgCard,
+                      border: `1px solid ${
+                        isSelected ? "rgba(248,113,113,0.5)" : colors.border
+                      }`,
+                      borderRadius: 14,
+                      padding: 18,
+                      cursor:
+                        selectMode && canSelect ? "pointer" : "default",
+                      opacity: selectMode && !canSelect ? 0.5 : 1,
+                    }}
+                  >
+                    {selectMode && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 12,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: canSelect
+                            ? isSelected
+                              ? "#F87171"
+                              : colors.textMuted
+                            : colors.textFaint,
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 18,
+                            height: 18,
+                            borderRadius: 5,
+                            border: `1.5px solid ${
+                              isSelected ? "#F87171" : colors.border
+                            }`,
+                            background: isSelected ? "#F87171" : "transparent",
+                            color: "#000",
+                            fontSize: 12,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {isSelected ? "✓" : ""}
+                        </span>
+                        {canSelect
+                          ? isSelected
+                            ? "Selected to delete"
+                            : "Tap to select"
+                          : "Can't be deleted here"}
+                      </div>
+                    )}
                   <div
                     style={{
                       display: "flex",
@@ -308,6 +556,7 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                     </p>
                   )}
 
+                  {!selectMode && (
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <Link
                       href={resumeHref}
@@ -369,10 +618,72 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                       </button>
                     )}
                   </div>
+                  )}
+                  </div>
+                );
+              })}
+            </div>
+            {selectMode && (
+              <div
+                style={{
+                  position: "fixed",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  zIndex: 40,
+                  display: "flex",
+                  justifyContent: "center",
+                  padding: "12px 16px calc(12px + env(safe-area-inset-bottom))",
+                  background: colors.bg,
+                  borderTop: `1px solid ${colors.border}`,
+                }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    maxWidth: 768,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ fontSize: 13.5, color: colors.textMuted }}>
+                    {selectedRunIds.size === 0
+                      ? "Nothing selected"
+                      : `${selectedRunIds.size} selected`}
+                  </span>
+                  <button
+                    onClick={bulkDelete}
+                    disabled={bulkDeleting || selectedRunIds.size === 0}
+                    style={{
+                      padding: "10px 18px",
+                      borderRadius: 10,
+                      background:
+                        bulkDeleting || selectedRunIds.size === 0
+                          ? "rgba(248,113,113,0.25)"
+                          : "#F87171",
+                      border: "none",
+                      color:
+                        bulkDeleting || selectedRunIds.size === 0
+                          ? colors.textFaint
+                          : "#000",
+                      fontWeight: 700,
+                      fontSize: 13.5,
+                      cursor:
+                        bulkDeleting || selectedRunIds.size === 0
+                          ? "not-allowed"
+                          : "pointer",
+                    }}
+                  >
+                    {bulkDeleting
+                      ? "Deleting…"
+                      : `Delete ${selectedRunIds.size || ""} permanently`}
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>

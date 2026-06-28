@@ -30,9 +30,9 @@ import type {
   SpendSummary,
 } from "./types";
 
-// Display currency. Account currency is not yet wired (a known wart shared with
-// the rest of the app); flip this one constant once it's confirmed.
-const CURRENCY = "€";
+// Display currency symbol. Resolved from the Google Ads account by the engine
+// (getAccountCurrency → currencySymbol) and threaded in; defaults to "€".
+const DEFAULT_CURRENCY = "€";
 
 // Fraction of searches that click ANY paid ad on this SERP. Hotter (more
 // commercial) SERPs draw more ad clicks. Blended, deliberately conservative.
@@ -77,7 +77,8 @@ function advertiserShare(
  * (i.e. nothing monetizable to estimate).
  */
 export function estimateCompetitorSpend(
-  comp: BenchmarkCompetitor
+  comp: BenchmarkCompetitor,
+  currency: string = DEFAULT_CURRENCY
 ): SpendEstimate | null {
   const adsOk = comp.adsStatus === "ok" && Array.isArray(comp.ads);
   const ads = adsOk ? comp.ads ?? [] : [];
@@ -130,7 +131,7 @@ export function estimateCompetitorSpend(
   perKw.sort((a, b) => b.estMonthlyMid - a.estMonthlyMid);
 
   return {
-    currency: CURRENCY,
+    currency,
     monthlyLow: Math.round(low),
     monthlyMid: Math.round(mid),
     monthlyHigh: Math.round(high),
@@ -147,14 +148,15 @@ export function estimateCompetitorSpend(
 
 /** Combine per-competitor estimates into a run-level roll-up. */
 export function summarizeSpend(
-  estimates: (SpendEstimate | null | undefined)[]
+  estimates: (SpendEstimate | null | undefined)[],
+  currency: string = DEFAULT_CURRENCY
 ): SpendSummary | null {
   const present = estimates.filter(
     (e): e is SpendEstimate => !!e
   );
   if (present.length === 0) return null;
   return {
-    currency: CURRENCY,
+    currency,
     monthlyLow: present.reduce((n, e) => n + e.monthlyLow, 0),
     monthlyMid: present.reduce((n, e) => n + e.monthlyMid, 0),
     monthlyHigh: present.reduce((n, e) => n + e.monthlyHigh, 0),

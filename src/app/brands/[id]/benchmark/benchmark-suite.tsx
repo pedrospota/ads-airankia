@@ -11,6 +11,7 @@ import type {
   CompetitorAd,
   SpendEstimate,
   SpendSummary,
+  ForecastProjection,
 } from "@/lib/benchmark/types";
 
 // ----------------------------------------------------------------------------
@@ -55,14 +56,31 @@ function fmtMoney(n: number, cur = CUR): string {
   if (v >= 1000) return `${cur}${(v / 1000).toFixed(1)}K`;
   return `${cur}${v.toLocaleString("en-US")}`;
 }
-function fmtCpc(low?: number, high?: number): string | null {
+function fmtCpc(low?: number, high?: number, cur = CUR): string | null {
   const l = low != null ? low / 1_000_000 : null;
   const h = high != null ? high / 1_000_000 : null;
   if (l == null && h == null) return null;
   if (l != null && h != null)
-    return `${CUR}${l.toFixed(2)}–${CUR}${h.toFixed(2)}`;
+    return `${cur}${l.toFixed(2)}–${cur}${h.toFixed(2)}`;
   const v = (l ?? h) as number;
-  return `${CUR}${v.toFixed(2)}`;
+  return `${cur}${v.toFixed(2)}`;
+}
+// Whole numbers with thousands separators (impressions, clicks, conversions).
+function fmtInt(n: number): string {
+  return Math.round(Math.max(0, n)).toLocaleString("en-US");
+}
+// Fraction → percent (CTR, conversion rate). 0.0432 → "4.3%".
+function fmtPct(frac: number): string {
+  if (!isFinite(frac) || frac <= 0) return "0%";
+  return `${(frac * 100).toFixed(frac < 0.1 ? 1 : 1)}%`;
+}
+// Micros → exact unit price (CPC, CPA). 1_850_000 → "€1.85".
+function fmtPriceMicros(micros: number, cur = CUR): string {
+  return `${cur}${(Math.max(0, micros) / 1_000_000).toFixed(2)}`;
+}
+// Micros → compact money (cost). 4_200_000 → "€4.2K".
+function fmtMoneyMicros(micros: number, cur = CUR): string {
+  return fmtMoney(Math.max(0, micros) / 1_000_000, cur);
 }
 function compStyle(comp: string): { label: string; color: string; bg: string } {
   const c = (comp || "").toUpperCase();
@@ -696,6 +714,13 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
             value={`~${fmtMoney(report.spendSummary.monthlyMid, report.spendSummary.currency)}`}
           />
         )}
+        {report.forecast && report.forecast.clicks > 0 && (
+          <Stat
+            colors={colors}
+            label="Proj. clicks/mo"
+            value={`~${fmtInt(report.forecast.clicks)}`}
+          />
+        )}
         <Stat colors={colors} label="Market" value={report.country} />
         <Stat
           colors={colors}
@@ -720,13 +745,25 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
       <h2 style={sectionTitle}>🧠 Your strategy</h2>
       <StrategyCard colors={colors} report={report} />
 
+      {/* projected results for the recommended plan */}
+      {report.forecast && (
+        <>
+          <h2 style={sectionTitle}>📈 What the recommended plan could get you</h2>
+          <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
+            Google&apos;s own forecast if you ran the recommended keywords for a
+            month — so the plan above isn&apos;t just advice, it has numbers.
+          </p>
+          <ForecastCard colors={colors} forecast={report.forecast} />
+        </>
+      )}
+
       {/* keyword gaps */}
       <h2 style={sectionTitle}>🎯 Keyword gaps</h2>
       <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
         Searches your competitors are associated with that you don&apos;t appear
         to be — sorted by how many of them cover each one.
       </p>
-      <KeywordGapTable colors={colors} gaps={report.keywordGaps} />
+      <KeywordGapTable colors={colors} gaps={report.keywordGaps} cur={report.currency} />
 
       {/* competitors */}
       <h2 style={sectionTitle}>🕵️ Competitor teardown</h2>
@@ -944,6 +981,214 @@ function SpendPanel({
   );
 }
 
+// ----------------------------------------------------------------------------
+// Forecast — Google's own traffic projection for the recommended plan. The
+// reliable metrics (impressions/clicks/CTR/CPC/cost) lead; conversions are
+// shown separately and clearly flagged as an estimate (no conversion tracking).
+// ----------------------------------------------------------------------------
+function ForecastCard({
+  colors,
+  forecast,
+}: {
+  colors: Colors;
+  forecast: ForecastProjection;
+}) {
+  const [how, setHow] = useState(false);
+  const cur = forecast.currency;
+  const showConv = forecast.conversions > 0;
+
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(59,130,246,0.07), rgba(59,130,246,0))",
+        border: `1px solid ${colors.border}`,
+        borderRadius: 16,
+        padding: 22,
+      }}
+    >
+      {/* headline */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12.5, color: colors.textMuted, marginBottom: 4 }}>
+            Projected for the recommended keywords, next ~{forecast.periodDays} days
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>
+            ~{fmtInt(forecast.clicks)}
+            <span style={{ fontSize: 15, fontWeight: 600, color: colors.textMuted }}> clicks</span>
+            <span style={{ color: colors.textFaint, fontWeight: 600 }}> · </span>
+            ~{fmtMoneyMicros(forecast.costMicros, cur)}
+            <span style={{ fontSize: 15, fontWeight: 600, color: colors.textMuted }}> spend</span>
+          </div>
+          <div style={{ fontSize: 12.5, color: colors.textMuted, marginTop: 4 }}>
+            across {forecast.keywordCount} keyword
+            {forecast.keywordCount === 1 ? "" : "s"} · phrase match
+          </div>
+        </div>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            padding: "5px 11px",
+            borderRadius: 999,
+            color: "#7DD3FC",
+            background: "rgba(125,211,252,0.12)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Google Keyword Planner
+        </span>
+      </div>
+
+      {/* reliable metric tiles */}
+      <div
+        style={{
+          marginTop: 18,
+          display: "grid",
+          gap: 10,
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+        }}
+      >
+        <MetricTile colors={colors} label="Impressions" value={`~${fmtInt(forecast.impressions)}`} />
+        <MetricTile colors={colors} label="Clicks" value={`~${fmtInt(forecast.clicks)}`} />
+        <MetricTile colors={colors} label="CTR" value={fmtPct(forecast.ctr)} />
+        <MetricTile colors={colors} label="Avg. CPC" value={fmtPriceMicros(forecast.avgCpcMicros, cur)} />
+        <MetricTile colors={colors} label="Est. cost" value={`~${fmtMoneyMicros(forecast.costMicros, cur)}`} />
+      </div>
+
+      {/* conversions — clearly lower-confidence */}
+      {showConv && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              If conversions behave typically
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: "2px 8px",
+                borderRadius: 999,
+                color: "#FBBF24",
+                background: "rgba(251,191,36,0.12)",
+              }}
+            >
+              Estimate
+            </span>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            }}
+          >
+            <MetricTile colors={colors} label="Conversions" value={`~${fmtInt(forecast.conversions)}`} muted />
+            <MetricTile colors={colors} label="Conv. rate" value={fmtPct(forecast.conversionRate)} muted />
+            {forecast.cpaMicros > 0 && (
+              <MetricTile colors={colors} label="Cost / conv." value={`~${fmtPriceMicros(forecast.cpaMicros, cur)}`} muted />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* honest disclosure */}
+      <button
+        onClick={() => setHow((h) => !h)}
+        style={{
+          marginTop: 16,
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          color: colors.accent,
+          fontWeight: 600,
+          fontSize: 12.5,
+          cursor: "pointer",
+        }}
+      >
+        {how ? "Hide how this is projected" : "ℹ️ How is this projected?"}
+      </button>
+      {how && (
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 12.5,
+            color: colors.textMuted,
+            lineHeight: 1.55,
+            background: colors.bgInput,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 12,
+            padding: 14,
+          }}
+        >
+          {forecast.basis}
+          <div style={{ marginTop: 8 }}>
+            The forecast bids at{" "}
+            <strong style={{ color: colors.text }}>
+              {fmtPriceMicros(forecast.maxCpcMicros, cur)}
+            </strong>{" "}
+            max CPC (grounded in the real Keyword Planner CPC of these keywords).
+            {showConv
+              ? " Conversions assume Google's estimated typical conversion rate for this kind of traffic — connect conversion tracking to make them exact."
+              : ""}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricTile({
+  colors,
+  label,
+  value,
+  muted,
+}: {
+  colors: Colors;
+  label: string;
+  value: string;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        background: colors.bgInput,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 12,
+        padding: "12px 14px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 19,
+          fontWeight: 800,
+          fontVariantNumeric: "tabular-nums",
+          color: muted ? colors.textMuted : colors.text,
+        }}
+      >
+        {value}
+      </div>
+      <div style={{ fontSize: 11, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginTop: 2 }}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
 function StrategyCard({ colors, report }: { colors: Colors; report: BenchmarkReport }) {
   const s = report.strategy;
   const block = (title: string, items: string[], color: string) =>
@@ -988,7 +1233,7 @@ function StrategyCard({ colors, report }: { colors: Colors; report: BenchmarkRep
   );
 }
 
-function KeywordGapTable({ colors, gaps }: { colors: Colors; gaps: KeywordGap[] }) {
+function KeywordGapTable({ colors, gaps, cur = CUR }: { colors: Colors; gaps: KeywordGap[]; cur?: string }) {
   const [showAll, setShowAll] = useState(false);
   if (gaps.length === 0) {
     return (
@@ -1032,7 +1277,7 @@ function KeywordGapTable({ colors, gaps }: { colors: Colors; gaps: KeywordGap[] 
           <tbody>
             {shown.map((g, i) => {
               const cs = compStyle(g.competition);
-              const cpc = fmtCpc(g.cpcLowMicros, g.cpcHighMicros);
+              const cpc = fmtCpc(g.cpcLowMicros, g.cpcHighMicros, cur);
               return (
                 <tr key={g.text + i} style={{ borderBottom: `1px solid ${colors.border}` }}>
                   <td style={{ ...cell, fontWeight: 600 }}>{g.text}</td>
@@ -1268,7 +1513,7 @@ function SpendBreakdown({ colors, spend }: { colors: Colors; spend: SpendEstimat
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {spend.topSpendKeywords.map((k, i) => {
               const pct = Math.max(5, Math.round((k.estMonthlyMid / maxKw) * 100));
-              const cpc = fmtCpc(k.cpcMicros, k.cpcMicros);
+              const cpc = fmtCpc(k.cpcMicros, k.cpcMicros, cur);
               return (
                 <div key={k.text + i}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>

@@ -23,6 +23,9 @@ import { benchmarkRuns } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import {
   generateKeywordIdeas,
+  generateKeywordForecast,
+  getAccountCurrency,
+  currencySymbol,
   type KeywordPlanIdea,
 } from "@/lib/google-ads";
 import { languageName } from "@/lib/engine/types";
@@ -40,6 +43,7 @@ import type {
   KeywordGap,
   BenchmarkStrategy,
   BenchmarkCostContext,
+  ForecastProjection,
 } from "./types";
 
 // ----------------------------------------------------------------------------
@@ -245,6 +249,11 @@ export async function runBenchmark(
   await setRun(runId, { status: "running", startedAt: new Date() });
   await stage(runId, "Reading your brand", 5);
 
+  // Resolve the account currency once (fixes the hardcoded "€"). Threaded into
+  // spend modeling + the forecast so every figure renders in the real currency.
+  const currencyCode = await getAccountCurrency();
+  const currency = currencySymbol(currencyCode);
+
   // ---- 1. Brand's own keyword footprint (URL-seeded + any manual keyword) ----
   await stage(runId, "Mapping your keyword footprint", 12);
   const brandIdeas = await generateKeywordIdeas({
@@ -277,7 +286,7 @@ export async function runBenchmark(
       progress
     );
 
-    const comp = await analyzeCompetitor(domain, ctx, country, cost);
+    const comp = await analyzeCompetitor(domain, ctx, country, currency, cost);
     competitors.push(comp);
     await emitBenchmarkEvent(runId, "partial", { kind: "competitor", competitor: comp });
   }
@@ -312,17 +321,42 @@ export async function runBenchmark(
     console.error("[benchmark] strategy synthesis failed", runId, e);
   }
 
-  // ---- 5. Assemble + persist -------------------------------------------------
+  // ---- 5. Forecast the recommended plan (Google's own traffic projection) ----
+  // So every recommendation carries real numbers (clicks/cost/CTR/CPC, and an
+  // estimated conversions figure). Never throws → just null when unavailable.
+  await stage(runId, "Forecasting the recommended plan", 95);
+  const forecast = await buildForecast(
+    ctx,
+    country,
+    currency,
+    currencyCode,
+    strategy,
+    keywordGaps,
+    brandKeywords,
+    competitors,
+    cost
+  );
+  if (forecast) {
+    await emitBenchmarkEvent(runId, "partial", {
+      kind: "forecast",
+      clicks: forecast.clicks,
+      costMicros: forecast.costMicros,
+    });
+  }
+
+  // ---- 6. Assemble + persist -------------------------------------------------
   const report: BenchmarkReport = {
     generatedAt: new Date().toISOString(),
     language: lang,
     country,
+    currency,
     brand: { name: ctx.name, website: ctx.website, domain: ctx.domain },
     brandKeywords,
     competitors,
     keywordGaps,
     strategy,
-    spendSummary: summarizeSpend(competitors.map((c) => c.spend)),
+    forecast,
+    spendSummary: summarizeSpend(competitors.map((c) => c.spend), currency),
     meta: {
       liveAdSpy: competitors.some((c) => c.adsStatus === "ok"),
       domainsAnalyzed: competitors.length,
@@ -349,6 +383,7 @@ async function analyzeCompetitor(
   domain: string,
   ctx: BenchmarkBrandContext,
   country: string,
+  currency: string,
   cost: BenchmarkCostContext
 ): Promise<BenchmarkCompetitor> {
   const notes: string[] = [];
@@ -444,7 +479,7 @@ async function analyzeCompetitor(
   };
   // Modeled monthly investment from the (free) KP volumes × CPC. Null when the
   // footprint carries no CPC bids (nothing monetizable to estimate).
-  comp.spend = estimateCompetitorSpend(comp);
+  comp.spend = estimateCompetitorSpend(comp, currency);
   return comp;
 }
 
@@ -485,6 +520,105 @@ function computeKeywordGaps(
       return b.avgMonthlySearches - a.avgMonthlySearches;
     })
     .slice(0, 60);
+}
+
+// ----------------------------------------------------------------------------
+// Forecast the recommended plan. Picks the keywords we actually recommend (the
+// AI's recommendedKeywords first, then the richest keyword gaps), grounds the
+// bid in real Keyword Planner CPC, and asks Google's Keyword Planner forecast
+// for the projected traffic. Returns null when nothing is forecastable.
+// ----------------------------------------------------------------------------
+async function buildForecast(
+  ctx: BenchmarkBrandContext,
+  country: string,
+  currency: string,
+  currencyCode: string,
+  strategy: BenchmarkStrategy,
+  gaps: KeywordGap[],
+  brandKeywords: BenchmarkKeyword[],
+  competitors: BenchmarkCompetitor[],
+  cost: BenchmarkCostContext
+): Promise<ForecastProjection | null> {
+  // Index every keyword we know CPC for, so recommended-keyword *strings* can
+  // recover real CPC to ground the forecast bid.
+  const index = new Map<string, BenchmarkKeyword>();
+  const remember = (k: BenchmarkKeyword) => {
+    const n = normKw(k.text);
+    if (n && !index.has(n)) index.set(n, k);
+  };
+  brandKeywords.forEach(remember);
+  competitors.forEach((c) => c.keywords.forEach(remember));
+  gaps.forEach((g) =>
+    remember({
+      text: g.text,
+      avgMonthlySearches: g.avgMonthlySearches,
+      competition: g.competition,
+      cpcLowMicros: g.cpcLowMicros,
+      cpcHighMicros: g.cpcHighMicros,
+    })
+  );
+
+  // Recommended keywords first, then fill from the richest gaps, then (last
+  // resort) the brand's own top keywords. Deduped, capped.
+  const chosen: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    const n = normKw(t);
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      chosen.push(t.trim());
+    }
+  };
+  (strategy.recommendedKeywords ?? []).forEach(push);
+  for (const g of gaps) {
+    if (chosen.length >= 25) break;
+    push(g.text);
+  }
+  if (chosen.length === 0) topByVolume(brandKeywords, 15).forEach((k) => push(k.text));
+  const keywords = chosen.slice(0, 25);
+  if (keywords.length === 0) return null;
+
+  // Bid = median of the chosen keywords' real top-of-page high CPC (fallback €1.50).
+  const highs = keywords
+    .map((t) => index.get(normKw(t))?.cpcHighMicros)
+    .filter((n): n is number => typeof n === "number" && n > 0)
+    .sort((a, b) => a - b);
+  const maxCpcMicros = highs.length
+    ? highs[Math.floor(highs.length / 2)]
+    : 1_500_000;
+
+  let f;
+  try {
+    f = await generateKeywordForecast({
+      keywords: keywords.map((t) => ({ text: t, matchType: "PHRASE" as const })),
+      languageCode: ctx.languageCode,
+      countryCodes: [country],
+      maxCpcMicros,
+      currencyCode,
+      costContext: cost,
+    });
+  } catch {
+    return null;
+  }
+  if (!f) return null;
+
+  return {
+    currency,
+    periodDays: f.periodDays,
+    keywordCount: f.keywordCount,
+    keywords,
+    impressions: f.impressions,
+    clicks: f.clicks,
+    ctr: f.ctr,
+    avgCpcMicros: f.avgCpcMicros,
+    costMicros: f.costMicros,
+    conversions: f.conversions,
+    conversionRate: f.conversionRate,
+    cpaMicros: f.cpaMicros,
+    maxCpcMicros,
+    basis:
+      "Google Ads Keyword Planner forecast for the recommended keywords (phrase match, ~30-day window). Impressions, clicks, CTR, average CPC and cost are Google's own forecast; conversions assume an estimated typical conversion rate (no account conversion tracking yet), so treat those as directional.",
+  };
 }
 
 // ----------------------------------------------------------------------------

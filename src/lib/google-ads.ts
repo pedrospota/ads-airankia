@@ -408,6 +408,250 @@ export async function generateKeywordIdeas(params: {
   return ideas;
 }
 
+// ---------------------------------------------------------------------------
+// Account currency — resolve the real currency of the Google Ads account so we
+// stop hardcoding "€" across the app. Cached for 6h (it never changes in
+// practice). Falls back to EUR (our default account) on any error so callers
+// always get a usable code. See currencySymbol() for display.
+// ---------------------------------------------------------------------------
+
+let cachedCurrency: { code: string; expires: number } | null = null;
+
+// ISO-4217 currency code -> display symbol. Unknown codes render as the code
+// itself (e.g. "PLN ") so we never show a wrong symbol.
+export function currencySymbol(code: string | null | undefined): string {
+  switch ((code ?? "").toUpperCase()) {
+    case "EUR":
+      return "€";
+    case "USD":
+    case "MXN":
+    case "ARS":
+    case "CLP":
+    case "COP":
+    case "AUD":
+    case "CAD":
+      return "$";
+    case "GBP":
+      return "£";
+    case "JPY":
+      return "¥";
+    case "BRL":
+      return "R$";
+    default:
+      return code ? `${code} ` : "€";
+  }
+}
+
+export async function getAccountCurrency(): Promise<string> {
+  if (cachedCurrency && Date.now() < cachedCurrency.expires) {
+    return cachedCurrency.code;
+  }
+  try {
+    const token = await getAccessToken();
+    const resp = await fetchWithTimeout(
+      `${BASE}/googleAds:searchStream`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({
+          query: "SELECT customer.currency_code FROM customer LIMIT 1",
+        }),
+      },
+      15000
+    );
+    const data = await resp.json();
+    // searchStream returns an array of batches, each with `.results`.
+    const code = Array.isArray(data)
+      ? data[0]?.results?.[0]?.customer?.currencyCode
+      : data?.results?.[0]?.customer?.currencyCode;
+    if (typeof code === "string" && code) {
+      cachedCurrency = { code, expires: Date.now() + 6 * 60 * 60 * 1000 };
+      return code;
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return "EUR";
+}
+
+// ---------------------------------------------------------------------------
+// Keyword Plan Forecast — GenerateKeywordForecastMetrics (KeywordPlanIdeaService).
+// Given a set of keywords, returns Google's own traffic forecast: impressions,
+// clicks, CTR, average CPC, cost and (estimated) conversions for a 30-day window.
+// This is what lets every RECOMMENDATION carry real numbers ("if you run these
+// keywords you'd get ~X clicks at ~€Y") instead of guesses.
+//
+// Honesty notes (per "que sí haga sentido"):
+//   • impressions / clicks / CTR / avgCPC / cost are forecast directly by Google
+//     → reliable.
+//   • We OMIT conversionRate so Google supplies an *estimated* conversion rate
+//     (no account conversion tracking to calibrate against), so conversions /
+//     conversionRate / CPA are lower-confidence — callers should label them as
+//     estimates assuming a typical conversion rate.
+//
+// Like generateKeywordIdeas, this NEVER throws to the pipeline: returns null
+// when the API can't serve a forecast, so the UI just hides the projection.
+// ---------------------------------------------------------------------------
+
+export interface KeywordForecast {
+  impressions: number;
+  clicks: number;
+  ctr: number; // fraction 0..1 (clickThroughRate)
+  avgCpcMicros: number;
+  costMicros: number;
+  conversions: number;
+  conversionRate: number; // fraction 0..1
+  cpaMicros: number;
+  periodDays: number; // length of the forecast window (≈30 → monthly)
+  currencyCode: string; // currency the micros are expressed in
+  keywordCount: number; // how many keywords were forecast
+}
+
+export async function generateKeywordForecast(params: {
+  keywords: { text: string; matchType?: "BROAD" | "PHRASE" | "EXACT" }[];
+  languageCode: string;
+  countryCodes: string[];
+  // Manual-CPC bid the forecast bids with. Ground it in real KP CPC when known;
+  // defaults to €1.50 so the call still works without CPC data.
+  maxCpcMicros?: number;
+  // Account currency (resolve once via getAccountCurrency and pass it). When
+  // omitted the API defaults to the account currency anyway.
+  currencyCode?: string;
+  costContext?: {
+    userId?: string | null;
+    brandId?: string | null;
+    workspaceId?: string | null;
+    runId?: string | null;
+    stepId?: string | null;
+  };
+}): Promise<KeywordForecast | null> {
+  const kws = params.keywords
+    .map((k) => ({
+      text: k.text?.trim() ?? "",
+      matchType: k.matchType ?? "PHRASE",
+    }))
+    .filter((k) => Boolean(k.text))
+    .slice(0, 1000); // defensive cap
+  if (kws.length === 0) return null;
+
+  const language = `languageConstants/${
+    LANGUAGE_CONSTANTS[params.languageCode?.toLowerCase()] ?? LANGUAGE_CONSTANTS.es
+  }`;
+  const geoModifiers = (params.countryCodes.length > 0 ? params.countryCodes : ["ES"])
+    .map((c) => GEO_TARGET_CONSTANTS[c?.toUpperCase()])
+    .filter((id): id is string => Boolean(id))
+    .map((id) => ({ geoTargetConstant: `geoTargetConstants/${id}` }));
+  if (geoModifiers.length === 0) {
+    geoModifiers.push({
+      geoTargetConstant: `geoTargetConstants/${GEO_TARGET_CONSTANTS.ES}`,
+    });
+  }
+
+  const maxCpcMicros = Math.max(
+    Math.round(params.maxCpcMicros ?? 1_500_000),
+    10_000
+  );
+
+  // 30-day window starting tomorrow (start must be in the future, end within a
+  // year). Metrics for impressions/clicks/cost/conversions scale with this
+  // window → a 30-day window yields ~monthly figures.
+  const periodDays = 30;
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const startDate = fmt(new Date(Date.now() + 86_400_000));
+  const endDate = fmt(new Date(Date.now() + (periodDays + 1) * 86_400_000));
+
+  const body: Record<string, unknown> = {
+    forecastPeriod: { startDate, endDate },
+    campaign: {
+      keywordPlanNetwork: "GOOGLE_SEARCH",
+      languageConstants: [language],
+      geoModifiers,
+      biddingStrategy: {
+        manualCpcBiddingStrategy: { maxCpcBidMicros: String(maxCpcMicros) },
+      },
+      // conversionRate intentionally omitted → Google supplies an estimate.
+      adGroups: [
+        {
+          biddableKeywords: kws.map((k) => ({
+            keyword: { text: k.text, matchType: k.matchType },
+          })),
+        },
+      ],
+    },
+  };
+  if (params.currencyCode) body.currencyCode = params.currencyCode;
+
+  let data: {
+    error?: unknown;
+    campaignForecastMetrics?: {
+      impressions?: string | number;
+      clickThroughRate?: string | number;
+      averageCpcMicros?: string | number;
+      clicks?: string | number;
+      costMicros?: string | number;
+      conversions?: string | number;
+      conversionRate?: string | number;
+      averageCpaMicros?: string | number;
+    };
+  };
+  try {
+    const token = await getAccessToken();
+    const resp = await fetchWithTimeout(
+      `${BASE}:generateKeywordForecastMetrics`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify(body),
+      },
+      20000
+    );
+    data = await resp.json();
+  } catch {
+    return null;
+  }
+  if (!data || data.error || !data.campaignForecastMetrics) return null;
+
+  const m = data.campaignForecastMetrics;
+  const currencyCode = params.currencyCode ?? (await getAccountCurrency());
+  const forecast: KeywordForecast = {
+    impressions: Number(m.impressions ?? 0),
+    clicks: Number(m.clicks ?? 0),
+    ctr: Number(m.clickThroughRate ?? 0),
+    avgCpcMicros: Number(m.averageCpcMicros ?? 0),
+    costMicros: Number(m.costMicros ?? 0),
+    conversions: Number(m.conversions ?? 0),
+    conversionRate: Number(m.conversionRate ?? 0),
+    cpaMicros: Number(m.averageCpaMicros ?? 0),
+    periodDays,
+    currencyCode,
+    keywordCount: kws.length,
+  };
+
+  // Meter the call (free, like generateKeywordIdeas → costMicros 0). Fire-and-forget.
+  const cc = params.costContext;
+  void recordCost({
+    category: "external_api",
+    provider: "google_ads",
+    resource: "generateKeywordForecastMetrics",
+    units: kws.length,
+    costMicros: 0,
+    userId: cc?.userId ?? null,
+    brandId: cc?.brandId ?? null,
+    workspaceId: cc?.workspaceId ?? null,
+    runId: cc?.runId ?? null,
+    stepId: cc?.stepId ?? null,
+    meta: {
+      keywords: kws.length,
+      languageCode: params.languageCode,
+      countries: params.countryCodes,
+      maxCpcMicros,
+      periodDays,
+    },
+  });
+
+  return forecast;
+}
+
 // Get campaign performance
 export async function getCampaignPerformance(campaignId: string): Promise<{
   impressions: number; clicks: number; costMicros: number; status: string;

@@ -123,10 +123,8 @@ export function BenchmarkSuite({
   const [manualKeyword, setManualKeyword] = useState("");
   const [manualDomain, setManualDomain] = useState("");
   // The live competitor-ad analysis (Oxylabs → domains → Transparency) IS the
-  // core of the benchmark, so it's ON by default. It's PAID, so we still show it
-  // as an explicit, clearly-labelled consent the user can switch off for a free
-  // keyword-only preview — spend is never hidden, but never a surprise toggle.
-  const [adSpy, setAdSpy] = useState(true);
+  // benchmark, so it always runs when the data sources are configured — no toggle.
+  // Pressing "Start the analysis" (clearly labelled paid) is the explicit consent.
   // Optional market/language override. Empty = auto-detect from the brand (the
   // default — the user never has to choose).
   const [marketOverride, setMarketOverride] = useState("");
@@ -269,7 +267,7 @@ export function BenchmarkSuite({
           manualKeyword: entryMode === "keyword" ? manualKeyword.trim() : undefined,
           manualDomain: entryMode === "domain" ? manualDomain.trim() : undefined,
           // Only send the paid opt-in when a key is actually available.
-          adSpy: adSpyAvailable ? adSpy : undefined,
+          adSpy: adSpyAvailable || undefined,
           countryCode: marketOverride || undefined,
           languageCode: langOverride || undefined,
           transparency,
@@ -292,7 +290,6 @@ export function BenchmarkSuite({
     entryMode,
     manualKeyword,
     manualDomain,
-    adSpy,
     adSpyAvailable,
     marketOverride,
     langOverride,
@@ -402,8 +399,6 @@ export function BenchmarkSuite({
           setManualKeyword={setManualKeyword}
           manualDomain={manualDomain}
           setManualDomain={setManualDomain}
-          adSpy={adSpy}
-          setAdSpy={setAdSpy}
           adSpyAvailable={adSpyAvailable}
           marketOverride={marketOverride}
           setMarketOverride={setMarketOverride}
@@ -512,8 +507,6 @@ function EntryPanel({
   setManualKeyword,
   manualDomain,
   setManualDomain,
-  adSpy,
-  setAdSpy,
   adSpyAvailable,
   marketOverride,
   setMarketOverride,
@@ -535,8 +528,6 @@ function EntryPanel({
   setManualKeyword: (s: string) => void;
   manualDomain: string;
   setManualDomain: (s: string) => void;
-  adSpy: boolean;
-  setAdSpy: (b: boolean) => void;
   adSpyAvailable: boolean;
   marketOverride: string;
   setMarketOverride: (s: string) => void;
@@ -687,53 +678,24 @@ function EntryPanel({
         </div>
       )}
 
-      {/* live competitor ads — PAID, per-run opt-in, OFF by default ---------- */}
+      {/* live competitor ads — the core of the benchmark, runs on Start ------- */}
       {adSpyAvailable && (
-        <button
-          type="button"
-          onClick={() => !running && setAdSpy(!adSpy)}
-          disabled={running}
+        <div
           style={{
             display: "flex",
             alignItems: "flex-start",
-            gap: 12,
+            gap: 10,
             width: "100%",
-            textAlign: "left",
             marginTop: 18,
             padding: 14,
             borderRadius: 12,
-            cursor: running ? "not-allowed" : "pointer",
-            background: adSpy ? "rgba(16,185,129,0.08)" : colors.bgInput,
-            border: `1.5px solid ${adSpy ? colors.accent : colors.border}`,
+            background: "rgba(16,185,129,0.08)",
+            border: `1.5px solid ${colors.accent}`,
             color: colors.text,
           }}
         >
-          {/* switch */}
-          <span
-            aria-hidden
-            style={{
-              flexShrink: 0,
-              width: 38,
-              height: 22,
-              borderRadius: 999,
-              background: adSpy ? colors.accent : colors.border,
-              position: "relative",
-              transition: "background 0.15s",
-              marginTop: 1,
-            }}
-          >
-            <span
-              style={{
-                position: "absolute",
-                top: 2,
-                left: adSpy ? 18 : 2,
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: "#fff",
-                transition: "left 0.15s",
-              }}
-            />
+          <span aria-hidden style={{ fontSize: 16, lineHeight: 1.2, marginTop: 1 }}>
+            🕵️
           </span>
           <span>
             <span style={{ fontSize: 14, fontWeight: 700, display: "block", marginBottom: 2 }}>
@@ -747,16 +709,16 @@ function EntryPanel({
                   color: colors.textFaint,
                 }}
               >
-                · on · paid
+                · paid
               </span>
             </span>
             <span style={{ fontSize: 12.5, color: colors.textMuted, lineHeight: 1.4, display: "block" }}>
               {entryMode === "domain"
-                ? "Pulls each competitor domain's live creatives from the Google Ads Transparency Center. Switch off for a free keyword-only preview."
-                : "Finds the domains actually running ads on your keyword (Oxylabs), then pulls each one's live creatives from the Transparency Center. These domains are only analyzed for this report — never saved to your competitors. Switch off for a free preview."}
+                ? "Pulls each competitor domain's live creatives from the Google Ads Transparency Center."
+                : "Finds the domains actually running ads on your keyword (Oxylabs), then pulls each one's live creatives from the Transparency Center. These domains are only analyzed for this report — never saved to your competitors."}
             </span>
           </span>
-        </button>
+        </div>
       )}
 
       {/* market & language — AUTO by default but ALWAYS visible (manual optional) */}
@@ -936,9 +898,9 @@ function EntryPanel({
           {starting || running ? "Analyzing…" : "Start the analysis"}
         </button>
         <span style={{ fontSize: 12.5, color: colors.textFaint }}>
-          {adSpyAvailable && adSpy
+          {adSpyAvailable
             ? "Includes the live competitor ad teardown · billed per competitor search"
-            : "Free preview · turn on live ad-spy for the full competitor ad report"}
+            : "Keyword & competitor analysis (live ad sources not configured)"}
         </span>
       </div>
     </div>

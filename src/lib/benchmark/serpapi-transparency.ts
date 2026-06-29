@@ -29,9 +29,11 @@ export function serpApiConfigured(): boolean {
 export interface SerpApiTransparencyResult {
   status: AdsStatus;
   domain: string;
-  region: string;
+  region: string; // "global" when no region filter applied
   totalAds: number;
   ads: CompetitorAd[];
+  /** Unprocessed API response items — includes image URL, days_active, legal names, etc. */
+  rawCreatives: RawCreative[];
 }
 
 interface RawCreative {
@@ -74,24 +76,30 @@ function mapCreative(c: RawCreative, domain: string): CompetitorAd {
 /**
  * Fetch a competitor domain's active ad creatives from Google Ads Transparency
  * Center via SerpApi. Returns up to maxAds creatives sorted oldest-first.
+ *
+ * IMPORTANT: region is NOT sent by default — Google Transparency returns global
+ * results without it, which is the correct default. Only pass region when the
+ * user explicitly requests a specific country.
  * Never throws — any failure yields { status:"error", ads:[] }.
  */
 export async function serpApiTransparency(
   domain: string,
-  region: string,
+  region: string | null,   // null = don't filter by region (global)
   cost: BenchmarkCostContext,
   maxAds = 12
 ): Promise<SerpApiTransparencyResult> {
   const key = serpApiKey();
   if (!key) {
-    return { status: "off", domain, region, totalAds: 0, ads: [] };
+    return { status: "off", domain, region: region ?? "global", totalAds: 0, ads: [], rawCreatives: [] };
   }
 
   const qs = new URLSearchParams({
     engine: "google_ads_transparency_center",
     text: domain,
     api_key: key,
+    num: "100",
   });
+  // Only send region when explicitly requested — omitting it returns global results.
   if (region) qs.set("region", region);
 
   let data: { ad_creatives?: RawCreative[]; ads?: RawCreative[] } | undefined;
@@ -102,12 +110,12 @@ export async function serpApiTransparency(
     });
     if (!resp.ok) {
       meter(cost, domain, 1, "http_" + resp.status);
-      return { status: "error", domain, region, totalAds: 0, ads: [] };
+      return { status: "error", domain, region: region ?? "global", totalAds: 0, ads: [], rawCreatives: [] };
     }
     data = await resp.json();
   } catch {
     meter(cost, domain, 1, "exception");
-    return { status: "error", domain, region, totalAds: 0, ads: [] };
+    return { status: "error", domain, region: region ?? "global", totalAds: 0, ads: [], rawCreatives: [] };
   }
 
   const creatives: RawCreative[] = data?.ad_creatives ?? data?.ads ?? [];
@@ -124,9 +132,10 @@ export async function serpApiTransparency(
   return {
     status: ads.length ? "ok" : "empty",
     domain,
-    region,
+    region: region ?? "global",
     totalAds: creatives.length,
     ads,
+    rawCreatives: creatives,
   };
 }
 

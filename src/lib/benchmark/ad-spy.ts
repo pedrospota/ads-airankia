@@ -49,12 +49,11 @@ export async function fetchAds(
     return { status: "off", ads: null };
   }
 
-  // SerpApi — primary (n8n provider).
+  // SerpApi — primary (n8n provider). No region filter by default (global results).
   if (serpApiConfigured()) {
-    const country = findCountry(countryCode);
     const result = await serpApiTransparency(
       domain,
-      country.region,
+      null,   // region omitted by default — only pass when user explicitly requests
       cost,
       opts?.maxAds ?? 12
     );

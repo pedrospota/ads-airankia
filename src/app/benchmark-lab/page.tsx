@@ -19,7 +19,7 @@ export default function BenchmarkLabPage() {
     geo: c.geo,
     region: c.region,
     language: c.lang,
-    mode: "normal",
+    mode: "keyword",
     numKeywords: 1,
     numCompetitors: 6,
   });

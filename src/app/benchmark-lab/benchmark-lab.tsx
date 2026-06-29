@@ -36,9 +36,10 @@ interface Props {
 }
 
 const MODES: { key: BenchmarkMode; label: string; hint: string }[] = [
-  { key: "normal", label: "Normal", hint: "Keyword → advertisers → their ads" },
-  { key: "company", label: "Company", hint: "Skip discovery, scan domains you give" },
-  { key: "extended", label: "Extended", hint: "Normal + landing-page teardown" },
+  { key: "keyword", label: "Keyword", hint: "Google Ads keyword search → advertisers + ads (Oxylabs)" },
+  { key: "company", label: "Company", hint: "Google Transparency report for a specific domain (SerpApi)" },
+  { key: "extended", label: "Extended", hint: "Keyword → domains → Transparency + OCR on all ad images" },
+  { key: "extended_company", label: "Extended Company", hint: "Transparency + OCR only, no keyword search (domain input)" },
 ];
 
 const STAGES = [
@@ -98,7 +99,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
   const [kwInput, setKwInput] = useState("");
   const [countryCode, setCountryCode] = useState(initialReport.query.countryCode);
   const [language, setLanguage] = useState(initialReport.query.language);
-  const [mode, setMode] = useState<BenchmarkMode>("normal");
+  const [mode, setMode] = useState<BenchmarkMode>("keyword");
   const [numKeywords, setNumKeywords] = useState(10);
   const [numCompetitors, setNumCompetitors] = useState(6);
 

@@ -9,7 +9,11 @@
 // No server-only imports here — safe to import from the client component.
 // ============================================================================
 
-export type BenchmarkMode = "normal" | "company" | "extended";
+// keyword   = Oxylabs keyword search only → structured ad report
+// company   = SerpApi Transparency only → ads for a specific domain
+// extended  = Oxylabs keyword → domains → SerpApi transparency + Firecrawl OCR
+// extended_company = SerpApi transparency + Firecrawl OCR (skip keyword search)
+export type BenchmarkMode = "keyword" | "company" | "extended" | "extended_company";
 
 /** A single competitor ad creative from the Google Ads Transparency Center. */
 export type LabAd = {

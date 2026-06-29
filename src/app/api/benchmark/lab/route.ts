@@ -37,9 +37,9 @@ function normalizeQuery(body: Record<string, unknown>): LabQuery {
     typeof body.language === "string" && body.language.trim()
       ? body.language.trim().toLowerCase()
       : country.lang;
-  const mode: BenchmarkMode = ["normal", "company", "extended"].includes(String(body.mode))
+  const mode: BenchmarkMode = ["keyword", "company", "extended", "extended_company"].includes(String(body.mode))
     ? (body.mode as BenchmarkMode)
-    : "normal";
+    : "keyword";
   const numKeywords = clampInt(body.numKeywords, 1, 25, keywords.length || 5);
   const numCompetitors = clampInt(body.numCompetitors, 1, 20, 6);
 

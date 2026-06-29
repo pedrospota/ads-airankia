@@ -1,6 +1,11 @@
 // Direct Google Ads REST API client — no MCP dependency
 
 import { recordCost } from "@/lib/cost-ledger";
+import {
+  dataForSeoConfigured,
+  dataForSeoKeywordIdeas,
+  dataForSeoForecast,
+} from "@/lib/dataforseo";
 
 const CUSTOMER_ID = process.env.GOOGLE_ADS_ACCOUNT_ID || "3531706003";
 const MCC_ID = process.env.GOOGLE_ADS_MCC_ID || "9539861409";
@@ -515,7 +520,26 @@ export async function generateKeywordIdeas(params: {
   }
 
   if (data.error || !Array.isArray(data.results)) {
-    params.onError?.(classifyAdsError(httpStatus, data.error ?? data));
+    const kpErr = classifyAdsError(httpStatus, data.error ?? data);
+    // When Google's Keyword Planner is blocked (Test-access 403 or quota) AND
+    // DataForSEO credentials are present, silently fall back to DataForSEO so
+    // callers get real data without knowing the difference. onError is only
+    // called when both providers fail (no data at all).
+    if (
+      (kpErr.kind === "access" || kpErr.kind === "quota") &&
+      dataForSeoConfigured()
+    ) {
+      const fb = await dataForSeoKeywordIdeas({
+        keywordSeeds: params.keywordSeeds,
+        urlSeed: params.urlSeed,
+        languageCode: params.languageCode,
+        countryCodes: params.countryCodes,
+        costContext: params.costContext,
+      });
+      if (fb.ok && fb.ideas.length > 0) return fb.ideas;
+      // DataForSEO also failed — report the original Google error upstream.
+    }
+    params.onError?.(kpErr);
     return [];
   }
 
@@ -771,7 +795,22 @@ export async function generateKeywordForecast(params: {
     return null;
   }
   if (!data || data.error || !data.campaignForecastMetrics) {
-    params.onError?.(classifyAdsError(httpStatus, data?.error ?? data));
+    const kpErr = classifyAdsError(httpStatus, data?.error ?? data);
+    if (
+      (kpErr.kind === "access" || kpErr.kind === "quota") &&
+      dataForSeoConfigured()
+    ) {
+      const fb = await dataForSeoForecast({
+        keywords: params.keywords,
+        languageCode: params.languageCode,
+        countryCodes: params.countryCodes,
+        maxCpcMicros: params.maxCpcMicros,
+        currencyCode: params.currencyCode,
+        costContext: params.costContext,
+      });
+      if (fb) return fb;
+    }
+    params.onError?.(kpErr);
     return null;
   }
 

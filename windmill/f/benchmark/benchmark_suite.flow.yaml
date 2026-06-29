@@ -1,0 +1,117 @@
+summary: Google Ads Benchmark Suite (Oxylabs + SerpApi + AI)
+description: >-
+  Port of Pedro's n8n workflow "google ads benchmark suite transaprency mcp".
+  Keyword -> real advertisers (Oxylabs google_ads) -> competitor ad creatives
+  (SerpApi Transparency Center) -> AI benchmark using the original agent prompt.
+  Modes: normal (keyword->ads), company (skip discovery, use given domains),
+  extended (adds Firecrawl landing scrape — TODO).
+value:
+  modules:
+    - id: discover
+      summary: Keyword -> advertisers (Oxylabs)
+      value:
+        type: rawscript
+        language: bun
+        content: "!inline oxylabs_keyword_ads.ts"
+        input_transforms:
+          keyword:
+            type: javascript
+            expr: flow_input.keyword
+          geo_location:
+            type: javascript
+            expr: flow_input.geo_location
+    - id: transparency
+      summary: Each advertiser -> ad creatives (SerpApi)
+      value:
+        type: forloopflow
+        skip_failures: true
+        parallel: true
+        iterator:
+          type: javascript
+          expr: "(results.discover.advertisers || []).slice(0, flow_input.num_competitors || 6)"
+        modules:
+          - id: trans_one
+            value:
+              type: rawscript
+              language: bun
+              content: "!inline serpapi_transparency.ts"
+              input_transforms:
+                domain:
+                  type: javascript
+                  expr: flow_input.iter.value
+                region:
+                  type: javascript
+                  expr: flow_input.region
+    - id: analyze
+      summary: AI benchmark (original agent prompt)
+      value:
+        type: rawscript
+        language: bun
+        content: "!inline analyze_benchmark.ts"
+        input_transforms:
+          keyword:
+            type: javascript
+            expr: flow_input.keyword
+          mode:
+            type: javascript
+            expr: flow_input.mode
+          advertisers:
+            type: javascript
+            expr: "results.discover.advertisers"
+          transparency:
+            type: javascript
+            expr: "results.transparency"
+          brand_language:
+            type: javascript
+            expr: flow_input.brand_language
+    - id: assemble
+      summary: Combine discover + transparency + analyze into one result
+      value:
+        type: rawscript
+        language: bun
+        content: "!inline assemble_report.ts"
+        input_transforms:
+          keyword:
+            type: javascript
+            expr: flow_input.keyword
+          advertisers:
+            type: javascript
+            expr: "results.discover.advertisers"
+          discover_ads:
+            type: javascript
+            expr: "results.discover.ads"
+          transparency:
+            type: javascript
+            expr: "results.transparency"
+          analyze:
+            type: javascript
+            expr: "results.analyze"
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  required:
+    - keyword
+  properties:
+    keyword:
+      type: string
+      description: Seed keyword to benchmark (e.g. "ai seo tools")
+    geo_location:
+      type: string
+      default: United States
+      description: Oxylabs geo_location (country name)
+    region:
+      type: string
+      default: ""
+      description: SerpApi transparency region code (e.g. 2840 = US); empty = anywhere
+    num_competitors:
+      type: integer
+      default: 6
+      description: Max advertisers to pull Transparency-Center creatives for (cost guard)
+    mode:
+      type: string
+      enum: [normal, company, extended]
+      default: normal
+    brand_language:
+      type: string
+      default: en
+      description: Output language (follows the brand's detected language)

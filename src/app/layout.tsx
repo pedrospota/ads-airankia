@@ -34,10 +34,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('ads-theme')||'dark';document.body.style.background=t==='dark'?'#0A0A0E':'#FFFFFF';document.body.style.color=t==='dark'?'#FAFAFA':'#111827';})()` }} />
-      </head>
       <body className="h-full antialiased" style={{ background: '#0A0A0E', color: '#FAFAFA' }}>
+        {/* Anti-FOUC: runs as the first body child so document.body exists (a
+            <head> script would see document.body === null and throw). Body
+            already defaults to dark inline; this only re-paints for light mode. */}
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('ads-theme')||'dark';document.body.style.background=t==='dark'?'#0A0A0E':'#FFFFFF';document.body.style.color=t==='dark'?'#FAFAFA':'#111827';}catch(e){}})()` }}
+        />
         <ThemeProvider>
           <ModeProvider>{children}</ModeProvider>
         </ThemeProvider>

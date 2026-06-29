@@ -33,7 +33,7 @@ import {
 import { languageName } from "@/lib/engine/types";
 import { benchmarkLlm } from "./llm";
 import { getBenchmarkConfig } from "./config";
-import { fetchCompetitorAds, discoverKeywordAdvertisers } from "./searchapi";
+import { fetchAds, discoverAdvertisers } from "./ad-spy";
 import { fetchPage, extractTracking, toDomain } from "./page-fetch";
 import { emitBenchmarkEvent } from "./events";
 import { estimateCompetitorSpend, summarizeSpend } from "./spend";
@@ -313,7 +313,7 @@ export async function runBenchmark(
     await stage(runId, "Discovering who advertises on your keyword", 9);
     let discovered = 0;
     for (const kw of seeds.keywords) {
-      const disc = await discoverKeywordAdvertisers(kw, country, cost, {
+      const disc = await discoverAdvertisers(kw, country, cost, {
         optIn: adSpy,
       });
       for (const d of disc.domains) {
@@ -587,7 +587,8 @@ async function analyzeCompetitor(
 
   // Ad-spy (PAID — runs only on the user's per-run opt-in or the admin gate;
   // returns status "off" without spending otherwise).
-  const adResult = await fetchCompetitorAds(domain, country, cost, { optIn: adSpy });
+  // Uses SerpApi (n8n parity) → SearchApi fallback — see ad-spy.ts.
+  const adResult = await fetchAds(domain, country, cost, { optIn: adSpy });
 
   const comp: BenchmarkCompetitor = {
     domain,

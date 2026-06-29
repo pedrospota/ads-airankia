@@ -374,7 +374,8 @@ async function runExtendedMode(
   query: LabQuery,
   cost: BenchmarkCostContext,
   skipKeywordSearch: boolean,
-  regionOverride: string | null = null
+  regionOverride: string | null = null,
+  skipOcr = false
 ): Promise<{ advertisers: LabAdvertiser[]; rawData: unknown[]; allImageUrls: string[] }> {
   const byDomain = new Map<string, LabAdvertiser>();
   const rawForLlm: unknown[] = [];
@@ -449,8 +450,9 @@ async function runExtendedMode(
     });
   }
 
-  // Step 3: Firecrawl OCR — all image URLs in parallel.
-  if (allImageUrls.length > 0) {
+  // Step 3: Firecrawl OCR — all image URLs in parallel. Skippable (the brand
+  // benchmark runs Oxylabs→domains→transparency only, no OCR).
+  if (!skipOcr && allImageUrls.length > 0) {
     const ocrMap = await ocrImagesBatch(allImageUrls);
     rawForLlm.push({
       step: "ocr",
@@ -471,13 +473,15 @@ async function runExtendedMode(
 export async function runBenchmarkLabInApp(
   query: LabQuery,
   cost?: BenchmarkCostContext,
-  regionOverride: string | null = null   // null = global (don't send region to SerpApi)
+  regionOverride: string | null = null,   // null = global (don't send region to SerpApi)
+  opts?: { skipOcr?: boolean }
 ): Promise<LabReport> {
   const costCtx: BenchmarkCostContext = cost ?? {
     userId: null, brandId: null, workspaceId: null, runId: null,
   };
 
   const mode: BenchmarkMode = query.mode;
+  const skipOcr = opts?.skipOcr ?? false;
   let result: { advertisers: LabAdvertiser[]; rawData: unknown[]; allImageUrls: string[] };
 
   switch (mode) {
@@ -485,10 +489,10 @@ export async function runBenchmarkLabInApp(
       result = await runCompanyMode(query, costCtx, regionOverride);
       break;
     case "extended":
-      result = await runExtendedMode(query, costCtx, false, regionOverride);
+      result = await runExtendedMode(query, costCtx, false, regionOverride, skipOcr);
       break;
     case "extended_company":
-      result = await runExtendedMode(query, costCtx, true, regionOverride);
+      result = await runExtendedMode(query, costCtx, true, regionOverride, skipOcr);
       break;
     case "keyword":
     default:

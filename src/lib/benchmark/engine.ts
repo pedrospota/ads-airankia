@@ -453,19 +453,25 @@ export async function runBenchmark(
   }
 
   // ---- 5b. Live ad-intelligence teardown (shared pipeline) -------------------
-  // Same Oxylabs→SerpApi→Firecrawl engine as /benchmark-lab, producing the rich
-  // strategist report in the brand's language. PAID, so gated behind the same
-  // opt-in as ad-spy. Fully wrapped — a failure becomes a missing section, never
-  // a dead run. Auto-picks the mode: keyword (Oxylabs) when we have seed
-  // keywords, company (Transparency) when we only have competitor domains.
+  // EXACTLY Pedro's flow: Oxylabs keyword search → the domains present in the ads
+  // → Google Ads Transparency for each of those domains → the strategist report.
+  // NO OCR ("no more than that"), NO adding domains to the brand's competitor
+  // list (this only reads the brand). Same engine as /benchmark-lab.
+  //
+  //   - "by a keyword" / auto with keywords → extended  (Oxylabs → domains → Transparency)
+  //   - "by a competitor" / only domains    → company   (Transparency on the given domains)
+  //
+  // PAID → runs only on the explicit opt-in. Capped + hard-timeout so it can
+  // never hang the run (the 90% freeze Pedro hit); a failure/timeout just drops
+  // the section, never kills the report.
   let adIntelligence: BenchmarkReport["adIntelligence"] = null;
   if (adSpy || config.liveEnabled) {
     try {
-      await stage(runId, "Reading competitors' live Google Ads", 90);
+      await stage(runId, "Reading competitors' live Google Ads", 92);
       const c = findCountry(country);
-      const labMode: BenchmarkMode = seeds.keywords.length ? "keyword" : "company";
+      const labMode: BenchmarkMode = seeds.keywords.length ? "extended" : "company";
       const labSeeds = seeds.keywords.length
-        ? seeds.keywords
+        ? seeds.keywords.slice(0, 3) // cap: a few keywords keeps Oxylabs fast
         : seeds.domains.length
           ? seeds.domains
           : [ctx.offering || ctx.name].filter(Boolean);
@@ -478,16 +484,22 @@ export async function runBenchmark(
           region: c.region,
           language: lang,
           mode: labMode,
-          numKeywords: Math.min(labSeeds.length, 10),
+          numKeywords: labSeeds.length,
           numCompetitors: config.maxCompetitors,
           transparency: seeds.transparency,
         };
-        const labReport = await runBenchmarkLabInApp(labQuery, cost);
-        if (labReport.analysis?.markdown) {
+        // Hard wall-clock cap so a slow Oxylabs/SerpApi/LLM can't freeze the run.
+        const labReport = await Promise.race([
+          runBenchmarkLabInApp(labQuery, cost, null, { skipOcr: true }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 150_000)),
+        ]);
+        if (labReport && labReport.analysis?.markdown) {
           adIntelligence = {
             markdown: labReport.analysis.markdown,
             generatedBy: labReport.analysis.model,
           };
+        } else if (!labReport) {
+          console.warn("[benchmark] ad-intelligence teardown timed out", runId);
         }
       }
     } catch (e) {

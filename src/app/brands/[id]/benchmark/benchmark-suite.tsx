@@ -122,9 +122,11 @@ export function BenchmarkSuite({
   const [entryMode, setEntryMode] = useState<EntryMode>("auto");
   const [manualKeyword, setManualKeyword] = useState("");
   const [manualDomain, setManualDomain] = useState("");
-  // Per-run opt-in to PAID live competitor-ad spying + keyword-advertiser
-  // discovery. OFF by default — a free run never spends.
-  const [adSpy, setAdSpy] = useState(false);
+  // The live competitor-ad analysis (Oxylabs → domains → Transparency) IS the
+  // core of the benchmark, so it's ON by default. It's PAID, so we still show it
+  // as an explicit, clearly-labelled consent the user can switch off for a free
+  // keyword-only preview — spend is never hidden, but never a surprise toggle.
+  const [adSpy, setAdSpy] = useState(true);
   // Optional market/language override. Empty = auto-detect from the brand (the
   // default — the user never has to choose).
   const [marketOverride, setMarketOverride] = useState("");
@@ -735,7 +737,7 @@ function EntryPanel({
           </span>
           <span>
             <span style={{ fontSize: 14, fontWeight: 700, display: "block", marginBottom: 2 }}>
-              Spy on live competitor ads{" "}
+              Live competitor ad analysis{" "}
               <span
                 style={{
                   fontSize: 10,
@@ -745,13 +747,13 @@ function EntryPanel({
                   color: colors.textFaint,
                 }}
               >
-                · paid
+                · on · paid
               </span>
             </span>
             <span style={{ fontSize: 12.5, color: colors.textMuted, lineHeight: 1.4, display: "block" }}>
-              {entryMode === "keyword"
-                ? "Pulls the real running ads from the Google Ads Transparency Center, and finds who actually advertises on your keyword (added to your competitor list)."
-                : "Pulls the real running ads from the Google Ads Transparency Center for each competitor. Without it, the analysis is fully free."}
+              {entryMode === "domain"
+                ? "Pulls each competitor domain's live creatives from the Google Ads Transparency Center. Switch off for a free keyword-only preview."
+                : "Finds the domains actually running ads on your keyword (Oxylabs), then pulls each one's live creatives from the Transparency Center. These domains are only analyzed for this report — never saved to your competitors. Switch off for a free preview."}
             </span>
           </span>
         </button>

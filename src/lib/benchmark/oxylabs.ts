@@ -34,21 +34,94 @@ export function oxylabsConfigured(): boolean {
 
 function toDomain(u?: string | null): string | null {
   if (!u) return null;
+  // url_shown comes back as "https://www.semrush.com › ai_search › seo_toolkit"
+  // (breadcrumb with spaces) — strip everything after the first space/breadcrumb
+  // so the URL parser doesn't choke and return null.
+  const clean = u.split(/[\s›|]/)[0]?.trim();
+  if (!clean) return null;
   try {
-    const h = new URL(u.startsWith("http") ? u : `https://${u}`).hostname;
+    const h = new URL(clean.startsWith("http") ? clean : `https://${clean}`).hostname;
     return h.replace(/^www\./, "").toLowerCase();
   } catch {
     return null;
   }
 }
 
+/**
+ * Pull campaign intelligence out of the Google `aclk` tracking URL (data_rw).
+ * The real value (campaign name, the keyword Google matched, match type) lives
+ * either on the outer aclk query string or, more often, inside the `adurl`
+ * param which is itself a full URL with its own query string. We read both.
+ * Never throws.
+ */
+function extractAclkMeta(dataRw?: string | null): {
+  campaign: string | null;
+  campaignLabel: string | null;
+  targetedKeyword: string | null;
+  matchType: string | null;
+} {
+  const empty = { campaign: null, campaignLabel: null, targetedKeyword: null, matchType: null };
+  if (!dataRw) return empty;
+  try {
+    const outer = new URL(dataRw);
+    const outerParams = outer.searchParams;
+    let innerParams: URLSearchParams | null = null;
+    const adurl = outerParams.get("adurl");
+    if (adurl) {
+      try {
+        innerParams = new URL(adurl).searchParams;
+      } catch {
+        // adurl can be partially encoded — pull the query part manually.
+        const q = adurl.split("?")[1];
+        if (q) innerParams = new URLSearchParams(q);
+      }
+    }
+    const pick = (keys: string[]): string | null => {
+      for (const k of keys) {
+        const v = innerParams?.get(k) ?? outerParams.get(k);
+        if (v && v.trim()) return decodeURIComponent(v.trim());
+      }
+      return null;
+    };
+    return {
+      campaign: pick(["g_campaign", "cmp", "utm_campaign", "hsa_cam"]),
+      campaignLabel: pick(["label", "g_acctid"]),
+      targetedKeyword: pick(["g_keyword", "kw", "utm_term", "hsa_kw"]),
+      matchType: pick(["matchtype", "hsa_mt"]),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export interface OxylabsSitelink {
+  title: string | null;
+  url: string | null;
+}
+
 export interface OxylabsAd {
   position: number | null;
+  positionOverall: number | null;
   title: string | null;
   description: string | null;
   displayedUrl: string | null;
+  /** The ad's actual landing page. */
   url: string | null;
+  /** The advertiser's root destination (from data_pcu). */
+  destinationUrl: string | null;
+  /** The raw Google aclk tracking URL (data_rw). */
+  trackingUrl: string | null;
   domain: string | null;
+  /** Campaign name decoded from the aclk URL (e.g. US_SRCH_AI_Toolkit_EN). */
+  campaign: string | null;
+  /** Campaign label decoded from the aclk URL (e.g. ai_toolkit). */
+  campaignLabel: string | null;
+  /** The keyword Google actually matched this ad to (from the aclk URL). */
+  targetedKeyword: string | null;
+  /** Match type (e = exact, p = phrase, b = broad). */
+  matchType: string | null;
+  /** Ad extensions (inline + expanded sitelinks). */
+  sitelinks: OxylabsSitelink[];
 }
 
 export interface OxylabsResult {
@@ -116,8 +189,22 @@ export async function oxylabsKeywordAds(
     const url =
       (a.url as string | null) ??
       (a.link as string | null) ??
-      (a.url_shown as string | null) ??
       null;
+    const pcu = a.data_pcu;
+    const destinationUrl =
+      Array.isArray(pcu) && typeof pcu[0] === "string" ? (pcu[0] as string) : null;
+    const trackingUrl = (a.data_rw as string | null) ?? null;
+    const meta = extractAclkMeta(trackingUrl);
+
+    // Sitelinks come as { inline:[{title,url}], expanded:[{title,url}] }.
+    const sl = a.sitelinks as
+      | { inline?: { title?: string; url?: string }[]; expanded?: { title?: string; url?: string }[] }
+      | undefined;
+    const sitelinks: OxylabsSitelink[] = [
+      ...(sl?.inline ?? []),
+      ...(sl?.expanded ?? []),
+    ].map((s) => ({ title: s.title ?? null, url: s.url ?? null }));
+
     return {
       position:
         typeof a.pos === "number"
@@ -125,6 +212,7 @@ export async function oxylabsKeywordAds(
           : typeof a.position === "number"
             ? a.position
             : null,
+      positionOverall: typeof a.pos_overall === "number" ? a.pos_overall : null,
       title:
         (a.title as string | null) ?? (a.headline as string | null) ?? null,
       description:
@@ -136,7 +224,15 @@ export async function oxylabsKeywordAds(
         (a.displayed_url as string | null) ??
         null,
       url,
-      domain: toDomain((a.url_shown as string | null) ?? url),
+      destinationUrl,
+      trackingUrl,
+      // Prefer the clean destination root / landing page over the breadcrumb url_shown.
+      domain: toDomain(destinationUrl ?? url ?? (a.url_shown as string | null)),
+      campaign: meta.campaign,
+      campaignLabel: meta.campaignLabel,
+      targetedKeyword: meta.targetedKeyword,
+      matchType: meta.matchType,
+      sitelinks,
     };
   });
 

@@ -18,13 +18,14 @@
 //   - Always return full image URLs (tpc.googlesyndication.com/...) never CR IDs
 //   - Top 5 oldest ads by days_active
 //   - Firecrawl OCR called in parallel on all image URLs
-//   - Final analysis: OpenRouter with Pedro's exact system prompt
+//   - Final analysis: the app's unified LLM layer (model/provider per /admin)
 // ============================================================================
 
 import { oxylabsKeywordAds } from "./oxylabs";
 import { serpApiTransparency } from "./serpapi-transparency";
 import { ocrImagesBatch } from "./firecrawl-ocr";
 import { computeAnalytics } from "./lab-analytics";
+import { benchmarkLlm } from "./llm";
 import type {
   LabAd,
   LabAdvertiser,
@@ -35,71 +36,69 @@ import type {
 } from "./lab-types";
 import type { BenchmarkCostContext } from "./types";
 
-// Pedro's exact system prompt from analyze_benchmark.ts
-const SYSTEM_PROMPT = `Act like a professional marketer doing a benchmark and uncovering competitors' Google Ads strategies.
+// Senior-strategist benchmark prompt — produces the rich, decision-ready report
+// format (landscape → per-competitor teardown → copy analysis → keyword mining →
+// positioning map), in the brand's language, from the real Oxylabs + SerpApi +
+// OCR data only.
+const SYSTEM_PROMPT = `Act like a senior performance-marketing strategist running a competitor benchmark to uncover rivals' Google Ads strategies. You receive RAW JSON from up to three real data sources:
+- Oxylabs (source: google_ads): the live PAID results on a keyword. Each ad has: title (headline), description (desc), landing page (url), root destination (destinationUrl), the decoded campaign + campaignLabel + targetedKeyword + matchType from the tracking URL, sitelinks, and position/positionOverall.
+- SerpApi (engine: google_ads_transparency_center): a domain's active ad creatives, each with first_shown/last_shown, total_days_shown (age in days), format, the FULL creative image URL, the advertiser legal name, and target_domain.
+- Firecrawl OCR: the text extracted from each ad image (keyed by image URL).
 
-You receive:
-- a keyword or company/domain,
-- the advertisers detected running ads (from Oxylabs google_ads when keyword mode),
-- each advertiser's Transparency-Center ad creatives (from SerpApi).
+Write the report in the brand's language. Use GitHub-flavored Markdown. Use ONLY the real data provided — never invent advertisers, numbers, URLs or quotes. If a field is missing, omit it gracefully. Produce EXACTLY these sections, in this order:
 
-Produce a structured benchmark in the brand's language with EXACTLY this format:
+# Competitive Intelligence Report
 
-## Benchmark Report
+## Competitive Landscape Overview
+Country analyzed · search query (or domain) · total ads found · total unique competitors (domains) · average ad age in days (ONLY when transparency data is present).
 
-**Total ads analyzed:** X
-**Country analyzed:** [country or Global if no region filter]
-**Average ad age:** X days
+## Top Competitors & Their Ad Strategies
+For EACH competitor (ranked by ad presence / position) a compact table with rows: Ad Position, Main Headline, Description, Landing Page, Campaign Label (decoded from the tracking URL when present), Key USPs, Sitelinks, Calls to Action detected.
 
----
+## Top 5 Oldest Ads (longest-running = proven winners)
+ONLY when transparency data is present. For each: the FULL creative image URL (https://tpc.googlesyndication.com/...), days active, advertiser, landing URL, and any text extracted from the image via OCR.
 
-### Top 5 Oldest Ads (longest running)
-For each: full image URL (https://tpc.googlesyndication.com/...) - X days active - landing URL
+## Ad Copy & Headlines Analysis
+A "Most Used Words in Headlines" table (Word | Frequency | % of ads) and a "Most Used Words in Descriptions" table (Word | Frequency | % of ads). Exclude generic stopwords.
 
----
+## Keyword Ranking Recommendations
+At least 10 keywords mined from the most-used terms across headlines/descriptions and the targetedKeyword fields. Split into High-Priority and Niche, ranked by commercial intent.
 
-### Legal Entities Running Ads
-List all advertiser legal names found.
+## Brand vs. Competitor Strategy
+State Yes/No whether any advertiser bids on competitor brand terms or positions against rivals, with the evidence.
 
----
+## Landing Page Strategy Insights
+Table: Competitor | Landing Page | Offer / Strategy.
 
-### Ad Creatives Analysis
-**Headlines & Descriptions:**
-List each unique headline/description, how many ads contain it, percentage of total.
+## Strategic Recommendations
+Headlines that win (patterns from the winners) · description angles to test · sitelinks you need · gaps to exploit (what NO competitor is doing).
 
----
+## Competitive Positioning Map
+A simple ASCII quadrant placing the competitors (e.g. feature complexity vs price, or breadth vs speed).
 
-### Landing URLs
-List all final destination URLs found in ads.
+## Legal Entities / Brands Running Ads
+Every advertiser domain with its legal entity name (from transparency advertiser_legal_name when available).
 
----
+HARD RULES:
+- ALWAYS output FULL image URLs (https://tpc.googlesyndication.com/archive/simgad/...). NEVER output CR IDs like CR12154176544763281409.
+- Extract the real landing/destination URLs and campaign labels from the data.
+- Percentages must be computed from the real counts.
+- Keep it concrete and decision-ready — the kind of teardown a strategist hands a client.`;
 
-### Calls to Action
-List CTAs found, with frequency and percentage.
-
----
-
-### Keyword Recommendations (min 10)
-Based on most-used terms in headlines/descriptions, list at least 10 keywords to use in Google Ads campaigns. Ranked by relevance.
-
----
-
-### Brand Competitor Ads
-Yes/No — are any ads targeting competitor brand keywords? List them if yes.
-
----
-
-### Strategic Summary
-Brief professional analysis of competitors' strategy.
-
-IMPORTANT:
-- Always return FULL image URLs like https://tpc.googlesyndication.com/archive/simgad/... NEVER return CR IDs like CR12154176544763281409
-- Extract real landing/destination URLs from ad data
-- Be concrete, use only real data provided, do not invent anything`;
-
-function openRouterKey(): string | null {
-  return process.env.OPENROUTER_API_KEY?.trim() || process.env.OPENROUTER_KEY?.trim() || null;
-}
+// Single-string structured output so the report flows through callStructured()
+// (which enforces provider routing, deadlines and cost metering) cleanly.
+const REPORT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    report: {
+      type: "string",
+      description:
+        "The complete competitor-intelligence benchmark report in GitHub-flavored Markdown, in the brand's language, following the exact section structure from the system prompt.",
+    },
+  },
+  required: ["report"],
+};
 
 export function labRunnerConfigured(): boolean {
   const hasOxylabs =
@@ -182,49 +181,37 @@ function rawToLabAd(c: RawTransCreative, domain: string, keyword: string): LabAd
 }
 
 // ---------------------------------------------------------------------------
-// OpenRouter analysis with Pedro's exact system prompt.
-// Non-fatal — returns null if LLM call fails (deterministic data still returned).
+// Strategic teardown via the app's unified LLM layer (model/provider per /admin,
+// cost metered). Non-fatal — returns null if the LLM call fails so the
+// deterministic dashboard data is still returned.
 // ---------------------------------------------------------------------------
-async function analyzeWithOpenRouter(
-  input: string,
+async function analyze(
+  query: LabQuery,
   mode: BenchmarkMode,
-  advertisers: string[],
-  transparencyData: unknown[],
-  ocrTexts: Record<string, string>,
-  language: string
+  advertiserDomains: string[],
+  rawData: unknown[],
+  cost: BenchmarkCostContext
 ): Promise<{ model: string; markdown: string } | null> {
-  const key = openRouterKey();
-  if (!key) return null;
-
-  const model = "anthropic/claude-opus-4-5";
-  const payload = JSON.stringify(
-    { input, mode, advertisers, transparency: transparencyData, ocr_texts: ocrTexts },
-    null,
-    2
-  );
-
   try {
-    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content: `${SYSTEM_PROMPT}\n\nOutput language: ${language}.`,
-          },
-          { role: "user", content: `Benchmark data:\n${payload}` },
-        ],
-      }),
-      signal: AbortSignal.timeout(90000),
+    const data = await benchmarkLlm<{ report: string }>({
+      tier: "opus",
+      system: `${SYSTEM_PROMPT}\n\nOutput language: ${query.language}.`,
+      prompt:
+        `INPUT: ${query.keywords.join(", ")}\n` +
+        `MODE: ${mode}\n` +
+        `COUNTRY: ${query.countryName}\n` +
+        `COMPETITOR DOMAINS: ${advertiserDomains.join(", ") || "(discovered from the data below)"}\n\n` +
+        `RAW DATA (Oxylabs google_ads + SerpApi transparency + Firecrawl OCR):\n` +
+        JSON.stringify(rawData, null, 2),
+      schema: REPORT_SCHEMA,
+      toolName: "deliver_benchmark_report",
+      toolDescription: "Return the finished competitor-intelligence benchmark report as Markdown.",
+      maxTokens: 8000,
+      stage: "benchmark_report",
+      cost,
     });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const markdown = data?.choices?.[0]?.message?.content?.trim() ?? "";
-    return markdown ? { model, markdown } : null;
+    const markdown = data?.report?.trim() ?? "";
+    return markdown ? { model: "Claude · Opus tier (provider per /admin)", markdown } : null;
   } catch {
     return null;
   }
@@ -487,21 +474,14 @@ export async function runBenchmarkLabInApp(
 
   const { advertisers, rawData, allImageUrls } = result;
 
-  // OCR texts already embedded in rawData for extended modes. Build a lookup for the LLM.
-  const ocrEntry = rawData.find((d) => (d as Record<string, unknown>).step === "ocr") as
-    | { texts?: Record<string, string> }
-    | undefined;
-  const ocrTexts = ocrEntry?.texts ?? {};
-
-  // OpenRouter analysis.
-  const inputLabel = query.keywords.join(", ");
-  const analysis = await analyzeWithOpenRouter(
-    inputLabel,
+  // Strategic teardown via the unified LLM layer (OCR text is already embedded
+  // in rawData for the extended modes, so the model sees it directly).
+  const analysis = await analyze(
+    query,
     mode,
     advertisers.map((a) => a.domain),
     rawData,
-    ocrTexts,
-    query.language
+    costCtx
   );
 
   // Aggregate stats.

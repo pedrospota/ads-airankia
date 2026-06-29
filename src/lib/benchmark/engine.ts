@@ -259,6 +259,12 @@ export async function runBenchmark(
   }
 ): Promise<void> {
   const adSpy = seeds.adSpy === true;
+  // When the live competitor-ad analysis runs (Pedro's Oxylabs→domains→Transparency
+  // pipeline below), it IS the benchmark — so we skip the old engine's heavy,
+  // slow, LLM-per-competitor landing teardowns and strategy synthesis (they were
+  // the 90% freeze and the "noise" Pedro doesn't want). The teardown report is
+  // the single source of truth.
+  const skipHeavyEngine = adSpy;
   const cost: BenchmarkCostContext = {
     userId: ctx.userId,
     brandId: ctx.brandId,
@@ -316,7 +322,7 @@ export async function runBenchmark(
     domainSource.set(manualDomain, "manual");
   }
 
-  if (adSpy && seeds.keywords.length) {
+  if (!skipHeavyEngine && adSpy && seeds.keywords.length) {
     await stage(runId, "Discovering who advertises on your keyword", 9);
     let discovered = 0;
     for (const kw of seeds.keywords) {
@@ -343,33 +349,35 @@ export async function runBenchmark(
   // Saved-list + manual domains keep priority (inserted first); discovered ones
   // fill the remaining slots up to the cost cap.
   const competitors: BenchmarkCompetitor[] = [];
-  const domains = [...domainSource.keys()].slice(0, config.maxCompetitors);
-  const spanStart = 18;
-  const spanEnd = 72;
+  if (!skipHeavyEngine) {
+    const domains = [...domainSource.keys()].slice(0, config.maxCompetitors);
+    const spanStart = 18;
+    const spanEnd = 72;
 
-  for (let i = 0; i < domains.length; i++) {
-    const domain = domains[i];
-    const source = domainSource.get(domain) ?? "brand_profile";
-    const progress =
-      spanStart + Math.round(((i + 0.5) / Math.max(1, domains.length)) * (spanEnd - spanStart));
-    await stage(
-      runId,
-      `Analyzing competitor ${i + 1} of ${domains.length}: ${domain}`,
-      progress
-    );
+    for (let i = 0; i < domains.length; i++) {
+      const domain = domains[i];
+      const source = domainSource.get(domain) ?? "brand_profile";
+      const progress =
+        spanStart + Math.round(((i + 0.5) / Math.max(1, domains.length)) * (spanEnd - spanStart));
+      await stage(
+        runId,
+        `Analyzing competitor ${i + 1} of ${domains.length}: ${domain}`,
+        progress
+      );
 
-    const comp = await analyzeCompetitor(
-      domain,
-      ctx,
-      country,
-      currency,
-      cost,
-      source,
-      adSpy,
-      onPlannerError
-    );
-    competitors.push(comp);
-    await emitBenchmarkEvent(runId, "partial", { kind: "competitor", competitor: comp });
+      const comp = await analyzeCompetitor(
+        domain,
+        ctx,
+        country,
+        currency,
+        cost,
+        source,
+        adSpy,
+        onPlannerError
+      );
+      competitors.push(comp);
+      await emitBenchmarkEvent(runId, "partial", { kind: "competitor", competitor: comp });
+    }
   }
 
   // ---- 3. Keyword gaps (competitor footprint minus brand footprint) ----------
@@ -400,6 +408,17 @@ export async function runBenchmark(
       summary:
         planner.error?.message ??
         "Real keyword data isn't available yet, so we're not generating a full strategy on top of empty numbers. The competitor landing-page teardowns below are still complete.",
+      positioning: "",
+      opportunities: [],
+      threats: [],
+      recommendedKeywords: [],
+      recommendedAngles: [],
+    };
+  } else if (skipHeavyEngine) {
+    // The live ad teardown below IS the strategy — skip the slow LLM synthesis
+    // (it was timing out at 90% and is exactly the "noise" Pedro asked to drop).
+    strategy = {
+      summary: "",
       positioning: "",
       opportunities: [],
       threats: [],
@@ -491,7 +510,7 @@ export async function runBenchmark(
         // Hard wall-clock cap so a slow Oxylabs/SerpApi/LLM can't freeze the run.
         const labReport = await Promise.race([
           runBenchmarkLabInApp(labQuery, cost, null, { skipOcr: true }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 150_000)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 180_000)),
         ]);
         if (labReport && labReport.analysis?.markdown) {
           adIntelligence = {
@@ -522,7 +541,7 @@ export async function runBenchmark(
     adIntelligence,
     spendSummary: summarizeSpend(competitors.map((c) => c.spend), currency),
     meta: {
-      liveAdSpy: competitors.some((c) => c.adsStatus === "ok"),
+      liveAdSpy: adIntelligence !== null || competitors.some((c) => c.adsStatus === "ok"),
       domainsAnalyzed: competitors.length,
       keywordsDiscovered:
         brandKeywords.length +

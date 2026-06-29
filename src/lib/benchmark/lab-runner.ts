@@ -185,13 +185,81 @@ function rawToLabAd(c: RawTransCreative, domain: string, keyword: string): LabAd
 // cost metered). Non-fatal — returns null if the LLM call fails so the
 // deterministic dashboard data is still returned.
 // ---------------------------------------------------------------------------
+// Huge fields that bloat the prompt (Google tracking/aclk URLs, preview scripts)
+// without helping the report — dropped before the data is sent to the LLM. The
+// untrimmed payload was timing the model out (70s deadline) → empty reports.
+const HUGE_KEYS = new Set([
+  "data_rw", "trackingUrl", "details_script_link", "details_link", "data_pcu",
+  "references", "favicon", "details_script", "link",
+]);
+const TEXT_KEYS = new Set(["description", "desc", "body", "text", "snippet"]);
+
+function trimForPrompt(v: unknown, depth = 0): unknown {
+  if (depth > 7) return undefined;
+  if (Array.isArray(v)) return v.slice(0, 12).map((x) => trimForPrompt(x, depth + 1));
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (HUGE_KEYS.has(k)) continue;
+      if (TEXT_KEYS.has(k) && typeof val === "string" && val.length > 280) {
+        out[k] = val.slice(0, 280) + "…";
+      } else {
+        const w = trimForPrompt(val, depth + 1);
+        if (w !== undefined) out[k] = w;
+      }
+    }
+    return out;
+  }
+  return v;
+}
+
+// Deterministic Markdown report straight from the structured advertiser data —
+// the safety net when the LLM is unavailable/slow, so the benchmark NEVER comes
+// back with an empty teardown.
+function buildDeterministicReport(query: LabQuery, advertisers: LabAdvertiser[]): string {
+  const allAds = advertisers.flatMap((a) => a.oldestTop5);
+  const days = allAds.map((a) => a.daysActive ?? 0).filter((n) => n > 0);
+  const avg = days.length ? Math.round(days.reduce((s, n) => s + n, 0) / days.length) : 0;
+  const totalAds = advertisers.reduce((n, a) => n + a.totalAds, 0);
+  const lines: string[] = [];
+  lines.push(`# Competitive Intelligence Report`, ``);
+  lines.push(`## Competitive Landscape Overview`);
+  lines.push(`- **Query / input:** ${query.keywords.join(", ")}`);
+  lines.push(`- **Country analyzed:** ${query.countryName}`);
+  lines.push(`- **Total ads found:** ${totalAds}`);
+  lines.push(`- **Competitors (domains):** ${advertisers.length}`);
+  if (avg > 0) lines.push(`- **Average ad age:** ${avg} days`);
+  lines.push(``);
+  lines.push(`## Competitors & Their Ads`);
+  for (const a of advertisers) {
+    lines.push(``, `### ${a.domain} — ${a.totalAds} ad(s)`);
+    const legal = a.oldestTop5.find((ad) => ad.legalName)?.legalName;
+    if (legal) lines.push(`Legal entity: ${legal}`);
+    for (const ad of a.oldestTop5.slice(0, 5)) {
+      const bits: string[] = [];
+      if (ad.headline) bits.push(`**${ad.headline}**`);
+      if (ad.daysActive) bits.push(`${ad.daysActive} days active`);
+      if (ad.imageUrl) bits.push(ad.imageUrl);
+      if (ad.detailsLink) bits.push(ad.detailsLink);
+      lines.push(`- ${bits.join(" · ") || "(creative)"}`);
+    }
+  }
+  lines.push(``, `_Note: the AI narrative was unavailable, so this is the raw structured data straight from Oxylabs + the Transparency Center._`);
+  return lines.join("\n");
+}
+
 async function analyze(
   query: LabQuery,
   mode: BenchmarkMode,
-  advertiserDomains: string[],
+  advertisers: LabAdvertiser[],
   rawData: unknown[],
   cost: BenchmarkCostContext
 ): Promise<{ model: string; markdown: string } | null> {
+  const domains = advertisers.map((a) => a.domain);
+  // Bound the payload so the model answers within its deadline.
+  let payload = JSON.stringify(trimForPrompt(rawData));
+  if (payload.length > 48_000) payload = payload.slice(0, 48_000) + "\n…(truncated)";
+
   try {
     const data = await benchmarkLlm<{ report: string }>({
       tier: "opus",
@@ -200,9 +268,9 @@ async function analyze(
         `INPUT: ${query.keywords.join(", ")}\n` +
         `MODE: ${mode}\n` +
         `COUNTRY: ${query.countryName}\n` +
-        `COMPETITOR DOMAINS: ${advertiserDomains.join(", ") || "(discovered from the data below)"}\n\n` +
-        `RAW DATA (Oxylabs google_ads + SerpApi transparency + Firecrawl OCR):\n` +
-        JSON.stringify(rawData, null, 2),
+        `COMPETITOR DOMAINS: ${domains.join(", ") || "(discovered from the data below)"}\n\n` +
+        `RAW DATA (Oxylabs google_ads + SerpApi transparency${mode.startsWith("extended") ? " + Firecrawl OCR" : ""}):\n` +
+        payload,
       schema: REPORT_SCHEMA,
       toolName: "deliver_benchmark_report",
       toolDescription: "Return the finished competitor-intelligence benchmark report as Markdown.",
@@ -211,10 +279,16 @@ async function analyze(
       cost,
     });
     const markdown = data?.report?.trim() ?? "";
-    return markdown ? { model: "Claude · Opus tier (provider per /admin)", markdown } : null;
-  } catch {
-    return null;
+    if (markdown) return { model: "Claude · Opus tier (provider per /admin)", markdown };
+  } catch (e) {
+    console.error("[benchmark-lab] report LLM failed, using deterministic fallback", e);
   }
+
+  // LLM down/slow → never return an empty teardown.
+  if (advertisers.length > 0) {
+    return { model: "Deterministic (AI narrative unavailable)", markdown: buildDeterministicReport(query, advertisers) };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,9 +459,12 @@ async function runExtendedMode(
   let discoveredDomains: string[] = [];
 
   if (!skipKeywordSearch) {
-    // Step 1: Oxylabs — keyword → advertiser domains.
-    for (const keyword of query.keywords) {
-      const result = await oxylabsKeywordAds(keyword, query.geo, cost);
+    // Step 1: Oxylabs — keyword → advertiser domains. In PARALLEL (was sequential,
+    // which stacked up wall-clock and helped freeze the brand run).
+    const oxyResults = await Promise.all(
+      query.keywords.map((keyword) => oxylabsKeywordAds(keyword, query.geo, cost))
+    );
+    for (const result of oxyResults) {
       rawForLlm.push({ step: "oxylabs", ...result });
       for (const domain of result.advertisers) {
         if (!discoveredDomains.includes(domain)) discoveredDomains.push(domain);
@@ -504,13 +581,7 @@ export async function runBenchmarkLabInApp(
 
   // Strategic teardown via the unified LLM layer (OCR text is already embedded
   // in rawData for the extended modes, so the model sees it directly).
-  const analysis = await analyze(
-    query,
-    mode,
-    advertisers.map((a) => a.domain),
-    rawData,
-    costCtx
-  );
+  const analysis = await analyze(query, mode, advertisers, rawData, costCtx);
 
   // Aggregate stats.
   const allAds = advertisers.flatMap((a) => a.oldestTop5);

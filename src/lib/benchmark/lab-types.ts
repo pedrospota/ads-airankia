@@ -57,6 +57,29 @@ export type LabSource = {
   live: boolean; // true = real call, false = demo sample
 };
 
+/**
+ * Manual Google Ads Transparency Center parameters (SerpApi / SearchApi).
+ * Everything is optional — when omitted we follow Pedro's rule: NO region by
+ * default (global), text/domain auto-derived, max ads. Power users set these
+ * explicitly in the Lab's advanced panel.
+ */
+export type TransparencyParams = {
+  /** Geo code (e.g. "2840" for the US). Absent/empty = global (anywhere). */
+  region?: string | null;
+  /** SEARCH | MAPS | YOUTUBE | GOOGLEPLAY — omit for all platforms. */
+  platform?: string | null;
+  /** text | image | video — omit for all formats. */
+  creativeFormat?: string | null;
+  /** Look up by a specific advertiser id (AR…) instead of the domain text. */
+  advertiserId?: string | null;
+  /** Custom range start, format YYYYMMDD. */
+  startDate?: string | null;
+  /** Custom range end, format YYYYMMDD. */
+  endDate?: string | null;
+  /** Max creatives to pull (1–100, default 100). */
+  num?: number | null;
+};
+
 export type LabQuery = {
   keywords: string[];
   countryCode: string;
@@ -67,6 +90,8 @@ export type LabQuery = {
   mode: BenchmarkMode;
   numKeywords: number;
   numCompetitors: number;
+  /** Optional manual Transparency-Center params (Lab advanced panel). */
+  transparency?: TransparencyParams;
 };
 
 /** A frequency stat with its share of the whole (count + percentage). */
@@ -138,4 +163,5 @@ export type LabRunInput = {
   mode: BenchmarkMode;
   numKeywords: number;
   numCompetitors: number;
+  transparency?: TransparencyParams;
 };

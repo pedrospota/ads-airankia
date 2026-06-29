@@ -82,25 +82,43 @@ function mapCreative(c: RawCreative, domain: string): CompetitorAd {
  * user explicitly requests a specific country.
  * Never throws — any failure yields { status:"error", ads:[] }.
  */
+/** Optional manual filters mirroring Pedro's n8n SerpApi node parameters. */
+export interface SerpApiTransparencyOpts {
+  platform?: string | null;       // SEARCH | MAPS | YOUTUBE | GOOGLEPLAY
+  creativeFormat?: string | null; // text | image | video
+  advertiserId?: string | null;   // AR… (used instead of free-text domain)
+  startDate?: string | null;      // YYYYMMDD
+  endDate?: string | null;        // YYYYMMDD
+  num?: number | null;            // 1–100
+}
+
 export async function serpApiTransparency(
   domain: string,
   region: string | null,   // null = don't filter by region (global)
   cost: BenchmarkCostContext,
-  maxAds = 12
+  maxAds = 12,
+  opts?: SerpApiTransparencyOpts
 ): Promise<SerpApiTransparencyResult> {
   const key = serpApiKey();
   if (!key) {
     return { status: "off", domain, region: region ?? "global", totalAds: 0, ads: [], rawCreatives: [] };
   }
 
+  const num = Math.max(1, Math.min(100, Math.round(opts?.num ?? 100)));
   const qs = new URLSearchParams({
     engine: "google_ads_transparency_center",
     text: domain,
     api_key: key,
-    num: "100",
+    num: String(num),
   });
   // Only send region when explicitly requested — omitting it returns global results.
   if (region) qs.set("region", region);
+  // Manual filters — only sent when present (Pedro's rule: omit by default).
+  if (opts?.advertiserId) qs.set("advertiser_id", opts.advertiserId);
+  if (opts?.platform) qs.set("platform", opts.platform);
+  if (opts?.creativeFormat) qs.set("creative_format", opts.creativeFormat);
+  if (opts?.startDate) qs.set("start_date", opts.startDate);
+  if (opts?.endDate) qs.set("end_date", opts.endDate);
 
   let data: { ad_creatives?: RawCreative[]; ads?: RawCreative[] } | undefined;
   try {

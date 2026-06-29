@@ -26,6 +26,7 @@ import type {
   LabReport,
   LabSource,
   LabStat,
+  TransparencyParams,
 } from "@/lib/benchmark/lab-types";
 
 type Colors = ReturnType<typeof useTheme>["colors"];
@@ -102,6 +103,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
   const [mode, setMode] = useState<BenchmarkMode>("keyword");
   const [numKeywords, setNumKeywords] = useState(10);
   const [numCompetitors, setNumCompetitors] = useState(6);
+  const [transparency, setTransparency] = useState<TransparencyParams>({});
 
   const [loading, setLoading] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);
@@ -166,7 +168,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
         headers: { "content-type": "application/json" },
         credentials: "include",
         signal: ac.signal,
-        body: JSON.stringify({ keywords: finalKws, countryCode, language, mode, numKeywords, numCompetitors }),
+        body: JSON.stringify({ keywords: finalKws, countryCode, language, mode, numKeywords, numCompetitors, transparency }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
@@ -181,7 +183,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
         abortRef.current = null;
       }
     }
-  }, [keywords, kwInput, countryCode, language, mode, numKeywords, numCompetitors]);
+  }, [keywords, kwInput, countryCode, language, mode, numKeywords, numCompetitors, transparency]);
 
   return (
     <div style={{ minHeight: "100vh", background: colors.bg }}>
@@ -229,6 +231,8 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
           setNumKeywords={setNumKeywords}
           numCompetitors={numCompetitors}
           setNumCompetitors={setNumCompetitors}
+          transparency={transparency}
+          setTransparency={setTransparency}
           loading={loading}
           onRun={run}
         />
@@ -285,6 +289,8 @@ function ConfigPanel(props: {
   setNumKeywords: (n: number) => void;
   numCompetitors: number;
   setNumCompetitors: (n: number) => void;
+  transparency: TransparencyParams;
+  setTransparency: (t: TransparencyParams) => void;
   loading: boolean;
   onRun: () => void;
 }) {
@@ -308,6 +314,9 @@ function ConfigPanel(props: {
     padding: "10px 12px",
     outline: "none",
   };
+  // company / extended_company are seeded with DOMAINS (Transparency only accepts
+  // domains); keyword / extended are seeded with keywords (Oxylabs search).
+  const isDomainInput = props.mode === "company" || props.mode === "extended_company";
 
   return (
     <div
@@ -318,8 +327,8 @@ function ConfigPanel(props: {
         padding: 22,
       }}
     >
-      {/* Keywords */}
-      <label style={labelStyle}>Keywords</label>
+      {/* Keywords (or domains, for company / extended_company modes) */}
+      <label style={labelStyle}>{isDomainInput ? "Competitor domains" : "Keywords"}</label>
       <div
         style={{
           display: "flex",
@@ -377,7 +386,13 @@ function ConfigPanel(props: {
               props.setKwInput("");
             }
           }}
-          placeholder={props.keywords.length ? "Add another…" : "e.g. ai seo tools, keyword research"}
+          placeholder={
+            props.keywords.length
+              ? "Add another…"
+              : isDomainInput
+                ? "e.g. semrush.com, jasper.ai"
+                : "e.g. ai seo tools, keyword research"
+          }
           style={{ flex: 1, minWidth: 160, background: "transparent", border: "none", outline: "none", color: colors.text, fontSize: 14, padding: "5px 4px" }}
         />
       </div>
@@ -436,6 +451,108 @@ function ConfigPanel(props: {
           </div>
         </div>
       </div>
+
+      {/* Advanced: manual Transparency-Center parameters (company / extended modes) */}
+      {props.mode !== "keyword" && (
+        <details style={{ marginTop: 18 }}>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontSize: 11.5,
+              fontWeight: 700,
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              color: colors.textMuted,
+            }}
+          >
+            Transparency parameters · manual (optional)
+          </summary>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginTop: 14 }}>
+            <div>
+              <label style={labelStyle}>Region (geo code)</label>
+              <input
+                value={props.transparency.region ?? ""}
+                onChange={(e) => props.setTransparency({ ...props.transparency, region: e.target.value })}
+                placeholder="empty = global · e.g. 2840"
+                style={fieldStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Platform</label>
+              <select
+                value={props.transparency.platform ?? ""}
+                onChange={(e) => props.setTransparency({ ...props.transparency, platform: e.target.value || null })}
+                style={fieldStyle}
+              >
+                <option value="">All platforms</option>
+                <option value="SEARCH">Search</option>
+                <option value="MAPS">Maps</option>
+                <option value="YOUTUBE">YouTube</option>
+                <option value="GOOGLEPLAY">Google Play</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Creative format</label>
+              <select
+                value={props.transparency.creativeFormat ?? ""}
+                onChange={(e) => props.setTransparency({ ...props.transparency, creativeFormat: e.target.value || null })}
+                style={fieldStyle}
+              >
+                <option value="">All formats</option>
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+                <option value="video">Video</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Advertiser ID</label>
+              <input
+                value={props.transparency.advertiserId ?? ""}
+                onChange={(e) => props.setTransparency({ ...props.transparency, advertiserId: e.target.value })}
+                placeholder="AR… (optional)"
+                style={fieldStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Start date</label>
+              <input
+                value={props.transparency.startDate ?? ""}
+                onChange={(e) => props.setTransparency({ ...props.transparency, startDate: e.target.value })}
+                placeholder="YYYYMMDD"
+                style={fieldStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>End date</label>
+              <input
+                value={props.transparency.endDate ?? ""}
+                onChange={(e) => props.setTransparency({ ...props.transparency, endDate: e.target.value })}
+                placeholder="YYYYMMDD"
+                style={fieldStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Max ads (1–100)</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={props.transparency.num ?? 100}
+                onChange={(e) =>
+                  props.setTransparency({
+                    ...props.transparency,
+                    num: e.target.value === "" ? null : Number(e.target.value),
+                  })
+                }
+                style={fieldStyle}
+              />
+            </div>
+          </div>
+          <span style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 8, display: "block" }}>
+            Blank = safe defaults (no region → global, all platforms &amp; formats, 100 ads). Region is only sent when you set it.
+          </span>
+        </details>
+      )}
 
       {/* Row: counts + run */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 16, marginTop: 18 }}>

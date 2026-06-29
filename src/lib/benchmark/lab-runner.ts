@@ -22,7 +22,7 @@
 // ============================================================================
 
 import { oxylabsKeywordAds } from "./oxylabs";
-import { serpApiTransparency } from "./serpapi-transparency";
+import { serpApiTransparency, type SerpApiTransparencyOpts } from "./serpapi-transparency";
 import { ocrImagesBatch } from "./firecrawl-ocr";
 import { computeAnalytics } from "./lab-analytics";
 import { benchmarkLlm } from "./llm";
@@ -284,6 +284,28 @@ async function runKeywordMode(
 // Input: domain(s). Returns creatives for each domain.
 // NOTE: Transparency report ONLY accepts domains, not company names.
 // ---------------------------------------------------------------------------
+
+// Resolve the effective Transparency params for a run: manual values from the
+// Lab's advanced panel win; otherwise NO region (global) per Pedro's rule.
+function serpParamsFor(
+  query: LabQuery,
+  regionOverride: string | null
+): { region: string | null; num: number; opts: SerpApiTransparencyOpts } {
+  const t = query.transparency ?? {};
+  return {
+    region: (t.region && t.region.trim()) || regionOverride || null,
+    num: t.num ?? 100,
+    opts: {
+      platform: t.platform ?? null,
+      creativeFormat: t.creativeFormat ?? null,
+      advertiserId: t.advertiserId ?? null,
+      startDate: t.startDate ?? null,
+      endDate: t.endDate ?? null,
+      num: t.num ?? null,
+    },
+  };
+}
+
 async function runCompanyMode(
   query: LabQuery,
   cost: BenchmarkCostContext,
@@ -292,6 +314,7 @@ async function runCompanyMode(
   const byDomain = new Map<string, LabAdvertiser>();
   const rawForLlm: unknown[] = [];
   const allImageUrls: string[] = [];
+  const { region, num, opts } = serpParamsFor(query, regionOverride);
 
   // In company mode, the "keywords" field holds the domain(s) to look up.
   const domains = query.keywords.slice(0, query.numCompetitors);
@@ -305,7 +328,7 @@ async function runCompanyMode(
       .toLowerCase()
       .trim();
 
-    const result = await serpApiTransparency(cleanDomain, regionOverride, cost, 100);
+    const result = await serpApiTransparency(cleanDomain, region, cost, num, opts);
     const rawAds = result.rawCreatives as RawTransCreative[];
 
     const labAds: LabAd[] = rawAds.map((c) => {
@@ -356,6 +379,7 @@ async function runExtendedMode(
   const byDomain = new Map<string, LabAdvertiser>();
   const rawForLlm: unknown[] = [];
   const allImageUrls: string[] = [];
+  const { region, num, opts } = serpParamsFor(query, regionOverride);
 
   let discoveredDomains: string[] = [];
 
@@ -382,7 +406,7 @@ async function runExtendedMode(
   // Step 2: SerpApi Transparency per domain + collect image URLs — in parallel.
   const transparencyResults = await Promise.all(
     discoveredDomains.map((domain) =>
-      serpApiTransparency(domain, regionOverride, cost, 100)
+      serpApiTransparency(domain, region, cost, num, opts)
     )
   );
 

@@ -33,7 +33,7 @@ import {
 import { languageName } from "@/lib/engine/types";
 import { benchmarkLlm } from "./llm";
 import { getBenchmarkConfig } from "./config";
-import { fetchCompetitorAds } from "./searchapi";
+import { fetchCompetitorAds, discoverKeywordAdvertisers } from "./searchapi";
 import { fetchPage, extractTracking, toDomain } from "./page-fetch";
 import { emitBenchmarkEvent } from "./events";
 import { estimateCompetitorSpend, summarizeSpend } from "./spend";
@@ -175,9 +175,13 @@ export async function startBenchmarkRun(input: {
   entryMode: EntryMode;
   manualKeyword?: string | null;
   manualDomain?: string | null;
+  /** End user's per-run opt-in to live competitor ads + keyword-advertiser
+   *  discovery (PAID SearchApi). Default false → free run, no spend. */
+  adSpy?: boolean;
 }): Promise<string> {
   const { ctx, entryMode } = input;
   const config = await getBenchmarkConfig();
+  const adSpy = input.adSpy === true;
 
   const seedDomains = deriveCompetitorDomains(ctx.competitors, ctx.domain);
   const manualDomain = input.manualDomain
@@ -203,7 +207,10 @@ export async function startBenchmarkRun(input: {
       seedDomains: seedDomains.slice(0, config.maxCompetitors),
       countryCode: ctx.countryCode,
       languageCode: ctx.languageCode,
-      liveEnabled: config.liveEnabled,
+      // Records the intent to run live ad-spy for this run (admin master switch
+      // OR the user's per-run opt-in). Whether ads actually came back is
+      // reflected separately in report.meta.liveAdSpy.
+      liveEnabled: config.liveEnabled || adSpy,
       progress: 0,
     })
     .returning({ id: benchmarkRuns.id });
@@ -214,6 +221,8 @@ export async function startBenchmarkRun(input: {
   void runBenchmark(runId, ctx, {
     keywords: seedKeywords,
     domains: seedDomains.slice(0, config.maxCompetitors),
+    manualDomain,
+    adSpy,
   }).catch(async (e) => {
     console.error("[benchmark] run crashed", runId, e);
     await setRun(runId, {
@@ -235,8 +244,14 @@ export async function startBenchmarkRun(input: {
 export async function runBenchmark(
   runId: string,
   ctx: BenchmarkBrandContext,
-  seeds: { keywords: string[]; domains: string[] }
+  seeds: {
+    keywords: string[];
+    domains: string[];
+    manualDomain?: string | null;
+    adSpy?: boolean;
+  }
 ): Promise<void> {
+  const adSpy = seeds.adSpy === true;
   const cost: BenchmarkCostContext = {
     userId: ctx.userId,
     brandId: ctx.brandId,
@@ -282,14 +297,52 @@ export async function runBenchmark(
     count: brandKeywords.length,
   });
 
+  // ---- 1b. Who actually advertises on the seed keyword? ----------------------
+  // "Ambos": when the user starts from a keyword AND opts into live data, we
+  // discover the domains running real paid ads on that term (SearchApi SERP) and
+  // UNION them with the saved competitor list — deduped by domain, provenance
+  // tracked so the report can show which came from discovery vs the profile.
+  const domainSource = new Map<string, BenchmarkCompetitor["source"]>();
+  for (const d of seeds.domains) domainSource.set(d, "brand_profile");
+  const manualDomain = seeds.manualDomain ?? null;
+  if (manualDomain && domainSource.has(manualDomain)) {
+    domainSource.set(manualDomain, "manual");
+  }
+
+  if (adSpy && seeds.keywords.length) {
+    await stage(runId, "Discovering who advertises on your keyword", 9);
+    let discovered = 0;
+    for (const kw of seeds.keywords) {
+      const disc = await discoverKeywordAdvertisers(kw, country, cost, {
+        optIn: adSpy,
+      });
+      for (const d of disc.domains) {
+        if (!d || d === ctx.domain) continue; // never analyze the brand itself
+        if (!domainSource.has(d)) {
+          domainSource.set(d, "derived");
+          discovered++;
+        }
+      }
+    }
+    if (discovered > 0) {
+      await emitBenchmarkEvent(runId, "partial", {
+        kind: "discovered",
+        count: discovered,
+      });
+    }
+  }
+
   // ---- 2. Per-competitor analysis -------------------------------------------
+  // Saved-list + manual domains keep priority (inserted first); discovered ones
+  // fill the remaining slots up to the cost cap.
   const competitors: BenchmarkCompetitor[] = [];
-  const domains = seeds.domains.slice(0, config.maxCompetitors);
+  const domains = [...domainSource.keys()].slice(0, config.maxCompetitors);
   const spanStart = 18;
   const spanEnd = 72;
 
   for (let i = 0; i < domains.length; i++) {
     const domain = domains[i];
+    const source = domainSource.get(domain) ?? "brand_profile";
     const progress =
       spanStart + Math.round(((i + 0.5) / Math.max(1, domains.length)) * (spanEnd - spanStart));
     await stage(
@@ -298,7 +351,16 @@ export async function runBenchmark(
       progress
     );
 
-    const comp = await analyzeCompetitor(domain, ctx, country, currency, cost, onPlannerError);
+    const comp = await analyzeCompetitor(
+      domain,
+      ctx,
+      country,
+      currency,
+      cost,
+      source,
+      adSpy,
+      onPlannerError
+    );
     competitors.push(comp);
     await emitBenchmarkEvent(runId, "partial", { kind: "competitor", competitor: comp });
   }
@@ -348,15 +410,10 @@ export async function runBenchmark(
         cost
       );
     } catch (e) {
-      strategy = {
-        summary:
-          "We gathered the competitor data below, but the AI summary couldn't be generated this time. The keyword gaps and landing teardowns are still complete.",
-        positioning: "",
-        opportunities: [],
-        threats: [],
-        recommendedKeywords: keywordGaps.slice(0, 10).map((g) => g.text),
-        recommendedAngles: [],
-      };
+      // Even with the LLM down, we still have real numbers + teardowns — so the
+      // "AI strategy" section degrades to a data-derived plan instead of a bare
+      // apology (recommended keywords, opportunities, threats from the data).
+      strategy = buildFallbackStrategy(competitors, keywordGaps);
       console.error("[benchmark] strategy synthesis failed", runId, e);
     }
   }
@@ -445,6 +502,8 @@ async function analyzeCompetitor(
   country: string,
   currency: string,
   cost: BenchmarkCostContext,
+  source: BenchmarkCompetitor["source"],
+  adSpy: boolean,
   onPlannerError?: (e: KeywordPlannerError) => void
 ): Promise<BenchmarkCompetitor> {
   const notes: string[] = [];
@@ -526,12 +585,13 @@ async function analyzeCompetitor(
     );
   }
 
-  // Ad-spy (PAID, gated OFF by default — returns status "off" without spending).
-  const adResult = await fetchCompetitorAds(domain, country, cost);
+  // Ad-spy (PAID — runs only on the user's per-run opt-in or the admin gate;
+  // returns status "off" without spending otherwise).
+  const adResult = await fetchCompetitorAds(domain, country, cost, { optIn: adSpy });
 
   const comp: BenchmarkCompetitor = {
     domain,
-    source: "brand_profile",
+    source,
     keywords,
     totalVolume,
     landing,
@@ -696,70 +756,118 @@ async function synthesizeStrategy(
   gaps: KeywordGap[],
   cost: BenchmarkCostContext
 ): Promise<BenchmarkStrategy> {
-  const compLines = competitors.map((c) => {
-    const top = c.keywords.slice(0, 8).map((k) => k.text).join(", ");
-    const offer = c.landing?.valueProposition || "(no landing read)";
-    const offers = (c.landing?.offers ?? []).slice(0, 4).join("; ");
-    const stack = (c.landing?.tracking.pixels ?? []).join(", ");
-    const spend = c.spend
-      ? `   estimated monthly Google Search spend: ~${c.spend.currency}${Math.round(
-          c.spend.monthlyMid
-        ).toLocaleString("en-US")} (range ${c.spend.currency}${Math.round(
-          c.spend.monthlyLow
-        ).toLocaleString("en-US")}–${c.spend.currency}${Math.round(
-          c.spend.monthlyHigh
-        ).toLocaleString("en-US")}, modeled, not exact)`
-      : "";
+  // Build the prompt at a chosen size. The retry shrinks maxComp/maxGaps so a
+  // second attempt is materially smaller — faster + far less likely to blow the
+  // deadline or the structured-output length on a heavy run.
+  const buildPrompt = (maxComp: number, maxGaps: number): string => {
+    const compLines = competitors.slice(0, maxComp).map((c) => {
+      const top = c.keywords.slice(0, 8).map((k) => k.text).join(", ");
+      const offer = c.landing?.valueProposition || "(no landing read)";
+      const offers = (c.landing?.offers ?? []).slice(0, 4).join("; ");
+      const stack = (c.landing?.tracking.pixels ?? []).join(", ");
+      const spend = c.spend
+        ? `   estimated monthly Google Search spend: ~${c.spend.currency}${Math.round(
+            c.spend.monthlyMid
+          ).toLocaleString("en-US")} (range ${c.spend.currency}${Math.round(
+            c.spend.monthlyLow
+          ).toLocaleString("en-US")}–${c.spend.currency}${Math.round(
+            c.spend.monthlyHigh
+          ).toLocaleString("en-US")}, modeled, not exact)`
+        : "";
+      return [
+        `• ${c.domain} — top keywords: ${top || "(none)"}`,
+        `   value prop: ${offer}`,
+        offers ? `   offers: ${offers}` : "",
+        stack ? `   marketing stack: ${stack}` : "",
+        spend,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    });
+
+    const gapLines = gaps
+      .slice(0, maxGaps)
+      .map(
+        (g) =>
+          `• ${g.text} — ${g.avgMonthlySearches}/mo, ${g.competition} competition, covered by ${g.competitorsCovering.length} competitor(s)`
+      );
+
     return [
-      `• ${c.domain} — top keywords: ${top || "(none)"}`,
-      `   value prop: ${offer}`,
-      offers ? `   offers: ${offers}` : "",
-      stack ? `   marketing stack: ${stack}` : "",
-      spend,
+      `Brand: ${ctx.name}${ctx.website ? ` (${ctx.website})` : ""}`,
+      ctx.industry ? `Industry: ${ctx.industry}` : "",
+      ctx.offering ? `What they offer: ${ctx.offering}` : "",
+      ctx.audience ? `Audience: ${ctx.audience}` : "",
+      `Market: ${ctx.countryCode}`,
+      "",
+      `The brand's own top keywords: ${brandKeywords.slice(0, 15).map((k) => k.text).join(", ") || "(none found)"}`,
+      "",
+      "COMPETITORS:",
+      compLines.join("\n") || "(no competitor domains analyzed)",
+      "",
+      "TOP KEYWORD GAPS (competitors rank, brand appears not to):",
+      gapLines.join("\n") || "(none)",
+      "",
+      "Produce a sharp, executive competitor strategy: an executive summary, the brand's positioning vs these competitors, the biggest opportunities (specific, actionable), the real threats, the keywords to prioritize, and the messaging angles to test. Ground every point in the data above — no fluff.",
     ]
       .filter(Boolean)
       .join("\n");
-  });
+  };
 
-  const gapLines = gaps
-    .slice(0, 25)
-    .map(
+  const run = (prompt: string, maxTokens: number) =>
+    benchmarkLlm<BenchmarkStrategy>({
+      tier: "opus",
+      stage: "strategy",
+      cost,
+      temperature: 0.4,
+      maxTokens,
+      toolName: "submit_strategy",
+      toolDescription: "Return the structured competitor strategy.",
+      schema: STRATEGY_SCHEMA,
+      system: `You are the head of paid search at a top agency, writing a premium competitor-analysis brief for a client. Be specific and decisive. Write EVERYTHING in ${langLabel}.`,
+      prompt,
+    });
+
+  try {
+    return await run(buildPrompt(competitors.length, 25), 4000);
+  } catch (e1) {
+    // One trimmed retry before giving up to the deterministic fallback.
+    console.warn("[benchmark] strategy attempt 1 failed — retrying trimmed", e1);
+    return await run(buildPrompt(6, 12), 2500);
+  }
+}
+
+// Deterministic strategy from the data we already have — used only when the LLM
+// synthesis fails after the retry. No model call, never throws: the user still
+// gets prioritized keywords, concrete opportunities and threats drawn straight
+// from the real numbers and teardowns above.
+function buildFallbackStrategy(
+  competitors: BenchmarkCompetitor[],
+  gaps: KeywordGap[]
+): BenchmarkStrategy {
+  const topGaps = gaps.slice(0, 10);
+  const angles = new Set<string>();
+  const threats: string[] = [];
+  for (const c of competitors) {
+    if (c.landing?.valueProposition) {
+      threats.push(`${c.domain}: ${c.landing.valueProposition}`);
+    }
+    (c.landing?.offers ?? []).forEach((o) => o && angles.add(o));
+    (c.landing?.ctas ?? []).forEach((cta) => cta && angles.add(cta));
+  }
+  return {
+    summary:
+      "The AI summary couldn't be generated this time, so here's a data-derived plan built from the real numbers and teardowns above. The keyword gaps, forecast and competitor teardowns are all complete.",
+    positioning: "",
+    opportunities: topGaps.map(
       (g) =>
-        `• ${g.text} — ${g.avgMonthlySearches}/mo, ${g.competition} competition, covered by ${g.competitorsCovering.length} competitor(s)`
-    );
-
-  const prompt = [
-    `Brand: ${ctx.name}${ctx.website ? ` (${ctx.website})` : ""}`,
-    ctx.industry ? `Industry: ${ctx.industry}` : "",
-    ctx.offering ? `What they offer: ${ctx.offering}` : "",
-    ctx.audience ? `Audience: ${ctx.audience}` : "",
-    `Market: ${ctx.countryCode}`,
-    "",
-    `The brand's own top keywords: ${brandKeywords.slice(0, 15).map((k) => k.text).join(", ") || "(none found)"}`,
-    "",
-    "COMPETITORS:",
-    compLines.join("\n") || "(no competitor domains analyzed)",
-    "",
-    "TOP KEYWORD GAPS (competitors rank, brand appears not to):",
-    gapLines.join("\n") || "(none)",
-    "",
-    "Produce a sharp, executive competitor strategy: an executive summary, the brand's positioning vs these competitors, the biggest opportunities (specific, actionable), the real threats, the keywords to prioritize, and the messaging angles to test. Ground every point in the data above — no fluff.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return benchmarkLlm<BenchmarkStrategy>({
-    tier: "opus",
-    stage: "strategy",
-    cost,
-    temperature: 0.4,
-    maxTokens: 4000,
-    toolName: "submit_strategy",
-    toolDescription: "Return the structured competitor strategy.",
-    schema: STRATEGY_SCHEMA,
-    system: `You are the head of paid search at a top agency, writing a premium competitor-analysis brief for a client. Be specific and decisive. Write EVERYTHING in ${langLabel}.`,
-    prompt,
-  });
+        `Target “${g.text}” — ${g.avgMonthlySearches.toLocaleString("en-US")} searches/mo, ${String(
+          g.competition
+        ).toLowerCase()} competition, covered by ${g.competitorsCovering.length} competitor(s).`
+    ),
+    threats: threats.slice(0, 6),
+    recommendedKeywords: topGaps.map((g) => g.text),
+    recommendedAngles: [...angles].slice(0, 8),
+  };
 }
 
 // ---- schemas ----------------------------------------------------------------

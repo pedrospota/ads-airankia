@@ -22,6 +22,8 @@ interface Props {
   brandName: string;
   brandWebsite: string | null;
   knownCompetitors: string[];
+  /** True when a SearchApi key is configured → the paid "live ads" toggle works. */
+  adSpyAvailable: boolean;
 }
 
 type EntryMode = "auto" | "keyword" | "domain";
@@ -110,6 +112,7 @@ export function BenchmarkSuite({
   brandName,
   brandWebsite,
   knownCompetitors,
+  adSpyAvailable,
 }: Props) {
   const { colors } = useTheme();
 
@@ -117,6 +120,13 @@ export function BenchmarkSuite({
   const [entryMode, setEntryMode] = useState<EntryMode>("auto");
   const [manualKeyword, setManualKeyword] = useState("");
   const [manualDomain, setManualDomain] = useState("");
+  // Per-run opt-in to PAID live competitor-ad spying + keyword-advertiser
+  // discovery. OFF by default — a free run never spends.
+  const [adSpy, setAdSpy] = useState(false);
+  // Optional market/language override. Empty = auto-detect from the brand (the
+  // default — the user never has to choose).
+  const [marketOverride, setMarketOverride] = useState("");
+  const [langOverride, setLangOverride] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -252,6 +262,10 @@ export function BenchmarkSuite({
           entryMode,
           manualKeyword: entryMode === "keyword" ? manualKeyword.trim() : undefined,
           manualDomain: entryMode === "domain" ? manualDomain.trim() : undefined,
+          // Only send the paid opt-in when a key is actually available.
+          adSpy: adSpyAvailable ? adSpy : undefined,
+          countryCode: marketOverride || undefined,
+          languageCode: langOverride || undefined,
         }),
       });
       const data = await res.json();
@@ -266,7 +280,18 @@ export function BenchmarkSuite({
     } finally {
       if (startAbort.current === ac) setStarting(false);
     }
-  }, [brandId, entryMode, manualKeyword, manualDomain, openStream, loadRuns]);
+  }, [
+    brandId,
+    entryMode,
+    manualKeyword,
+    manualDomain,
+    adSpy,
+    adSpyAvailable,
+    marketOverride,
+    langOverride,
+    openStream,
+    loadRuns,
+  ]);
 
   // ---- open a past run ------------------------------------------------------
   const openPastRun = useCallback(
@@ -369,6 +394,13 @@ export function BenchmarkSuite({
           setManualKeyword={setManualKeyword}
           manualDomain={manualDomain}
           setManualDomain={setManualDomain}
+          adSpy={adSpy}
+          setAdSpy={setAdSpy}
+          adSpyAvailable={adSpyAvailable}
+          marketOverride={marketOverride}
+          setMarketOverride={setMarketOverride}
+          langOverride={langOverride}
+          setLangOverride={setLangOverride}
           knownCompetitors={knownCompetitors}
           brandWebsite={brandWebsite}
           canStart={canStart}
@@ -428,6 +460,33 @@ export function BenchmarkSuite({
 // ----------------------------------------------------------------------------
 type Colors = ReturnType<typeof useTheme>["colors"];
 
+// Optional market / language overrides. "" = auto-detect from the brand (default).
+const MARKET_OPTIONS: { code: string; label: string }[] = [
+  { code: "", label: "Auto-detect (recommended)" },
+  { code: "ES", label: "Spain" },
+  { code: "MX", label: "Mexico" },
+  { code: "AR", label: "Argentina" },
+  { code: "CO", label: "Colombia" },
+  { code: "CL", label: "Chile" },
+  { code: "PE", label: "Peru" },
+  { code: "US", label: "United States" },
+  { code: "GB", label: "United Kingdom" },
+  { code: "FR", label: "France" },
+  { code: "DE", label: "Germany" },
+  { code: "IT", label: "Italy" },
+  { code: "PT", label: "Portugal" },
+];
+
+const LANG_OPTIONS: { code: string; label: string }[] = [
+  { code: "", label: "Auto" },
+  { code: "es", label: "Spanish" },
+  { code: "en", label: "English" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+];
+
 function EntryPanel({
   colors,
   entryMode,
@@ -436,6 +495,13 @@ function EntryPanel({
   setManualKeyword,
   manualDomain,
   setManualDomain,
+  adSpy,
+  setAdSpy,
+  adSpyAvailable,
+  marketOverride,
+  setMarketOverride,
+  langOverride,
+  setLangOverride,
   knownCompetitors,
   brandWebsite,
   canStart,
@@ -450,6 +516,13 @@ function EntryPanel({
   setManualKeyword: (s: string) => void;
   manualDomain: string;
   setManualDomain: (s: string) => void;
+  adSpy: boolean;
+  setAdSpy: (b: boolean) => void;
+  adSpyAvailable: boolean;
+  marketOverride: string;
+  setMarketOverride: (s: string) => void;
+  langOverride: string;
+  setLangOverride: (s: string) => void;
   knownCompetitors: string[];
   brandWebsite: string | null;
   canStart: boolean;
@@ -457,6 +530,7 @@ function EntryPanel({
   running: boolean;
   onStart: () => void;
 }) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const modes: { id: EntryMode; icon: string; title: string; sub: string }[] = [
     { id: "auto", icon: "✨", title: "Automatic", sub: "We pick the competitors and keywords for you" },
     { id: "keyword", icon: "🔑", title: "By a keyword", sub: "Start from a search term you care about" },
@@ -592,6 +666,145 @@ function EntryPanel({
         </div>
       )}
 
+      {/* live competitor ads — PAID, per-run opt-in, OFF by default ---------- */}
+      {adSpyAvailable && (
+        <button
+          type="button"
+          onClick={() => !running && setAdSpy(!adSpy)}
+          disabled={running}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            width: "100%",
+            textAlign: "left",
+            marginTop: 18,
+            padding: 14,
+            borderRadius: 12,
+            cursor: running ? "not-allowed" : "pointer",
+            background: adSpy ? "rgba(16,185,129,0.08)" : colors.bgInput,
+            border: `1.5px solid ${adSpy ? colors.accent : colors.border}`,
+            color: colors.text,
+          }}
+        >
+          {/* switch */}
+          <span
+            aria-hidden
+            style={{
+              flexShrink: 0,
+              width: 38,
+              height: 22,
+              borderRadius: 999,
+              background: adSpy ? colors.accent : colors.border,
+              position: "relative",
+              transition: "background 0.15s",
+              marginTop: 1,
+            }}
+          >
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                left: adSpy ? 18 : 2,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: "#fff",
+                transition: "left 0.15s",
+              }}
+            />
+          </span>
+          <span>
+            <span style={{ fontSize: 14, fontWeight: 700, display: "block", marginBottom: 2 }}>
+              Spy on live competitor ads{" "}
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  color: colors.textFaint,
+                }}
+              >
+                · paid
+              </span>
+            </span>
+            <span style={{ fontSize: 12.5, color: colors.textMuted, lineHeight: 1.4, display: "block" }}>
+              {entryMode === "keyword"
+                ? "Pulls the real running ads from the Google Ads Transparency Center, and finds who actually advertises on your keyword (added to your competitor list)."
+                : "Pulls the real running ads from the Google Ads Transparency Center for each competitor. Without it, the analysis is fully free."}
+            </span>
+          </span>
+        </button>
+      )}
+
+      {/* market & language — auto by default, optional override ------------- */}
+      <div style={{ marginTop: 14, fontSize: 12.5, color: colors.textFaint }}>
+        You don&apos;t need to choose a country or language — we detect them
+        automatically from your brand.{" "}
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((s) => !s)}
+          disabled={running}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            color: colors.accent,
+            cursor: running ? "not-allowed" : "pointer",
+            fontSize: 12.5,
+            fontWeight: 600,
+          }}
+        >
+          {showAdvanced ? "Hide options" : "Change them"}
+        </button>
+      </div>
+      {showAdvanced && (
+        <div
+          style={{
+            display: "grid",
+            gap: 12,
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            marginTop: 10,
+          }}
+        >
+          <div>
+            <label style={{ fontSize: 12.5, color: colors.textMuted, display: "block", marginBottom: 6 }}>
+              Market
+            </label>
+            <select
+              value={marketOverride}
+              onChange={(e) => setMarketOverride(e.target.value)}
+              disabled={running}
+              style={{ ...inputStyle, cursor: running ? "not-allowed" : "pointer" }}
+            >
+              {MARKET_OPTIONS.map((o) => (
+                <option key={o.code || "auto"} value={o.code}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12.5, color: colors.textMuted, display: "block", marginBottom: 6 }}>
+              Language
+            </label>
+            <select
+              value={langOverride}
+              onChange={(e) => setLangOverride(e.target.value)}
+              disabled={running}
+              style={{ ...inputStyle, cursor: running ? "not-allowed" : "pointer" }}
+            >
+              {LANG_OPTIONS.map((o) => (
+                <option key={o.code || "auto"} value={o.code}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 20 }}>
         <button
           onClick={onStart}
@@ -610,7 +823,9 @@ function EntryPanel({
           {starting || running ? "Analyzing…" : "Start the analysis"}
         </button>
         <span style={{ fontSize: 12.5, color: colors.textFaint }}>
-          Free · uses real Google Keyword Planner data
+          {adSpyAvailable && adSpy
+            ? "Includes live ad-spy · billed per competitor search"
+            : "Free · uses real Google Keyword Planner data"}
         </span>
       </div>
     </div>
@@ -1472,6 +1687,7 @@ function CompetitorCard({ colors, c }: { colors: Colors; c: BenchmarkCompetitor 
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
             <h3 style={{ fontSize: 17, fontWeight: 800 }}>{c.domain}</h3>
             <AdsBadge colors={colors} status={c.adsStatus} count={c.ads?.length ?? 0} />
+            <SourceBadge colors={colors} source={c.source} />
           </div>
           {landing?.valueProposition ? (
             <p style={{ fontSize: 13.5, color: colors.textMuted, lineHeight: 1.5, maxWidth: 560 }}>
@@ -1653,6 +1869,38 @@ function SpendBreakdown({ colors, spend }: { colors: Colors; spend: SpendEstimat
         {spend.basis}
       </p>
     </Detail>
+  );
+}
+
+// Where this competitor came from — answers "did the system find it from my
+// list or from the keyword?" at a glance.
+function SourceBadge({
+  colors,
+  source,
+}: {
+  colors: Colors;
+  source: BenchmarkCompetitor["source"];
+}) {
+  const map: Record<string, { label: string; color: string; bg: string }> = {
+    derived: { label: "Found via keyword", color: "#7DD3FC", bg: "rgba(125,211,252,0.12)" },
+    manual: { label: "You picked this", color: "#C4B5FD", bg: "rgba(196,181,253,0.12)" },
+    brand_profile: { label: "From your list", color: colors.textMuted, bg: "rgba(255,255,255,0.05)" },
+  };
+  const m = map[source] ?? map.brand_profile;
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 600,
+        padding: "3px 9px",
+        borderRadius: 999,
+        color: m.color,
+        background: m.bg,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {m.label}
+    </span>
   );
 }
 

@@ -151,3 +151,17 @@ export async function adSpyAllowed(): Promise<boolean> {
   if (!config.liveEnabled) return false;
   return hasSearchApiKey();
 }
+
+/**
+ * Whether the paid ad-spy / live-discovery may run for ONE specific run.
+ *
+ * The end user can explicitly opt in per run (the pre-scan "live competitor ads"
+ * toggle). That opt-in IS the spending approval, so it bypasses the global admin
+ * `liveEnabled` master switch — but a usable SearchApi key is STILL required, so
+ * a run can never spend when no key is configured. Without an opt-in it falls
+ * back to the global gate. Either way: no key → false → zero spend.
+ */
+export async function adSpyAllowedForRun(optIn: boolean): Promise<boolean> {
+  if (optIn) return hasSearchApiKey();
+  return adSpyAllowed();
+}

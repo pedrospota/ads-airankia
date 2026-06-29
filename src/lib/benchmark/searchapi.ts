@@ -14,7 +14,8 @@
 // ============================================================================
 
 import { recordCost } from "@/lib/cost-ledger";
-import { adSpyAllowed, getSearchApiKey, getBenchmarkConfig } from "./config";
+import { adSpyAllowedForRun, getSearchApiKey, getBenchmarkConfig } from "./config";
+import { toDomain } from "./page-fetch";
 import type { CompetitorAd, AdsStatus, BenchmarkCostContext } from "./types";
 
 const ENDPOINT = "https://www.searchapi.io/api/v1/search";
@@ -53,14 +54,19 @@ function mapAd(raw: RawAd): CompetitorAd {
  * Pull a competitor's running ad creatives from the Google Ads Transparency
  * Center via SearchApi. Returns { status:"off", ads:null } when the paid gate
  * is closed — callers render the rest of the report unchanged.
+ *
+ * `opts.optIn` is the end user's per-run "live competitor ads" approval; it
+ * bypasses the global admin gate but still requires a key (see adSpyAllowedForRun).
  */
 export async function fetchCompetitorAds(
   domain: string,
   countryCode: string,
-  cost: BenchmarkCostContext
+  cost: BenchmarkCostContext,
+  opts?: { optIn?: boolean }
 ): Promise<AdSpyResult> {
   // GATE — the single most important line in this file. No spend without it.
-  if (!(await adSpyAllowed())) return { status: "off", ads: null };
+  if (!(await adSpyAllowedForRun(opts?.optIn ?? false)))
+    return { status: "off", ads: null };
 
   const key = await getSearchApiKey();
   if (!key) return { status: "off", ads: null };
@@ -96,6 +102,96 @@ export async function fetchCompetitorAds(
     void meter(cost, domain, 1, "exception");
     return { status: "error", ads: null };
   }
+}
+
+// ----------------------------------------------------------------------------
+// Keyword → real advertisers. Reads a live Google SERP via SearchApi and pulls
+// the domains running PAID ads on the term — i.e. who actually competes for that
+// keyword right now. Same paid gate as ad-spy (the user's per-run opt-in is the
+// spend approval; a key is still required). Returns { status:"off", domains:[] }
+// when the gate is closed → the caller just uses the saved competitor list.
+// ----------------------------------------------------------------------------
+export interface KeywordAdvertisersResult {
+  status: AdsStatus;
+  domains: string[];
+}
+
+interface RawSerpAd {
+  link?: string;
+  tracking_link?: string;
+  displayed_link?: string;
+  source?: string;
+}
+
+export async function discoverKeywordAdvertisers(
+  keyword: string,
+  countryCode: string,
+  cost: BenchmarkCostContext,
+  opts?: { optIn?: boolean }
+): Promise<KeywordAdvertisersResult> {
+  // GATE — identical contract to fetchCompetitorAds. No spend without it.
+  if (!(await adSpyAllowedForRun(opts?.optIn ?? false)))
+    return { status: "off", domains: [] };
+
+  const key = await getSearchApiKey();
+  if (!key) return { status: "off", domains: [] };
+
+  const q = keyword.trim();
+  if (!q) return { status: "empty", domains: [] };
+
+  try {
+    const params = new URLSearchParams({
+      engine: "google",
+      q,
+      gl: (countryCode || "ES").toLowerCase(),
+      api_key: key,
+    });
+    const resp = await fetch(`${ENDPOINT}?${params.toString()}`, {
+      signal: AbortSignal.timeout(20000),
+      headers: { Accept: "application/json" },
+    });
+
+    if (!resp.ok) {
+      void meterDiscovery(cost, q, "http_" + resp.status);
+      return { status: "error", domains: [] };
+    }
+
+    const json = (await resp.json()) as { ads?: RawSerpAd[] };
+    const rawAds = json.ads ?? [];
+    const domains: string[] = [];
+    for (const ad of rawAds) {
+      const candidate =
+        ad.link || ad.displayed_link || ad.source || ad.tracking_link || "";
+      const d = toDomain(candidate);
+      if (d && !domains.includes(d)) domains.push(d);
+    }
+
+    void meterDiscovery(cost, q, "ok");
+    return { status: domains.length ? "ok" : "empty", domains };
+  } catch {
+    void meterDiscovery(cost, q, "exception");
+    return { status: "error", domains: [] };
+  }
+}
+
+// One metered row per SERP advertiser-discovery search (provider "searchapi").
+function meterDiscovery(
+  cost: BenchmarkCostContext,
+  keyword: string,
+  outcome: string
+): Promise<void> {
+  return recordCost({
+    category: "external_api",
+    provider: "searchapi",
+    resource: "google_serp_ads",
+    units: 1,
+    costMicros: 0,
+    userId: cost.userId ?? null,
+    brandId: cost.brandId ?? null,
+    workspaceId: cost.workspaceId ?? null,
+    runId: cost.runId ?? null,
+    meta: { module: "benchmark", stage: "discover_advertisers", keyword, outcome },
+  });
 }
 
 // One metered row per SearchApi search. We record the call VOLUME (units); the

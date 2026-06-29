@@ -49,7 +49,12 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/benchmark/runs — create + kick off a benchmark run for a brand.
-// Body: { brandId, entryMode?, manualKeyword?, manualDomain? }
+// Body: { brandId, entryMode?, manualKeyword?, manualDomain?, adSpy?,
+//         countryCode?, languageCode? }
+// adSpy is the user's per-run opt-in to live competitor ads + keyword-advertiser
+// discovery (PAID). countryCode/languageCode are OPTIONAL overrides — market &
+// language are auto-detected from the brand by default (the user never has to
+// pick); these only apply when the user explicitly changes them.
 export async function POST(request: NextRequest) {
   const authClient = await createSupabaseServerClient();
   const {
@@ -62,6 +67,9 @@ export async function POST(request: NextRequest) {
     entryMode?: string;
     manualKeyword?: string;
     manualDomain?: string;
+    adSpy?: boolean;
+    countryCode?: string;
+    languageCode?: string;
   };
   try {
     body = await request.json();
@@ -106,8 +114,21 @@ export async function POST(request: NextRequest) {
         .map((c: unknown) => (typeof c === "string" ? c.trim() : ""))
         .filter(Boolean)
     : [];
-  const countryCode = resolveCountryCode(brand.main_country, website);
-  const languageCode = resolveLanguageCode(countryCode);
+  // Market + language: auto-detected from the brand by default. The optional
+  // body overrides only kick in when the user explicitly changes them (a valid
+  // ISO-2 country / 2-letter language). An override country re-derives language
+  // unless the user also overrode language explicitly.
+  let countryCode = resolveCountryCode(brand.main_country, website);
+  let languageCode = resolveLanguageCode(countryCode);
+  const overrideCountry = (body.countryCode ?? "").trim();
+  if (/^[A-Za-z]{2}$/.test(overrideCountry)) {
+    countryCode = overrideCountry.toUpperCase();
+    languageCode = resolveLanguageCode(countryCode);
+  }
+  const overrideLang = (body.languageCode ?? "").trim();
+  if (/^[A-Za-z]{2}$/.test(overrideLang)) {
+    languageCode = overrideLang.toLowerCase();
+  }
 
   const ctx: BenchmarkBrandContext = {
     brandId,
@@ -135,6 +156,7 @@ export async function POST(request: NextRequest) {
       entryMode,
       manualKeyword: body.manualKeyword ?? null,
       manualDomain: body.manualDomain ?? null,
+      adSpy: body.adSpy === true,
     });
     return NextResponse.json({ runId });
   } catch (e) {

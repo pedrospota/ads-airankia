@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
+import { hasSearchApiKey } from "@/lib/benchmark/config";
 import { BenchmarkSuite } from "./benchmark-suite";
 
 export const runtime = "nodejs";
@@ -36,12 +37,18 @@ export default async function BenchmarkPage({
         .filter(Boolean)
     : [];
 
+  // Whether live competitor-ad spying + keyword-advertiser discovery is even
+  // possible (a SearchApi key is configured). The key itself is never sent to
+  // the browser — only this boolean — so the UI can show/hide the paid toggle.
+  const adSpyAvailable = await hasSearchApiKey();
+
   return (
     <BenchmarkSuite
       brandId={brand.id}
       brandName={brand.name ?? ""}
       brandWebsite={brand.website ?? null}
       knownCompetitors={competitors}
+      adSpyAvailable={adSpyAvailable}
     />
   );
 }

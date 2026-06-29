@@ -36,7 +36,7 @@ import { getBenchmarkConfig } from "./config";
 import { fetchAds, discoverAdvertisers } from "./ad-spy";
 import { runBenchmarkLabInApp } from "./lab-runner";
 import { findCountry } from "./countries";
-import type { BenchmarkMode, LabQuery } from "./lab-types";
+import type { BenchmarkMode, LabQuery, TransparencyParams } from "./lab-types";
 import { fetchPage, extractTracking, toDomain } from "./page-fetch";
 import { emitBenchmarkEvent } from "./events";
 import { estimateCompetitorSpend, summarizeSpend } from "./spend";
@@ -181,6 +181,8 @@ export async function startBenchmarkRun(input: {
   /** End user's per-run opt-in to live competitor ads + keyword-advertiser
    *  discovery (PAID SearchApi). Default false → free run, no spend. */
   adSpy?: boolean;
+  /** Optional manual Transparency-Center params (advanced settings). */
+  transparency?: TransparencyParams;
 }): Promise<string> {
   const { ctx, entryMode } = input;
   const config = await getBenchmarkConfig();
@@ -226,6 +228,7 @@ export async function startBenchmarkRun(input: {
     domains: seedDomains.slice(0, config.maxCompetitors),
     manualDomain,
     adSpy,
+    transparency: input.transparency,
   }).catch(async (e) => {
     console.error("[benchmark] run crashed", runId, e);
     await setRun(runId, {
@@ -252,6 +255,7 @@ export async function runBenchmark(
     domains: string[];
     manualDomain?: string | null;
     adSpy?: boolean;
+    transparency?: TransparencyParams;
   }
 ): Promise<void> {
   const adSpy = seeds.adSpy === true;
@@ -476,6 +480,7 @@ export async function runBenchmark(
           mode: labMode,
           numKeywords: Math.min(labSeeds.length, 10),
           numCompetitors: config.maxCompetitors,
+          transparency: seeds.transparency,
         };
         const labReport = await runBenchmarkLabInApp(labQuery, cost);
         if (labReport.analysis?.markdown) {

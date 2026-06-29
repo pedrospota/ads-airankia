@@ -80,6 +80,44 @@ export type TransparencyParams = {
   num?: number | null;
 };
 
+/**
+ * Validate/whitelist raw Transparency params from a request body. Pure (no server
+ * imports) so both the lab route and the brand-benchmark route share it. Returns
+ * undefined when nothing meaningful was set, so callers can follow the defaults.
+ */
+export function parseTransparencyParams(raw: unknown): TransparencyParams | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const str = (v: unknown): string | null => {
+    const s = typeof v === "string" ? v.trim() : "";
+    return s ? s : null;
+  };
+  const PLATFORMS = new Set(["SEARCH", "MAPS", "YOUTUBE", "GOOGLEPLAY"]);
+  const FORMATS = new Set(["text", "image", "video"]);
+  const platformRaw = str(r.platform)?.toUpperCase() ?? null;
+  const formatRaw = str(r.creativeFormat)?.toLowerCase() ?? null;
+  const digits = (v: unknown): string | null => {
+    const s = str(v)?.replace(/\D/g, "") ?? null;
+    return s && s.length === 8 ? s : null; // YYYYMMDD
+  };
+  const numRaw =
+    r.num === undefined || r.num === null || r.num === ""
+      ? null
+      : Math.max(1, Math.min(100, Math.round(Number(r.num) || 0))) || null;
+
+  const t: TransparencyParams = {
+    region: str(r.region),
+    platform: platformRaw && PLATFORMS.has(platformRaw) ? platformRaw : null,
+    creativeFormat: formatRaw && FORMATS.has(formatRaw) ? formatRaw : null,
+    advertiserId: str(r.advertiserId),
+    startDate: digits(r.startDate),
+    endDate: digits(r.endDate),
+    num: numRaw,
+  };
+  const hasAny = Object.values(t).some((v) => v !== null && v !== undefined);
+  return hasAny ? t : undefined;
+}
+
 export type LabQuery = {
   keywords: string[];
   countryCode: string;

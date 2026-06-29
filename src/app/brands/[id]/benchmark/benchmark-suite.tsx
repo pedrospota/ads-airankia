@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
 import { MarkdownReport } from "@/components/markdown-report";
+import type { TransparencyParams } from "@/lib/benchmark/lab-types";
 import type {
   BenchmarkReport,
   BenchmarkCompetitor,
@@ -128,6 +129,8 @@ export function BenchmarkSuite({
   // default — the user never has to choose).
   const [marketOverride, setMarketOverride] = useState("");
   const [langOverride, setLangOverride] = useState("");
+  // Advanced manual Transparency-Center params (optional; parity with the Lab).
+  const [transparency, setTransparency] = useState<TransparencyParams>({});
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -267,6 +270,7 @@ export function BenchmarkSuite({
           adSpy: adSpyAvailable ? adSpy : undefined,
           countryCode: marketOverride || undefined,
           languageCode: langOverride || undefined,
+          transparency,
         }),
       });
       const data = await res.json();
@@ -290,6 +294,7 @@ export function BenchmarkSuite({
     adSpyAvailable,
     marketOverride,
     langOverride,
+    transparency,
     openStream,
     loadRuns,
   ]);
@@ -402,6 +407,8 @@ export function BenchmarkSuite({
           setMarketOverride={setMarketOverride}
           langOverride={langOverride}
           setLangOverride={setLangOverride}
+          transparency={transparency}
+          setTransparency={setTransparency}
           knownCompetitors={knownCompetitors}
           brandWebsite={brandWebsite}
           canStart={canStart}
@@ -488,6 +495,13 @@ const LANG_OPTIONS: { code: string; label: string }[] = [
   { code: "pt", label: "Portuguese" },
 ];
 
+const advLabel = (colors: Colors): React.CSSProperties => ({
+  fontSize: 12.5,
+  color: colors.textMuted,
+  display: "block",
+  marginBottom: 6,
+});
+
 function EntryPanel({
   colors,
   entryMode,
@@ -503,6 +517,8 @@ function EntryPanel({
   setMarketOverride,
   langOverride,
   setLangOverride,
+  transparency,
+  setTransparency,
   knownCompetitors,
   brandWebsite,
   canStart,
@@ -524,6 +540,8 @@ function EntryPanel({
   setMarketOverride: (s: string) => void;
   langOverride: string;
   setLangOverride: (s: string) => void;
+  transparency: TransparencyParams;
+  setTransparency: (t: TransparencyParams) => void;
   knownCompetitors: string[];
   brandWebsite: string | null;
   canStart: boolean;
@@ -739,39 +757,21 @@ function EntryPanel({
         </button>
       )}
 
-      {/* market & language — auto by default, optional override ------------- */}
-      <div style={{ marginTop: 14, fontSize: 12.5, color: colors.textFaint }}>
-        You don&apos;t need to choose a country or language — we detect them
-        automatically from your brand.{" "}
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((s) => !s)}
-          disabled={running}
-          style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-            color: colors.accent,
-            cursor: running ? "not-allowed" : "pointer",
-            fontSize: 12.5,
-            fontWeight: 600,
-          }}
-        >
-          {showAdvanced ? "Hide options" : "Change them"}
-        </button>
-      </div>
-      {showAdvanced && (
+      {/* market & language — AUTO by default but ALWAYS visible (manual optional) */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 12.5, color: colors.textFaint, marginBottom: 10 }}>
+          Country &amp; language are auto-detected from your brand — change them only if you want.
+        </div>
         <div
           style={{
             display: "grid",
             gap: 12,
             gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            marginTop: 10,
           }}
         >
           <div>
             <label style={{ fontSize: 12.5, color: colors.textMuted, display: "block", marginBottom: 6 }}>
-              Market
+              Country / market
             </label>
             <select
               value={marketOverride}
@@ -804,7 +804,117 @@ function EntryPanel({
             </select>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* advanced settings — manual Transparency-Center params (optional) ------ */}
+      <details
+        style={{ marginTop: 14 }}
+        open={showAdvanced}
+        onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}
+      >
+        <summary
+          style={{
+            cursor: running ? "not-allowed" : "pointer",
+            fontSize: 11.5,
+            fontWeight: 700,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            color: colors.textMuted,
+          }}
+        >
+          Advanced settings (optional)
+        </summary>
+        <div style={{ fontSize: 12, color: colors.textFaint, margin: "8px 0 12px" }}>
+          Fine-tune the Google Ads Transparency lookup (used for competitor / domain
+          searches). Leave blank for the safe defaults — no region (global), all
+          platforms &amp; formats, 100 ads.
+        </div>
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+          <div>
+            <label style={advLabel(colors)}>Region (geo code)</label>
+            <input
+              value={transparency.region ?? ""}
+              onChange={(e) => setTransparency({ ...transparency, region: e.target.value })}
+              disabled={running}
+              placeholder="empty = global · e.g. 2840"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={advLabel(colors)}>Platform</label>
+            <select
+              value={transparency.platform ?? ""}
+              onChange={(e) => setTransparency({ ...transparency, platform: e.target.value || null })}
+              disabled={running}
+              style={{ ...inputStyle, cursor: running ? "not-allowed" : "pointer" }}
+            >
+              <option value="">All platforms</option>
+              <option value="SEARCH">Search</option>
+              <option value="MAPS">Maps</option>
+              <option value="YOUTUBE">YouTube</option>
+              <option value="GOOGLEPLAY">Google Play</option>
+            </select>
+          </div>
+          <div>
+            <label style={advLabel(colors)}>Creative format</label>
+            <select
+              value={transparency.creativeFormat ?? ""}
+              onChange={(e) => setTransparency({ ...transparency, creativeFormat: e.target.value || null })}
+              disabled={running}
+              style={{ ...inputStyle, cursor: running ? "not-allowed" : "pointer" }}
+            >
+              <option value="">All formats</option>
+              <option value="text">Text</option>
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+          <div>
+            <label style={advLabel(colors)}>Advertiser ID</label>
+            <input
+              value={transparency.advertiserId ?? ""}
+              onChange={(e) => setTransparency({ ...transparency, advertiserId: e.target.value })}
+              disabled={running}
+              placeholder="AR… (optional)"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={advLabel(colors)}>Start date</label>
+            <input
+              value={transparency.startDate ?? ""}
+              onChange={(e) => setTransparency({ ...transparency, startDate: e.target.value })}
+              disabled={running}
+              placeholder="YYYYMMDD"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={advLabel(colors)}>End date</label>
+            <input
+              value={transparency.endDate ?? ""}
+              onChange={(e) => setTransparency({ ...transparency, endDate: e.target.value })}
+              disabled={running}
+              placeholder="YYYYMMDD"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={advLabel(colors)}>Max ads (1–100)</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={transparency.num ?? 100}
+              onChange={(e) =>
+                setTransparency({ ...transparency, num: e.target.value === "" ? null : Number(e.target.value) })
+              }
+              disabled={running}
+              style={inputStyle}
+            />
+          </div>
+        </div>
+      </details>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 20 }}>
         <button

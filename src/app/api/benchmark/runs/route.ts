@@ -12,6 +12,7 @@ import {
   type EntryMode,
 } from "@/lib/benchmark/engine";
 import { toDomain } from "@/lib/benchmark/page-fetch";
+import { parseTransparencyParams } from "@/lib/benchmark/lab-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
     adSpy?: boolean;
     countryCode?: string;
     languageCode?: string;
+    transparency?: unknown;
   };
   try {
     body = await request.json();
@@ -157,6 +159,7 @@ export async function POST(request: NextRequest) {
       manualKeyword: body.manualKeyword ?? null,
       manualDomain: body.manualDomain ?? null,
       adSpy: body.adSpy === true,
+      transparency: parseTransparencyParams(body.transparency),
     });
     return NextResponse.json({ runId });
   } catch (e) {

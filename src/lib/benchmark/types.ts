@@ -183,6 +183,15 @@ export interface BenchmarkReport {
   forecast?: ForecastProjection | null;
   /** Modeled combined competitor investment (null when nothing could be estimated). */
   spendSummary?: SpendSummary | null;
+  /**
+   * Live ad-intelligence teardown produced by the shared Oxylabs→SerpApi→Firecrawl
+   * pipeline (the same engine that powers /benchmark-lab), in the brand's language.
+   * Only present when the user opted into live ad-spy. Markdown, rendered as-is.
+   */
+  adIntelligence?: {
+    markdown: string;
+    generatedBy: string;
+  } | null;
   meta: {
     liveAdSpy: boolean;
     domainsAnalyzed: number;

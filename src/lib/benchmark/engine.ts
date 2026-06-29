@@ -34,6 +34,9 @@ import { languageName } from "@/lib/engine/types";
 import { benchmarkLlm } from "./llm";
 import { getBenchmarkConfig } from "./config";
 import { fetchAds, discoverAdvertisers } from "./ad-spy";
+import { runBenchmarkLabInApp } from "./lab-runner";
+import { findCountry } from "./countries";
+import type { BenchmarkMode, LabQuery } from "./lab-types";
 import { fetchPage, extractTracking, toDomain } from "./page-fetch";
 import { emitBenchmarkEvent } from "./events";
 import { estimateCompetitorSpend, summarizeSpend } from "./spend";
@@ -445,6 +448,48 @@ export async function runBenchmark(
     });
   }
 
+  // ---- 5b. Live ad-intelligence teardown (shared pipeline) -------------------
+  // Same Oxylabs→SerpApi→Firecrawl engine as /benchmark-lab, producing the rich
+  // strategist report in the brand's language. PAID, so gated behind the same
+  // opt-in as ad-spy. Fully wrapped — a failure becomes a missing section, never
+  // a dead run. Auto-picks the mode: keyword (Oxylabs) when we have seed
+  // keywords, company (Transparency) when we only have competitor domains.
+  let adIntelligence: BenchmarkReport["adIntelligence"] = null;
+  if (adSpy || config.liveEnabled) {
+    try {
+      await stage(runId, "Reading competitors' live Google Ads", 90);
+      const c = findCountry(country);
+      const labMode: BenchmarkMode = seeds.keywords.length ? "keyword" : "company";
+      const labSeeds = seeds.keywords.length
+        ? seeds.keywords
+        : seeds.domains.length
+          ? seeds.domains
+          : [ctx.offering || ctx.name].filter(Boolean);
+      if (labSeeds.length) {
+        const labQuery: LabQuery = {
+          keywords: labSeeds,
+          countryCode: c.code,
+          countryName: c.name,
+          geo: c.geo,
+          region: c.region,
+          language: lang,
+          mode: labMode,
+          numKeywords: Math.min(labSeeds.length, 10),
+          numCompetitors: config.maxCompetitors,
+        };
+        const labReport = await runBenchmarkLabInApp(labQuery, cost);
+        if (labReport.analysis?.markdown) {
+          adIntelligence = {
+            markdown: labReport.analysis.markdown,
+            generatedBy: labReport.analysis.model,
+          };
+        }
+      }
+    } catch (e) {
+      console.error("[benchmark] ad-intelligence teardown failed", runId, e);
+    }
+  }
+
   // ---- 6. Assemble + persist -------------------------------------------------
   const report: BenchmarkReport = {
     generatedAt: new Date().toISOString(),
@@ -457,6 +502,7 @@ export async function runBenchmark(
     keywordGaps,
     strategy,
     forecast,
+    adIntelligence,
     spendSummary: summarizeSpend(competitors.map((c) => c.spend), currency),
     meta: {
       liveAdSpy: competitors.some((c) => c.adsStatus === "ok"),

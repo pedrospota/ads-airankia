@@ -586,7 +586,7 @@ function EntryPanel({
   const modes: { id: EntryMode; icon: string; title: string; sub: string; hidden?: boolean }[] = [
     { id: "auto", icon: "✨", title: "Automatic", sub: "We pick the competitors and keywords for you" },
     { id: "keyword", icon: "🔑", title: "By a keyword", sub: "Start from a search term you care about" },
-    { id: "domain", icon: "🌐", title: "By a competitor", sub: "Point at one specific competitor domain" },
+    { id: "domain", icon: "🌐", title: "By a competitor", sub: "One domain: its live ads + any rival bidding on its brand" },
     { id: "competitors", icon: "📋", title: "Your competitor list", sub: "Use the competitors already on your profile (editable)", hidden: knownCompetitors.length === 0 },
   ];
 
@@ -855,7 +855,7 @@ function EntryPanel({
             </span>
             <span style={{ fontSize: 12.5, color: colors.textMuted, lineHeight: 1.4, display: "block" }}>
               {entryMode === "domain"
-                ? "Pulls each competitor domain's live creatives from the Google Ads Transparency Center."
+                ? "Analyzes ONLY the competitor you pick — pulls its live ads and surfaces any rival bidding on its brand name (Oxylabs + Transparency Center). Your saved competitor list is not mixed in."
                 : "Finds the domains actually running ads on your keyword (Oxylabs), then pulls each one's live creatives from the Transparency Center. These domains are only analyzed for this report — never saved to your competitors."}
             </span>
           </span>

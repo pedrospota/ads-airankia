@@ -221,21 +221,27 @@ export async function startBenchmarkRun(input: {
   // "competitors" mode always runs the live Transparency pipeline (it IS the analysis)
   const adSpy = input.adSpy === true || entryMode === "competitors";
 
-  let seedDomains: string[];
-  if (entryMode === "competitors" && input.manualDomains?.length) {
-    // User's edited competitor list overrides the brand's saved list
-    seedDomains = input.manualDomains
-      .map((d) => toDomain(d))
-      .filter((d): d is string => Boolean(d));
-  } else {
-    seedDomains = deriveCompetitorDomains(ctx.competitors, ctx.domain);
-  }
-
   const manualDomain = input.manualDomain
     ? toDomain(input.manualDomain)
     : null;
-  if (manualDomain && !seedDomains.includes(manualDomain)) {
-    seedDomains.unshift(manualDomain);
+
+  let seedDomains: string[];
+  if (entryMode === "competitors" && input.manualDomains?.length) {
+    // User's edited competitor list overrides the brand's saved list.
+    seedDomains = input.manualDomains
+      .map((d) => toDomain(d))
+      .filter((d): d is string => Boolean(d));
+  } else if (entryMode === "domain") {
+    // "By a competitor" = inspect ONLY the one domain the user picked. Do NOT
+    // fold in the brand's whole saved competitor list (that made deleting one
+    // from the picker have no effect and pulled in competitors never selected).
+    seedDomains = manualDomain ? [manualDomain] : [];
+  } else {
+    // auto / keyword: the brand's saved competitors are the seed set.
+    seedDomains = deriveCompetitorDomains(ctx.competitors, ctx.domain);
+    if (manualDomain && !seedDomains.includes(manualDomain)) {
+      seedDomains.unshift(manualDomain);
+    }
   }
 
   const seedKeywords: string[] = [];

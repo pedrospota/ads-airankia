@@ -55,6 +55,7 @@ function normalizeQuery(body: Record<string, unknown>): LabQuery {
     numKeywords,
     numCompetitors,
     transparency: parseTransparencyParams(body.transparency),
+    ocr: body.ocr === true,
   };
 }
 

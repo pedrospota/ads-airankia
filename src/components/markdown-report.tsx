@@ -30,11 +30,33 @@ const codeStyle: React.CSSProperties = {
   wordBreak: "break-all",
 };
 
+// A creative thumbnail with graceful fallback to a link when the image 404s /
+// hotlink-blocks (the Transparency image URLs are usually open, but be safe).
+function MdImage({ src, alt, colors }: { src: string; alt: string; colors: MdColors }) {
+  const [ok, setOk] = React.useState(true);
+  if (!ok) {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, textDecoration: "underline", wordBreak: "break-all" }}>
+        {alt || "image"} ↗
+      </a>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      onError={() => setOk(false)}
+      style={{ maxWidth: 160, maxHeight: 110, borderRadius: 6, border: `1px solid ${colors.border}`, display: "block", objectFit: "cover" }}
+    />
+  );
+}
+
 function renderInline(text: string, colors: MdColors, keyBase: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  // Order matters: bold, code, [md](link), bare url, italic.
+  // Order matters: image ![](), bold, code, [md](link), bare url, italic.
   const regex =
-    /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\bhttps?:\/\/[^\s)]+|\*[^*\n]+\*|_[^_\n]+_)/g;
+    /(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\bhttps?:\/\/[^\s)]+|\*[^*\n]+\*|_[^_\n]+_)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -46,7 +68,12 @@ function renderInline(text: string, colors: MdColors, keyBase: string): React.Re
   while ((m = regex.exec(text)) !== null) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     const tok = m[0];
-    if (tok.startsWith("**")) {
+    if (tok.startsWith("![")) {
+      const mm = tok.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      const alt = mm?.[1] ?? "";
+      const src = mm?.[2] ?? "";
+      nodes.push(<MdImage key={`${keyBase}-${i++}`} src={src} alt={alt} colors={colors} />);
+    } else if (tok.startsWith("**")) {
       nodes.push(
         <strong key={`${keyBase}-${i++}`} style={{ color: colors.text, fontWeight: 700 }}>
           {tok.slice(2, -2)}

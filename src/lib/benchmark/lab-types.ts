@@ -41,6 +41,8 @@ export type LabAd = {
   sitelinks?: string[];
   /** Position on the SERP (Oxylabs `pos`). */
   position?: number | null;
+  /** Text read off the creative image by Firecrawl OCR (when OCR is enabled). */
+  ocrText?: string | null;
 };
 
 export type AdvertiserSource = "oxylabs" | "serpapi" | "manual";
@@ -145,6 +147,9 @@ export type LabQuery = {
   numCompetitors: number;
   /** Optional manual Transparency-Center params (Lab advanced panel). */
   transparency?: TransparencyParams;
+  /** Run Firecrawl OCR on every creative image to read its text (user toggle).
+   *  Works in ANY mode that returns images (company / extended / extended_company). */
+  ocr?: boolean;
   /** Extended mode only: domains that MUST be looked up in the Transparency
    *  Center regardless of what the Oxylabs keyword search discovers. Used by
    *  domain-entry brand runs ("by a competitor" / "your competitor list") so a
@@ -223,4 +228,5 @@ export type LabRunInput = {
   numKeywords: number;
   numCompetitors: number;
   transparency?: TransparencyParams;
+  ocr?: boolean;
 };

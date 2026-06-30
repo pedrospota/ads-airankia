@@ -171,6 +171,13 @@ function wordFreqRows(texts: string[], limit: number): { word: string; count: nu
 
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
 
+// Truncate long copy so it stays readable inside a Markdown table cell; also
+// strips pipes/newlines that would break the table.
+function clip(s: string | null | undefined, max: number): string {
+  const t = (s ?? "").replace(/\s*[|\r\n]+\s*/g, " ").trim();
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t || "—";
+}
+
 // Normalize any user/API input to a bare registrable domain ("https://www.X.com/a" → "x.com").
 function cleanDomain(d: string): string {
   return d.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].toLowerCase().trim();
@@ -213,10 +220,15 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   }
 
   const allAds = advertisers.flatMap((a) => a.oldestTop5);
-  // Ad-copy corpus: include the Oxylabs topAd (transparency creatives carry no text).
+  // Display creatives = ads carrying a visual (image/video) from Transparency.
+  const displayAds = advertisers.flatMap((a) =>
+    a.oldestTop5.filter((ad) => Boolean(ad.imageUrl)).map((ad) => ({ ad, domain: a.domain })),
+  );
+  // Ad-copy corpus: Oxylabs topAd text (transparency creatives carry no text) + OCR.
   const copyAds = advertisers.flatMap((a) => [a.topAd, ...a.oldestTop5].filter((x): x is LabAd => Boolean(x)));
   const headlines = copyAds.map((a) => a.headline).filter((x): x is string => Boolean(x));
   const descriptions = copyAds.map((a) => a.description).filter((x): x is string => Boolean(x));
+  const ocrTexts = allAds.map((a) => a.ocrText).filter((x): x is string => Boolean(x));
   const days = allAds.map((a) => a.daysActive ?? 0).filter((n) => n > 0);
   const avg = days.length ? Math.round(days.reduce((s, n) => s + n, 0) / days.length) : 0;
   const totalAds = advertisers.reduce((n, a) => n + a.totalAds, 0);
@@ -227,24 +239,31 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   L.push(`- **Country analyzed:** ${query.countryName}`);
   L.push(`- **Total ads found:** ${totalAds}`);
   L.push(`- **Competitors (unique domains):** ${advertisers.length}`);
+  L.push(`- **Search text ads / Display creatives:** ${headlines.length} / ${displayAds.length}`);
   if (avg > 0) L.push(`- **Average ad age:** ${avg} days`);
   L.push(``);
 
-  // ---- Top competitors & their ad strategies ----
-  L.push(`## Top Competitors & Their Ad Strategies`);
+  // ===================== 🔍 SEARCH ADS =====================
+  L.push(`## 🔍 Search Ads — Competitor Teardown`);
+  if (!headlines.length && !descriptions.length) {
+    L.push(
+      `_No Search text ads captured here. Keyword & Extended modes pull Search ad copy from Oxylabs; for image-only competitors, enable **OCR** to read the text off the Display creatives below._`,
+    );
+  }
   advertisers.slice(0, 10).forEach((a, i) => {
-    const ad = a.topAd ?? a.oldestTop5[0];
+    const ad = a.topAd ?? a.oldestTop5.find((x) => x.headline) ?? a.oldestTop5[0];
     const legal = a.oldestTop5.find((x) => x.legalName)?.legalName ?? a.topAd?.legalName;
     const sitelinks = uniq([...(a.topAd?.sitelinks ?? []), ...a.oldestTop5.flatMap((x) => x.sitelinks ?? [])]);
+    const body = ad?.description ?? ad?.ocrText ?? null;
     L.push(``, `### ${i + 1}. ${a.domain}${legal ? ` (${legal})` : ""} — ${a.totalAds} ad(s)`);
     L.push(`| Attribute | Details |`, `| --- | --- |`);
     if (ad?.position) L.push(`| Ad position | #${ad.position} |`);
-    if (ad?.headline) L.push(`| Headline | ${ad.headline} |`);
-    if (ad?.description) L.push(`| Description | ${ad.description} |`);
+    if (ad?.headline) L.push(`| Headline | ${clip(ad.headline, 120)} |`);
+    if (body) L.push(`| Description${ad?.description ? "" : " (from OCR)"} | ${clip(body, 180)} |`);
     const landing = ad?.detailsLink ?? a.sampleUrl;
     if (landing) L.push(`| Landing page | ${landing} |`);
-    if (ad?.campaign) L.push(`| Campaign label | ${ad.campaign} |`);
-    const usps = extractUSPs(ad?.description);
+    if (ad?.campaign) L.push(`| Campaign label | ${clip(ad.campaign, 60)} |`);
+    const usps = extractUSPs(ad?.description ?? ad?.ocrText);
     if (usps.length) L.push(`| Key USPs | ${usps.join(" · ")} |`);
     if (sitelinks.length) L.push(`| Sitelinks | ${sitelinks.slice(0, 6).join(", ")} |`);
     const ctas = extractCTAs(ad, sitelinks);
@@ -253,37 +272,50 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   });
   L.push(``);
 
-  // ---- Top 5 oldest ads (only when transparency images exist) ----
-  const withImages = allAds.filter((a) => a.imageUrl && (a.daysActive ?? 0) > 0)
-    .sort((a, b) => (b.daysActive ?? 0) - (a.daysActive ?? 0));
-  if (withImages.length) {
-    L.push(`## Top 5 Oldest Ads (longest-running = proven winners)`);
-    L.push(`| Advertiser | Days active | Image URL | Landing |`, `| --- | --- | --- | --- |`);
-    for (const ad of withImages.slice(0, 5)) {
-      L.push(`| ${ad.advertiser ?? ad.advertiserDomain ?? "—"} | ${ad.daysActive} | ${ad.imageUrl} | ${ad.detailsLink ?? "—"} |`);
-    }
-    L.push(``);
-  }
-
-  // ---- Ad copy & headlines analysis ----
-  L.push(`## Ad Copy & Headlines Analysis`);
+  // ---- Ad copy & headlines analysis (Search) ----
+  L.push(`### Ad Copy & Headline Analysis`);
   if (headlines.length) {
-    L.push(``, `**Most used words in headlines** (${headlines.length} headlines):`);
+    L.push(``, `**Most-used words in headlines** (${headlines.length} headlines):`);
     L.push(`| Word | Frequency | % of headlines |`, `| --- | --- | --- |`);
     for (const r of wordFreqRows(headlines, 10)) L.push(`| ${r.word} | ${r.count}/${headlines.length} | ${r.pct}% |`);
   }
   if (descriptions.length) {
-    L.push(``, `**Most used words in descriptions** (${descriptions.length} descriptions):`);
+    L.push(``, `**Most-used words in descriptions** (${descriptions.length} descriptions):`);
     L.push(`| Word | Frequency | % of descriptions |`, `| --- | --- | --- |`);
     for (const r of wordFreqRows(descriptions, 10)) L.push(`| ${r.word} | ${r.count}/${descriptions.length} | ${r.pct}% |`);
   }
   if (!headlines.length && !descriptions.length) {
-    L.push(`Ad copy text isn't available for these creatives (image ads — run Extended mode for OCR text).`);
+    L.push(`Ad copy text isn't available for these creatives. Enable **OCR** to read the text off the Display images below.`);
   }
   L.push(``);
 
+  // ===================== 🖼️ DISPLAY ADS =====================
+  if (displayAds.length) {
+    const sorted = [...displayAds].sort((a, b) => (b.ad.daysActive ?? 0) - (a.ad.daysActive ?? 0));
+    const anyOcr = sorted.some((x) => x.ad.ocrText);
+    L.push(`## 🖼️ Display Ads — Visual Creatives`);
+    L.push(
+      `Image/video creatives running right now, pulled from the Google Ads Transparency Center (longest-running first = proven winners).`,
+      ``,
+    );
+    if (anyOcr) {
+      L.push(`| Competitor | Creative | Text on creative (OCR) | Days active |`, `| --- | --- | --- | --- |`);
+      for (const { ad, domain } of sorted.slice(0, 15)) {
+        L.push(`| ${domain} | ![ad](${ad.imageUrl}) | ${clip(ad.ocrText, 130)} | ${ad.daysActive ?? "—"} |`);
+      }
+    } else {
+      L.push(`| Competitor | Creative | Landing | Days active |`, `| --- | --- | --- | --- |`);
+      for (const { ad, domain } of sorted.slice(0, 15)) {
+        L.push(`| ${domain} | ![ad](${ad.imageUrl}) | ${ad.detailsLink ?? "—"} | ${ad.daysActive ?? "—"} |`);
+      }
+      L.push(``, `_Turn on **OCR** to read the exact text written on each creative._`);
+    }
+    L.push(``);
+  }
+
   // ---- Keyword ranking recommendations (clean, split High-Priority / Niche) ----
-  const corpus = [...headlines, ...descriptions];
+  // Corpus now also includes any OCR text so image-only competitors still feed it.
+  const corpus = [...headlines, ...descriptions, ...ocrTexts];
   const terms = wordFreqRows(corpus, 20).map((r) => r.word).filter((t) => t.length > 2);
   const qset = new Set(query.keywords.map((k) => k.toLowerCase().trim()));
   const primary = (query.keywords[0] ?? "").toLowerCase().trim();
@@ -333,7 +365,7 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   const vs: string[] = [];
   for (const a of advertisers) {
     const own = new Set((a.domain.split(".")[0] || "").split(/[-_]/));
-    const text = [a.topAd, ...a.oldestTop5].map((x) => `${x?.headline ?? ""} ${x?.description ?? ""}`).join(" ").toLowerCase();
+    const text = [a.topAd, ...a.oldestTop5].map((x) => `${x?.headline ?? ""} ${x?.description ?? ""} ${x?.ocrText ?? ""}`).join(" ").toLowerCase();
     const namesRival = [...brandTokens].some((t) => !own.has(t) && text.includes(t));
     if (namesRival || /\b(vs|versus|alternative|compare|better than)\b/.test(text)) vs.push(a.domain);
   }
@@ -432,6 +464,9 @@ async function analyze(
     topAd: a.topAd
       ? { headline: a.topAd.headline, description: a.topAd.description, campaign: a.topAd.campaign, sitelinks: a.topAd.sitelinks, landing: a.topAd.detailsLink }
       : null,
+    // OCR text read off the image creatives (when OCR is on) — lets the strategist
+    // analyze image-only competitors too.
+    creativeText: uniq(a.oldestTop5.map((x) => x.ocrText).filter((t): t is string => Boolean(t))).slice(0, 3),
     oldestDays: a.oldestTop5.map((x) => x.daysActive ?? 0).filter((n) => n > 0).slice(0, 3),
   }));
   const narrative = await benchmarkNarrative({
@@ -625,8 +660,7 @@ async function runExtendedMode(
   query: LabQuery,
   cost: BenchmarkCostContext,
   skipKeywordSearch: boolean,
-  regionOverride: string | null = null,
-  skipOcr = false
+  regionOverride: string | null = null
 ): Promise<{ advertisers: LabAdvertiser[]; rawData: unknown[]; allImageUrls: string[] }> {
   const byDomain = new Map<string, LabAdvertiser>();
   const rawForLlm: unknown[] = [];
@@ -734,16 +768,7 @@ async function runExtendedMode(
     });
   }
 
-  // Step 3: Firecrawl OCR — all image URLs in parallel. Skippable (the brand
-  // benchmark runs Oxylabs→domains→transparency only, no OCR).
-  if (!skipOcr && allImageUrls.length > 0) {
-    const ocrMap = await ocrImagesBatch(allImageUrls);
-    rawForLlm.push({
-      step: "ocr",
-      texts: Object.fromEntries(ocrMap),
-    });
-  }
-
+  // OCR is now centralized in runBenchmarkLabInApp (user toggle, any mode).
   return {
     advertisers: [...byDomain.values()],
     rawData: rawForLlm,
@@ -773,10 +798,10 @@ export async function runBenchmarkLabInApp(
       result = await runCompanyMode(query, costCtx, regionOverride);
       break;
     case "extended":
-      result = await runExtendedMode(query, costCtx, false, regionOverride, skipOcr);
+      result = await runExtendedMode(query, costCtx, false, regionOverride);
       break;
     case "extended_company":
-      result = await runExtendedMode(query, costCtx, true, regionOverride, skipOcr);
+      result = await runExtendedMode(query, costCtx, true, regionOverride);
       break;
     case "keyword":
     default:
@@ -785,6 +810,29 @@ export async function runBenchmarkLabInApp(
   }
 
   const { advertisers, allImageUrls } = result;
+
+  // Firecrawl OCR — user-toggled, works in ANY mode that returned creative images
+  // (company / extended / extended_company). Reads the exact text off each image
+  // and attaches it to its ad so the report can show it next to the photo + mine
+  // it for copy analysis. Centralized here so a single toggle drives every mode.
+  let ocrCount = 0;
+  const runOcr = (query.ocr ?? false) && !skipOcr && allImageUrls.length > 0;
+  if (runOcr) {
+    // Cap the number of images we OCR so an opt-in run can't fan out to 100+ paid
+    // calls; 48 comfortably covers the creatives the report surfaces.
+    const toOcr = uniq(allImageUrls).slice(0, 48);
+    const ocrMap = await ocrImagesBatch(toOcr);
+    const attach = (ad: LabAd | null | undefined) => {
+      if (ad?.imageUrl && ocrMap.has(ad.imageUrl)) {
+        const txt = (ocrMap.get(ad.imageUrl) ?? "").trim();
+        if (txt) { ad.ocrText = txt; ocrCount++; }
+      }
+    };
+    for (const adv of advertisers) {
+      attach(adv.topAd);
+      adv.oldestTop5.forEach(attach);
+    }
+  }
 
   // Report = deterministic full teardown (always complete) + best-effort AI strategy.
   const analysis = await analyze(query, mode, advertisers, costCtx);
@@ -818,11 +866,11 @@ export async function runBenchmarkLabInApp(
       live: true,
     });
   }
-  if ((mode === "extended" || mode === "extended_company") && allImageUrls.length > 0) {
+  if (runOcr && ocrCount > 0) {
     sources.push({
       label: "Ad image text (OCR)",
       provider: "Firecrawl · ocr_image_simple_text",
-      detail: `Text extracted from ${allImageUrls.length} ad image(s) in parallel`,
+      detail: `Text read from ${ocrCount} of ${allImageUrls.length} ad image(s) in parallel`,
       live: true,
     });
   }

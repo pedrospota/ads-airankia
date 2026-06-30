@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
 import { MarkdownReport } from "@/components/markdown-report";
+import { COUNTRIES, LANGUAGES } from "@/lib/benchmark/countries";
 import type { TransparencyParams } from "@/lib/benchmark/lab-types";
 import type {
   BenchmarkReport,
@@ -498,30 +499,15 @@ export function BenchmarkSuite({
 type Colors = ReturnType<typeof useTheme>["colors"];
 
 // Optional market / language overrides. "" = auto-detect from the brand (default).
+// Derived from the full shared catalogue so every country/language is selectable.
 const MARKET_OPTIONS: { code: string; label: string }[] = [
   { code: "", label: "Auto-detect (recommended)" },
-  { code: "ES", label: "Spain" },
-  { code: "MX", label: "Mexico" },
-  { code: "AR", label: "Argentina" },
-  { code: "CO", label: "Colombia" },
-  { code: "CL", label: "Chile" },
-  { code: "PE", label: "Peru" },
-  { code: "US", label: "United States" },
-  { code: "GB", label: "United Kingdom" },
-  { code: "FR", label: "France" },
-  { code: "DE", label: "Germany" },
-  { code: "IT", label: "Italy" },
-  { code: "PT", label: "Portugal" },
+  ...COUNTRIES.map((c) => ({ code: c.code, label: `${c.flag} ${c.name}` })),
 ];
 
 const LANG_OPTIONS: { code: string; label: string }[] = [
   { code: "", label: "Auto" },
-  { code: "es", label: "Spanish" },
-  { code: "en", label: "English" },
-  { code: "fr", label: "French" },
-  { code: "de", label: "German" },
-  { code: "it", label: "Italian" },
-  { code: "pt", label: "Portuguese" },
+  ...LANGUAGES.map((l) => ({ code: l.code, label: l.name })),
 ];
 
 const advLabel = (colors: Colors): React.CSSProperties => ({

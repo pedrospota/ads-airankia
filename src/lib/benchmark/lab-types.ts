@@ -43,6 +43,9 @@ export type LabAd = {
   position?: number | null;
   /** Text read off the creative image by Firecrawl OCR (when OCR is enabled). */
   ocrText?: string | null;
+  /** Transparency Center ids, needed to look up which countries the ad ran in. */
+  advertiserId?: string | null;
+  creativeId?: string | null;
 };
 
 export type AdvertiserSource = "oxylabs" | "serpapi" | "manual";
@@ -64,6 +67,9 @@ export type LabAdvertiser = {
    * per-competitor card needs (transparency creatives have no copy).
    */
   topAd?: LabAd | null;
+  /** Countries this advertiser runs ads in (Transparency ad-details geo lookup,
+   *  when the Geo Footprint option is on). Sorted by creative count desc. */
+  geoCountries?: { name: string; creatives: number; lastShown: string | null }[];
 };
 
 /** A data-provenance line shown in the report so the source is always clear. */
@@ -150,6 +156,9 @@ export type LabQuery = {
   /** Run Firecrawl OCR on every creative image to read its text (user toggle).
    *  Works in ANY mode that returns images (company / extended / extended_company). */
   ocr?: boolean;
+  /** Look up which countries each competitor advertises in (paid, per-creative
+   *  Transparency ad-details calls). Drives the "Geo Footprint" section. */
+  geoFootprint?: boolean;
   /** Extended mode only: domains that MUST be looked up in the Transparency
    *  Center regardless of what the Oxylabs keyword search discovers. Used by
    *  domain-entry brand runs ("by a competitor" / "your competitor list") so a

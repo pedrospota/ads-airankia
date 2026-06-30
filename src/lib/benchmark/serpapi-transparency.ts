@@ -157,6 +157,60 @@ export async function serpApiTransparency(
   };
 }
 
+export interface CreativeRegion {
+  region: string; // numeric Google geo id (e.g. "2076")
+  name: string; // country name (e.g. "Brazil")
+  lastShown: string | null; // YYYYMMDD as returned by ad_details
+}
+
+/**
+ * Which countries a single creative was shown in. Uses SerpApi's
+ * `google_ads_transparency_center_ad_details` engine, which returns
+ * `search_information.regions: [{region, region_name, last_shown}]` (verified
+ * live). One paid call per creative — callers must sample + cap. Never throws.
+ */
+export async function fetchCreativeRegions(
+  advertiserId: string,
+  creativeId: string,
+  cost: BenchmarkCostContext
+): Promise<CreativeRegion[]> {
+  const key = serpApiKey();
+  if (!key || !advertiserId || !creativeId) return [];
+  const qs = new URLSearchParams({
+    engine: "google_ads_transparency_center_ad_details",
+    advertiser_id: advertiserId,
+    creative_id: creativeId,
+    api_key: key,
+  });
+  try {
+    const resp = await fetch(`https://serpapi.com/search?${qs.toString()}`, {
+      signal: AbortSignal.timeout(20000),
+      headers: { Accept: "application/json" },
+    });
+    if (!resp.ok) {
+      meter(cost, advertiserId, 1, "geo_http_" + resp.status);
+      return [];
+    }
+    const data = (await resp.json()) as {
+      search_information?: {
+        regions?: { region?: number | string; region_name?: string; last_shown?: number | string }[];
+      };
+    };
+    const regions = data?.search_information?.regions ?? [];
+    meter(cost, advertiserId, 1, "geo_ok");
+    return regions
+      .map((r) => ({
+        region: r.region != null ? String(r.region) : "",
+        name: (r.region_name ?? "").trim(),
+        lastShown: r.last_shown != null ? String(r.last_shown) : null,
+      }))
+      .filter((r) => r.name && r.name.toLowerCase() !== "anywhere");
+  } catch {
+    meter(cost, advertiserId, 1, "geo_exception");
+    return [];
+  }
+}
+
 function meter(
   cost: BenchmarkCostContext,
   domain: string,

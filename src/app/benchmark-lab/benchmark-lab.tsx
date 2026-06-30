@@ -106,6 +106,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
   const [numCompetitors, setNumCompetitors] = useState(6);
   const [transparency, setTransparency] = useState<TransparencyParams>({});
   const [ocr, setOcr] = useState(false);
+  const [geoFootprint, setGeoFootprint] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);
@@ -170,7 +171,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
         headers: { "content-type": "application/json" },
         credentials: "include",
         signal: ac.signal,
-        body: JSON.stringify({ keywords: finalKws, countryCode, language, mode, numKeywords, numCompetitors, transparency, ocr }),
+        body: JSON.stringify({ keywords: finalKws, countryCode, language, mode, numKeywords, numCompetitors, transparency, ocr, geoFootprint }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
@@ -185,7 +186,7 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
         abortRef.current = null;
       }
     }
-  }, [keywords, kwInput, countryCode, language, mode, numKeywords, numCompetitors, transparency, ocr]);
+  }, [keywords, kwInput, countryCode, language, mode, numKeywords, numCompetitors, transparency, ocr, geoFootprint]);
 
   return (
     <div style={{ minHeight: "100vh", background: colors.bg }}>
@@ -237,6 +238,8 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
           setTransparency={setTransparency}
           ocr={ocr}
           setOcr={setOcr}
+          geoFootprint={geoFootprint}
+          setGeoFootprint={setGeoFootprint}
           loading={loading}
           onRun={run}
         />
@@ -297,6 +300,8 @@ function ConfigPanel(props: {
   setTransparency: (t: TransparencyParams) => void;
   ocr: boolean;
   setOcr: (b: boolean) => void;
+  geoFootprint: boolean;
+  setGeoFootprint: (b: boolean) => void;
   loading: boolean;
   onRun: () => void;
 }) {
@@ -587,6 +592,37 @@ function ConfigPanel(props: {
           <span style={{ fontSize: 12, color: colors.textMuted }}>
             Runs Firecrawl on every display/image creative to extract the exact copy — shown next to each
             photo and mined for the analysis. Works in any mode with images (Company / Extended). Paid step.
+          </span>
+        </span>
+      </label>
+
+      {/* Geo footprint — which countries each competitor advertises in. */}
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          marginTop: 10,
+          padding: 12,
+          borderRadius: 10,
+          cursor: "pointer",
+          background: props.geoFootprint ? "rgba(16,185,129,0.08)" : colors.bgInput,
+          border: `1px solid ${props.geoFootprint ? colors.accent : colors.border}`,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={props.geoFootprint}
+          onChange={(e) => props.setGeoFootprint(e.target.checked)}
+          style={{ marginTop: 2, width: 16, height: 16, accentColor: colors.accent, cursor: "pointer" }}
+        />
+        <span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: colors.text, display: "block" }}>
+            🌍 Geo footprint — which countries each competitor runs ads in
+          </span>
+          <span style={{ fontSize: 12, color: colors.textMuted }}>
+            Looks up each competitor&apos;s creatives in the Transparency Center to map the countries
+            they advertise in (a share-by-country table). Great for a global run. Paid step.
           </span>
         </span>
       </label>

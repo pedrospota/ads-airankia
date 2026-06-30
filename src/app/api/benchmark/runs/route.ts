@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
     languageCode?: string;
     transparency?: unknown;
     ocr?: boolean;
+    geoFootprint?: boolean;
   };
   try {
     body = await request.json();
@@ -175,6 +176,7 @@ export async function POST(request: NextRequest) {
       adSpy: body.adSpy === true,
       transparency: parseTransparencyParams(body.transparency),
       ocr: body.ocr === true,
+      geoFootprint: body.geoFootprint === true,
     });
     return NextResponse.json({ runId });
   } catch (e) {

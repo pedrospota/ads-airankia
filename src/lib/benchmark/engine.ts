@@ -213,6 +213,8 @@ export async function startBenchmarkRun(input: {
   transparency?: TransparencyParams;
   /** Read the exact text off competitors' image creatives (Firecrawl OCR). */
   ocr?: boolean;
+  /** Look up which countries each competitor advertises in (Transparency geo). */
+  geoFootprint?: boolean;
 }): Promise<string> {
   const { ctx, entryMode } = input;
   const config = await getBenchmarkConfig();
@@ -271,6 +273,7 @@ export async function startBenchmarkRun(input: {
     transparency: input.transparency,
     entryMode,
     ocr: input.ocr === true,
+    geoFootprint: input.geoFootprint === true,
   }).catch(async (e) => {
     console.error("[benchmark] run crashed", runId, e);
     await setRun(runId, {
@@ -300,6 +303,7 @@ export async function runBenchmark(
     transparency?: TransparencyParams;
     entryMode?: EntryMode;
     ocr?: boolean;
+    geoFootprint?: boolean;
   }
 ): Promise<void> {
   const adSpy = seeds.adSpy === true;
@@ -586,11 +590,13 @@ export async function runBenchmark(
           guaranteedDomains,
           // OCR only when the user opted in (it reads the text off image creatives).
           ocr: seeds.ocr === true,
+          // Geo footprint: which countries each competitor advertises in (paid).
+          geoFootprint: seeds.geoFootprint === true,
         };
         // Hard wall-clock cap so a slow Oxylabs/SerpApi/LLM can't freeze the run.
         // The AI write-up (a reasoning model can take ~1-2 min) runs AFTER the
-        // scrape, and OCR fans out to extra image calls — give both headroom.
-        const liveTimeoutMs = seeds.ocr ? 330_000 : 230_000;
+        // scrape, and OCR / geo fan out to extra calls — give them all headroom.
+        const liveTimeoutMs = seeds.ocr || seeds.geoFootprint ? 330_000 : 230_000;
         const labReport = await Promise.race([
           runBenchmarkLabInApp(labQuery, cost, null, { skipOcr: seeds.ocr !== true }),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), liveTimeoutMs)),

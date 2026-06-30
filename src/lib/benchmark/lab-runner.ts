@@ -22,10 +22,11 @@
 // ============================================================================
 
 import { oxylabsKeywordAds } from "./oxylabs";
-import { serpApiTransparency, type SerpApiTransparencyOpts } from "./serpapi-transparency";
+import { serpApiTransparency, fetchCreativeRegions, type SerpApiTransparencyOpts } from "./serpapi-transparency";
 import { ocrImagesBatch } from "./firecrawl-ocr";
 import { computeAnalytics } from "./lab-analytics";
 import { benchmarkReport } from "./llm";
+import { COUNTRIES } from "./countries";
 import type {
   LabAd,
   LabAdvertiser,
@@ -130,6 +131,8 @@ function rawToLabAd(c: RawTransCreative, domain: string, keyword: string): LabAd
     viaKeyword: keyword,
     headline: c.headline ?? null,
     cta: null,
+    advertiserId: c.advertiser_id ?? null,
+    creativeId: c.ad_creative_id ?? null,
   };
 }
 
@@ -224,6 +227,19 @@ function labels(lang: string) {
         headlineWords: "Palabras más usadas en titulares", descriptionWords: "Palabras más usadas en descripciones",
         word: "Palabra", frequency: "Frecuencia",
         writtenBy: "Escrito por", grounded: "basado en datos reales de anuncios", tokensNa: "uso de tokens no disponible",
+        tokIn: "entrada", tokOut: "salida",
+        geoHeading: "🌍 Huella geográfica — en qué países pautan",
+        geoIntro: "En qué países está corriendo ads cada competidor (Centro de Transparencia de Google · por creativo).",
+        geoShareTitle: "Reparto por país (todos los competidores)",
+        country: "País", competitorsCol: "Competidores", creativesCol: "Creativos vistos", advertisesIn: "Pauta en",
+        sourcesHeading: "📡 Fuentes y método",
+        sourceLabel: "Fuente", usedFor: "Usado para",
+        srcOxylabs: "Anuncios de búsqueda (texto, posición, sitelinks)",
+        srcTransparency: "Creativos visuales, antigüedad, entidad legal, geo",
+        srcOcr: "Texto exacto leído de las imágenes",
+        srcGeo: "Países donde corre cada competidor",
+        srcAi: "Redacción y análisis estratégico del reporte",
+        notRun: "no usado en esta corrida",
       }
     : {
         displayHeading: "🖼️ Display Ads — Visual Creatives",
@@ -234,7 +250,103 @@ function labels(lang: string) {
         headlineWords: "Most-used words in headlines", descriptionWords: "Most-used words in descriptions",
         word: "Word", frequency: "Frequency",
         writtenBy: "Written by", grounded: "grounded in live ad data", tokensNa: "token usage unavailable",
+        tokIn: "in", tokOut: "out tokens",
+        geoHeading: "🌍 Geo Footprint — where competitors advertise",
+        geoIntro: "Which countries each competitor is running ads in (Google Transparency Center · per creative).",
+        geoShareTitle: "Share by country (all competitors)",
+        country: "Country", competitorsCol: "Competitors", creativesCol: "Creatives seen", advertisesIn: "Advertises in",
+        sourcesHeading: "📡 Sources & Method",
+        sourceLabel: "Source", usedFor: "Used for",
+        srcOxylabs: "Search ads (text, position, sitelinks)",
+        srcTransparency: "Visual creatives, ad age, legal entity, geo",
+        srcOcr: "Exact text read off the images",
+        srcGeo: "Countries where each competitor runs ads",
+        srcAi: "Wrote and analyzed the strategic report",
+        notRun: "not used in this run",
       };
+}
+
+// Localize a SerpApi (English) country name to the report language via the ISO
+// code from our catalogue + Intl.DisplayNames. Falls back to the English name.
+const NAME_TO_CODE = new Map(COUNTRIES.map((c) => [c.name.toLowerCase(), c.code]));
+const dnCache = new Map<string, Intl.DisplayNames | null>();
+function localizeCountry(name: string, lang: string): string {
+  if (!name || !lang || lang.toLowerCase().startsWith("en")) return name;
+  const code = NAME_TO_CODE.get(name.toLowerCase());
+  if (!code) return name;
+  if (!dnCache.has(lang)) {
+    try {
+      dnCache.set(lang, new Intl.DisplayNames([lang], { type: "region" }));
+    } catch {
+      dnCache.set(lang, null);
+    }
+  }
+  try {
+    return dnCache.get(lang)?.of(code) || name;
+  } catch {
+    return name;
+  }
+}
+
+// 🌍 Geo Footprint — per-competitor country list + an overall "share by country"
+// table (the cross-competitor view that matters most for a global run).
+function buildGeoSection(advertisers: LabAdvertiser[], lang = "en"): string {
+  const withGeo = advertisers.filter((a) => a.geoCountries && a.geoCountries.length);
+  if (!withGeo.length) return "";
+  const t = labels(lang);
+  const L: string[] = [];
+  L.push(`## ${t.geoHeading}`);
+  L.push(t.geoIntro, ``);
+
+  // Per-competitor: the countries they run ads in (most creatives first).
+  for (const a of withGeo) {
+    const list = (a.geoCountries ?? [])
+      .slice(0, 12)
+      .map((g) => `${localizeCountry(g.name, lang)} (${g.creatives})`)
+      .join(", ");
+    L.push(`- **${a.domain}** — ${t.advertisesIn}: ${list}`);
+  }
+
+  // Overall share by country: how many competitors + creatives per country.
+  const agg = new Map<string, { competitors: number; creatives: number }>();
+  for (const a of withGeo) {
+    for (const g of a.geoCountries ?? []) {
+      const cur = agg.get(g.name) ?? { competitors: 0, creatives: 0 };
+      cur.competitors++;
+      cur.creatives += g.creatives;
+      agg.set(g.name, cur);
+    }
+  }
+  const rows = [...agg.entries()].sort((a, b) => b[1].competitors - a[1].competitors || b[1].creatives - a[1].creatives).slice(0, 20);
+  if (rows.length) {
+    L.push(``, `**${t.geoShareTitle}**`, ``);
+    L.push(`| ${t.country} | ${t.competitorsCol} | ${t.creativesCol} |`, `| --- | --- | --- |`);
+    for (const [name, v] of rows) L.push(`| ${localizeCountry(name, lang)} | ${v.competitors} | ${v.creatives} |`);
+  }
+  return L.join("\n");
+}
+
+// 📡 Sources & Method — always present so the user sees exactly which API each
+// part came from and whether the write-up passed through AI.
+function buildSourcesSection(
+  opts: { mode: BenchmarkMode; aiModel: string | null; ocrUsed: boolean; geoUsed: boolean },
+  lang = "en",
+): string {
+  const t = labels(lang);
+  // What ACTUALLY ran this mode: Oxylabs in keyword/extended; Transparency in
+  // every mode except keyword. OCR/geo/AI reflect whether they produced output.
+  const usedOxylabs = opts.mode === "keyword" || opts.mode === "extended";
+  const usedTransparency = opts.mode !== "keyword";
+  const mark = (active: boolean, desc: string) => (active ? desc : `${desc} — _${t.notRun}_`);
+  const L: string[] = [];
+  L.push(`## ${t.sourcesHeading}`);
+  L.push(`| ${t.sourceLabel} | ${t.usedFor} |`, `| --- | --- |`);
+  L.push(`| **Oxylabs** · google_ads | ${mark(usedOxylabs, t.srcOxylabs)} |`);
+  L.push(`| **SerpApi** · Transparency Center | ${mark(usedTransparency, t.srcTransparency)} |`);
+  L.push(`| **Firecrawl** · OCR | ${mark(opts.ocrUsed, t.srcOcr)} |`);
+  L.push(`| **SerpApi** · ad-details (geo) | ${mark(opts.geoUsed, t.srcGeo)} |`);
+  L.push(`| **AI** · ${opts.aiModel ?? "—"} | ${mark(Boolean(opts.aiModel), t.srcAi)} |`);
+  return L.join("\n");
 }
 
 // The 🖼️ Display Ads gallery (photos + OCR text) — reused by both the
@@ -498,6 +610,15 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
     L.push(``);
   }
 
+  // ---- Geo footprint (when looked up) ----
+  const geo = buildGeoSection(advertisers, query.language);
+  if (geo) L.push(geo, ``);
+
+  // ---- Sources & method (always — this is the deterministic-only output) ----
+  const ocrUsed = advertisers.some((a) => a.topAd?.ocrText || a.oldestTop5.some((x) => x.ocrText));
+  const geoUsed = advertisers.some((a) => a.geoCountries && a.geoCountries.length);
+  L.push(buildSourcesSection({ mode: query.mode, aiModel: null, ocrUsed, geoUsed }, query.language), ``);
+
   return L.join("\n");
 }
 
@@ -560,7 +681,8 @@ async function analyze(
   query: LabQuery,
   mode: BenchmarkMode,
   advertisers: LabAdvertiser[],
-  cost: BenchmarkCostContext
+  cost: BenchmarkCostContext,
+  src: { ocrUsed: boolean; geoUsed: boolean }
 ): Promise<{ model: string; markdown: string } | null> {
   // Empty result → still return an honest report (buildFullReport renders the
   // "no advertisers found — try a broader keyword" guidance), never null, so the
@@ -570,10 +692,11 @@ async function analyze(
   }
 
   // Deterministic, EXACT data sections appended after the AI prose: the word-freq
-  // tables (the LLM is told not to fabricate counts) and the creative photo
-  // gallery (the LLM can't render images). Both localized to the brand language.
+  // tables (the LLM is told not to fabricate counts), the creative photo gallery
+  // (the LLM can't render images), the geo footprint, and the source attribution.
   const wordFreqSection = buildWordFreqSection(advertisers, query.language);
   const displaySection = buildDisplaySection(advertisers, query.language);
+  const geoSection = buildGeoSection(advertisers, query.language);
   const t = labels(query.language);
 
   // Rich, fully-grounded data payload for the AI writer (the real scraped fields).
@@ -598,6 +721,9 @@ async function analyze(
       oldestAdDaysActive: oldestDays || null,
       seenOnKeywords: a.viaKeywords,
       ocrTextOnImages: uniq(a.oldestTop5.map((x) => x.ocrText).filter((t): t is string => Boolean(t))).slice(0, 2),
+      // Countries this competitor advertises in (for strategic geo commentary;
+      // the detailed share-by-country table is appended deterministically).
+      countriesAdvertising: (a.geoCountries ?? []).slice(0, 8).map((g) => g.name),
     };
   });
   const data = {
@@ -626,10 +752,14 @@ async function analyze(
   if (r.markdown) {
     const tokensLine =
       r.tokensIn || r.tokensOut
-        ? `${r.tokensIn.toLocaleString("en-US")} in + ${r.tokensOut.toLocaleString("en-US")} tokens`
+        ? `${r.tokensIn.toLocaleString("en-US")} ${t.tokIn} + ${r.tokensOut.toLocaleString("en-US")} ${t.tokOut}`
         : t.tokensNa;
     const footer = `\n\n---\n_🤖 ${t.writtenBy} **${r.model}** · ${tokensLine} · ${t.grounded}._`;
-    const appendix = [wordFreqSection, displaySection].filter(Boolean).join("\n\n");
+    const sourcesSection = buildSourcesSection(
+      { mode, aiModel: r.model, ocrUsed: src.ocrUsed, geoUsed: src.geoUsed },
+      query.language,
+    );
+    const appendix = [wordFreqSection, displaySection, geoSection, sourcesSection].filter(Boolean).join("\n\n");
     const markdown = r.markdown + (appendix ? `\n\n${appendix}` : "") + footer;
     return { model: r.model ?? "AI", markdown };
   }
@@ -983,8 +1113,53 @@ export async function runBenchmarkLabInApp(
     }
   }
 
+  // Geo Footprint — user-toggled, paid: for each competitor, sample its creatives
+  // and ask Transparency ad-details which countries each ran in, then aggregate
+  // into a per-competitor country list (the "share by country" the report shows).
+  let geoUsed = false;
+  if (query.geoFootprint) {
+    const GEO_CAP = 48; // bound the paid ad-details fan-out
+    const tasks: { domain: string; advertiserId: string; creativeId: string }[] = [];
+    for (const adv of advertisers) {
+      for (const ad of adv.oldestTop5) {
+        if (ad.advertiserId && ad.creativeId) {
+          tasks.push({ domain: adv.domain, advertiserId: ad.advertiserId, creativeId: ad.creativeId });
+        }
+        if (tasks.filter((t) => t.domain === adv.domain).length >= 8) break; // ≤8 per competitor
+      }
+    }
+    const capped = tasks.slice(0, GEO_CAP);
+    if (capped.length) {
+      const regionLists = await Promise.all(
+        capped.map((t) => fetchCreativeRegions(t.advertiserId, t.creativeId, costCtx)),
+      );
+      const byDomain = new Map<string, Map<string, { creatives: number; lastShown: string | null }>>();
+      capped.forEach((t, i) => {
+        const m = byDomain.get(t.domain) ?? new Map<string, { creatives: number; lastShown: string | null }>();
+        for (const reg of regionLists[i]) {
+          const cur = m.get(reg.name) ?? { creatives: 0, lastShown: null };
+          cur.creatives++;
+          if (reg.lastShown && (!cur.lastShown || reg.lastShown > cur.lastShown)) cur.lastShown = reg.lastShown;
+          m.set(reg.name, cur);
+        }
+        byDomain.set(t.domain, m);
+      });
+      for (const adv of advertisers) {
+        const m = byDomain.get(adv.domain);
+        if (m && m.size) {
+          adv.geoCountries = [...m.entries()]
+            .map(([name, v]) => ({ name, creatives: v.creatives, lastShown: v.lastShown }))
+            .sort((a, b) => b.creatives - a.creatives);
+        }
+      }
+      // Honest "used" flag — true only if geo data actually came back.
+      geoUsed = advertisers.some((a) => a.geoCountries && a.geoCountries.length > 0);
+    }
+  }
+
   // Report = deterministic full teardown (always complete) + best-effort AI strategy.
-  const analysis = await analyze(query, mode, advertisers, costCtx);
+  // ocrUsed/geoUsed reflect whether each actually produced output (not just attempted).
+  const analysis = await analyze(query, mode, advertisers, costCtx, { ocrUsed: ocrCount > 0, geoUsed });
 
   // Aggregate stats.
   const allAds = advertisers.flatMap((a) => a.oldestTop5);

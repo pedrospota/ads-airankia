@@ -56,6 +56,7 @@ function normalizeQuery(body: Record<string, unknown>): LabQuery {
     numCompetitors,
     transparency: parseTransparencyParams(body.transparency),
     ocr: body.ocr === true,
+    geoFootprint: body.geoFootprint === true,
   };
 }
 

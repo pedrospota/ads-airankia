@@ -137,6 +137,8 @@ export function BenchmarkSuite({
   const [transparency, setTransparency] = useState<TransparencyParams>({});
   // OCR: read the exact text off competitors' image creatives (opt-in, paid step).
   const [ocr, setOcr] = useState(false);
+  // Geo footprint: which countries each competitor advertises in (opt-in, paid).
+  const [geoFootprint, setGeoFootprint] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -279,6 +281,7 @@ export function BenchmarkSuite({
           languageCode: langOverride || undefined,
           transparency,
           ocr,
+          geoFootprint,
         }),
       });
       const data = await res.json();
@@ -304,6 +307,7 @@ export function BenchmarkSuite({
     langOverride,
     transparency,
     ocr,
+    geoFootprint,
     openStream,
     loadRuns,
   ]);
@@ -439,6 +443,8 @@ export function BenchmarkSuite({
           setTransparency={setTransparency}
           ocr={ocr}
           setOcr={setOcr}
+          geoFootprint={geoFootprint}
+          setGeoFootprint={setGeoFootprint}
           knownCompetitors={knownCompetitors}
           brandWebsite={brandWebsite}
           canStart={canStart}
@@ -538,6 +544,8 @@ function EntryPanel({
   setTransparency,
   ocr,
   setOcr,
+  geoFootprint,
+  setGeoFootprint,
   knownCompetitors,
   brandWebsite,
   canStart,
@@ -565,6 +573,8 @@ function EntryPanel({
   setTransparency: (t: TransparencyParams) => void;
   ocr: boolean;
   setOcr: (b: boolean) => void;
+  geoFootprint: boolean;
+  setGeoFootprint: (b: boolean) => void;
   knownCompetitors: string[];
   brandWebsite: string | null;
   canStart: boolean;
@@ -1039,6 +1049,38 @@ function EntryPanel({
           <span style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.4 }}>
             Reads the exact copy off each Display creative and shows it next to the photo — also feeds the
             analysis. Adds a little time. Leave off for a faster, image-only teardown.
+          </span>
+        </span>
+      </label>
+
+      {/* Geo footprint toggle — which countries each competitor advertises in */}
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          marginTop: 10,
+          padding: 12,
+          borderRadius: 10,
+          cursor: running ? "not-allowed" : "pointer",
+          background: geoFootprint ? "rgba(16,185,129,0.08)" : colors.bgInput,
+          border: `1px solid ${geoFootprint ? colors.accent : colors.border}`,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={geoFootprint}
+          disabled={running}
+          onChange={(e) => setGeoFootprint(e.target.checked)}
+          style={{ marginTop: 2, width: 16, height: 16, accentColor: colors.accent, cursor: running ? "not-allowed" : "pointer" }}
+        />
+        <span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: colors.text, display: "block" }}>
+            🌍 Map which countries each competitor advertises in
+          </span>
+          <span style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.4 }}>
+            Looks up each competitor&apos;s creatives in the Transparency Center to build a share-by-country
+            view. Adds time + extra lookups. Leave off for a single-market teardown.
           </span>
         </span>
       </label>

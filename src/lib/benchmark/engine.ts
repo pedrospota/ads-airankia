@@ -588,8 +588,9 @@ export async function runBenchmark(
           ocr: seeds.ocr === true,
         };
         // Hard wall-clock cap so a slow Oxylabs/SerpApi/LLM can't freeze the run.
-        // OCR fans out to extra (paid) image calls, so allow more headroom for it.
-        const liveTimeoutMs = seeds.ocr ? 280_000 : 180_000;
+        // The AI write-up (a reasoning model can take ~1-2 min) runs AFTER the
+        // scrape, and OCR fans out to extra image calls — give both headroom.
+        const liveTimeoutMs = seeds.ocr ? 330_000 : 230_000;
         const labReport = await Promise.race([
           runBenchmarkLabInApp(labQuery, cost, null, { skipOcr: seeds.ocr !== true }),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), liveTimeoutMs)),

@@ -132,13 +132,29 @@ export async function setLlmConfig(
   return next;
 }
 
+/**
+ * Strip wrapping quotes + whitespace + control chars a pasted / env-injected key
+ * may carry. Coolify stored the key WITH literal single quotes ('sk-or-...'),
+ * which made the Authorization header `Bearer 'sk-or-...'` → OpenRouter 401 and
+ * the whole AI layer failed silently. Cleaning it here fixes every LLM call.
+ */
+function cleanKey(raw: string | null | undefined): string | undefined {
+  let s = (raw ?? "").trim().replace(/[^\x20-\x7E]/g, "");
+  if (
+    s.length >= 2 &&
+    ((s[0] === "'" && s[s.length - 1] === "'") || (s[0] === '"' && s[s.length - 1] === '"'))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s || undefined;
+}
+
 /** Resolve the OpenRouter key: env first, then the DB row. Never sent to client. */
 export async function getOpenRouterKey(): Promise<string | undefined> {
-  const envKey = process.env.OPENROUTER_API_KEY;
-  if (envKey && envKey.trim()) return envKey.trim();
+  const envKey = cleanKey(process.env.OPENROUTER_API_KEY);
+  if (envKey) return envKey;
   try {
-    const stored = await readValue<string>(KEY_OPENROUTER);
-    return stored && stored.trim() ? stored.trim() : undefined;
+    return cleanKey(await readValue<string>(KEY_OPENROUTER));
   } catch {
     return undefined;
   }

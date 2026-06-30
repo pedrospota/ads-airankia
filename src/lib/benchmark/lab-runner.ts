@@ -614,8 +614,11 @@ async function analyze(
   // returns a precise reason we surface to the user.
   const r = await benchmarkReport({
     cost,
-    maxTokens: 4200,
-    timeoutMs: 95_000,
+    // Reasoning models (e.g. GLM 5.2) spend completion tokens on hidden reasoning
+    // BEFORE the visible report — give enough headroom for reasoning + the full
+    // write-up so the report is never truncated.
+    maxTokens: 8000,
+    timeoutMs: 110_000,
     system: reportSystemPrompt(query.language),
     prompt: `COMPETITOR AD DATA (JSON — use ONLY this, quote it verbatim):\n${JSON.stringify(data)}`,
   });

@@ -484,6 +484,7 @@ export async function runBenchmark(
   // never hang the run (the 90% freeze Pedro hit); a failure/timeout just drops
   // the section, never kills the report.
   let adIntelligence: BenchmarkReport["adIntelligence"] = null;
+  let teardownDomains = 0; // advertisers found by the live pipeline (for the meta strip)
   if (adSpy || config.liveEnabled) {
     try {
       await stage(runId, "Reading competitors' live Google Ads", 92);
@@ -517,6 +518,7 @@ export async function runBenchmark(
             markdown: labReport.analysis.markdown,
             generatedBy: labReport.analysis.model,
           };
+          teardownDomains = labReport.advertisers.length;
         } else if (!labReport) {
           console.warn("[benchmark] ad-intelligence teardown timed out", runId);
         }
@@ -542,7 +544,7 @@ export async function runBenchmark(
     spendSummary: summarizeSpend(competitors.map((c) => c.spend), currency),
     meta: {
       liveAdSpy: adIntelligence !== null || competitors.some((c) => c.adsStatus === "ok"),
-      domainsAnalyzed: competitors.length,
+      domainsAnalyzed: competitors.length || teardownDomains,
       keywordsDiscovered:
         brandKeywords.length +
         competitors.reduce((n, c) => n + c.keywords.length, 0),

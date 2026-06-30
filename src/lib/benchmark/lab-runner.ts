@@ -174,8 +174,10 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   }
 
   const allAds = advertisers.flatMap((a) => a.oldestTop5);
-  const headlines = allAds.map((a) => a.headline).filter((x): x is string => Boolean(x));
-  const descriptions = allAds.map((a) => a.description).filter((x): x is string => Boolean(x));
+  // Ad-copy corpus: include the Oxylabs topAd (transparency creatives carry no text).
+  const copyAds = advertisers.flatMap((a) => [a.topAd, ...a.oldestTop5].filter((x): x is LabAd => Boolean(x)));
+  const headlines = copyAds.map((a) => a.headline).filter((x): x is string => Boolean(x));
+  const descriptions = copyAds.map((a) => a.description).filter((x): x is string => Boolean(x));
   const days = allAds.map((a) => a.daysActive ?? 0).filter((n) => n > 0);
   const avg = days.length ? Math.round(days.reduce((s, n) => s + n, 0) / days.length) : 0;
   const totalAds = advertisers.reduce((n, a) => n + a.totalAds, 0);
@@ -192,9 +194,9 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   // ---- Top competitors & their ad strategies ----
   L.push(`## Top Competitors & Their Ad Strategies`);
   advertisers.slice(0, 10).forEach((a, i) => {
-    const ad = a.oldestTop5[0];
-    const legal = a.oldestTop5.find((x) => x.legalName)?.legalName;
-    const sitelinks = uniq(a.oldestTop5.flatMap((x) => x.sitelinks ?? []));
+    const ad = a.topAd ?? a.oldestTop5[0];
+    const legal = a.oldestTop5.find((x) => x.legalName)?.legalName ?? a.topAd?.legalName;
+    const sitelinks = uniq([...(a.topAd?.sitelinks ?? []), ...a.oldestTop5.flatMap((x) => x.sitelinks ?? [])]);
     L.push(``, `### ${i + 1}. ${a.domain}${legal ? ` (${legal})` : ""} — ${a.totalAds} ad(s)`);
     L.push(`| Attribute | Details |`, `| --- | --- |`);
     if (ad?.position) L.push(`| Ad position | #${ad.position} |`);
@@ -270,7 +272,7 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   const vs: string[] = [];
   for (const a of advertisers) {
     const own = new Set((a.domain.split(".")[0] || "").split(/[-_]/));
-    const text = a.oldestTop5.map((x) => `${x.headline ?? ""} ${x.description ?? ""}`).join(" ").toLowerCase();
+    const text = [a.topAd, ...a.oldestTop5].map((x) => `${x?.headline ?? ""} ${x?.description ?? ""}`).join(" ").toLowerCase();
     const namesRival = [...brandTokens].some((t) => !own.has(t) && text.includes(t));
     if (namesRival || /\b(vs|versus|alternative|compare|better than)\b/.test(text)) vs.push(a.domain);
   }
@@ -284,7 +286,7 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   L.push(`## Landing Page Strategy`);
   L.push(`| Competitor | Landing page | Campaign |`, `| --- | --- | --- |`);
   for (const a of advertisers.slice(0, 10)) {
-    const ad = a.oldestTop5[0];
+    const ad = a.topAd ?? a.oldestTop5[0];
     L.push(`| ${a.domain} | ${ad?.detailsLink ?? a.sampleUrl ?? "—"} | ${ad?.campaign ?? "—"} |`);
   }
   L.push(``);
@@ -434,6 +436,7 @@ async function runKeywordMode(
         position: ad.position ?? null,
         cta: sitelinks[0] ?? null,
       };
+      if (!adv.topAd) adv.topAd = labAd; // representative ad with copy
       if (adv.oldestTop5.length < 5) adv.oldestTop5.push(labAd);
     }
   }
@@ -549,6 +552,10 @@ async function runExtendedMode(
   const { region, num, opts } = serpParamsFor(query, regionOverride);
 
   let discoveredDomains: string[] = [];
+  // Keep the Oxylabs ad COPY per domain (headline/description/campaign/sitelinks);
+  // transparency creatives have no text, so this is what feeds the per-competitor
+  // cards. Without it, extended-mode cards were thin (landing only).
+  const oxyAdByDomain = new Map<string, LabAd>();
 
   if (!skipKeywordSearch) {
     // Step 1: Oxylabs — keyword → advertiser domains. In PARALLEL (was sequential,
@@ -560,6 +567,29 @@ async function runExtendedMode(
       rawForLlm.push({ step: "oxylabs", ...result });
       for (const domain of result.advertisers) {
         if (!discoveredDomains.includes(domain)) discoveredDomains.push(domain);
+      }
+      for (const ad of result.ads) {
+        if (!ad.domain || oxyAdByDomain.has(ad.domain)) continue;
+        const sitelinks = (ad.sitelinks ?? []).map((s) => s.title).filter((t): t is string => Boolean(t));
+        oxyAdByDomain.set(ad.domain, {
+          advertiser: ad.title ?? null,
+          advertiserDomain: ad.domain,
+          legalName: null,
+          format: "text",
+          firstShown: null,
+          lastShown: null,
+          daysActive: null,
+          imageUrl: null,
+          detailsLink: ad.url ?? ad.destinationUrl ?? null,
+          targetDomain: ad.domain,
+          viaKeyword: result.keyword,
+          headline: ad.title ?? null,
+          description: ad.description ?? null,
+          campaign: ad.campaignLabel ?? ad.campaign ?? null,
+          sitelinks,
+          position: ad.position ?? null,
+          cta: sitelinks[0] ?? null,
+        });
       }
     }
     discoveredDomains = discoveredDomains.slice(0, query.numCompetitors);
@@ -600,14 +630,17 @@ async function runExtendedMode(
     labAds.sort((a, b) => (b.daysActive ?? 0) - (a.daysActive ?? 0));
     imageUrlsByDomain.set(domain, domainImages);
 
+    const oxyAd = oxyAdByDomain.get(domain) ?? null;
     byDomain.set(domain, {
       domain,
       source: "serpapi",
       totalAds: result.totalAds,
       oldestTop5: labAds.slice(0, 5),
-      sampleHeadline: labAds[0]?.headline ?? null,
-      sampleUrl: labAds[0]?.detailsLink ?? null,
-      viaKeywords: [query.keywords[0] ?? domain],
+      sampleHeadline: oxyAd?.headline ?? labAds[0]?.headline ?? null,
+      sampleUrl: oxyAd?.detailsLink ?? labAds[0]?.detailsLink ?? null,
+      viaKeywords: [oxyAd?.viaKeyword ?? query.keywords[0] ?? domain].filter((x): x is string => Boolean(x)),
+      // Oxylabs copy for the per-competitor card; transparency creatives stay in oldestTop5.
+      topAd: oxyAd,
     });
 
     rawForLlm.push({

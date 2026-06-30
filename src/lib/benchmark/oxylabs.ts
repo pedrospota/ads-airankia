@@ -195,7 +195,11 @@ export async function oxylabsKeywordAds(
 
   const auth = "Basic " + Buffer.from(`${c.username}:${c.password}`).toString("base64");
 
-  const MAX = 4; // Oxylabs returns the parsed object only ~half the time; retry the rest.
+  // Google returns paid ads for the SAME query only INTERMITTENTLY (verified: the
+  // identical "best ai seo tools" scrape flips between 0 and 4–6 ads call-to-call,
+  // always parsed). So we retry until ads appear, up to MAX. ~50% hit rate per call
+  // → 5 tries ≈ 97% chance of catching a snapshot with ads.
+  const MAX = 5;
   for (let attempt = 1; attempt <= MAX; attempt++) {
     let data: unknown;
     try {
@@ -235,13 +239,15 @@ export async function oxylabsKeywordAds(
     const ads = mapOxylabsAds(rawAds);
     const advertisers = [...new Set(ads.map((x) => x.domain).filter((d): d is string => Boolean(d)))];
 
-    // Got ads, or a genuinely parsed (but ad-less) SERP → done. Otherwise retry.
-    if (ads.length > 0 || parsedOk) {
+    // Ads found → done. Otherwise retry — empty `paid` is usually just this
+    // scrape, not a genuine no-ads SERP. Keep going (parsed-empty AND unparsed).
+    if (ads.length > 0) {
       meter(cost, keyword, "ok");
       return { keyword, geoLocation, advertisers, ads };
     }
-    meter(cost, keyword, "unparsed_retry_" + attempt);
+    meter(cost, keyword, (parsedOk ? "empty_retry_" : "unparsed_retry_") + attempt);
   }
+  meter(cost, keyword, "exhausted_no_ads");
   return empty;
 }
 

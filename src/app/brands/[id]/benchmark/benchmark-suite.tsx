@@ -1048,13 +1048,17 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
 
       {/* ===== Deterministic numbers first (the hero of the report) ===== */}
 
-      {/* keyword gaps */}
-      <h2 style={sectionTitle}>🎯 Keyword gaps</h2>
-      <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
-        Searches your competitors are associated with that you don&apos;t appear
-        to be — sorted by how many of them cover each one.
-      </p>
-      <KeywordGapTable colors={colors} gaps={report.keywordGaps} cur={report.currency} />
+      {/* keyword gaps — only when there's competitor footprint data to compare */}
+      {report.keywordGaps.length > 0 && (
+        <>
+          <h2 style={sectionTitle}>🎯 Keyword gaps</h2>
+          <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
+            Searches your competitors are associated with that you don&apos;t appear
+            to be — sorted by how many of them cover each one.
+          </p>
+          <KeywordGapTable colors={colors} gaps={report.keywordGaps} cur={report.currency} />
+        </>
+      )}
 
       {/* projected results for the recommended plan */}
       {report.forecast && (
@@ -1084,27 +1088,30 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
         </>
       )}
 
-      {/* competitors (qualitative facts) */}
-      <h2 style={sectionTitle}>🕵️ Competitor teardown</h2>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {report.competitors.map((c) => (
-          <CompetitorCard key={c.domain} colors={colors} c={c} />
-        ))}
-        {report.competitors.length === 0 && (
-          <EmptyNote colors={colors}>
-            No competitor domains could be analyzed. Add competitor websites to
-            your brand profile, or start the analysis pointed at one domain.
-          </EmptyNote>
-        )}
-      </div>
+      {/* competitors (qualitative facts) — only the OLD non-live path; the live
+          ad teardown above replaces this, so we hide the empty/redundant version. */}
+      {report.competitors.length > 0 && (
+        <>
+          <h2 style={sectionTitle}>🕵️ Competitor teardown</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {report.competitors.map((c) => (
+              <CompetitorCard key={c.domain} colors={colors} c={c} />
+            ))}
+          </div>
+        </>
+      )}
 
-      {/* ===== AI synthesis LAST — layered on top of the numbers above ===== */}
-      <h2 style={sectionTitle}>🧠 AI strategy</h2>
-      <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
-        A synthesis of the numbers and teardowns above — the &quot;so what, do
-        this&quot; layer, in your brand&apos;s language.
-      </p>
-      <StrategyCard colors={colors} report={report} />
+      {/* ===== AI synthesis — only when the old engine actually produced one ===== */}
+      {(report.strategy.summary?.trim() || report.strategy.opportunities.length > 0) && (
+        <>
+          <h2 style={sectionTitle}>🧠 AI strategy</h2>
+          <p style={{ fontSize: 13.5, color: colors.textMuted, marginTop: -8, marginBottom: 14 }}>
+            A synthesis of the numbers and teardowns above — the &quot;so what, do
+            this&quot; layer, in your brand&apos;s language.
+          </p>
+          <StrategyCard colors={colors} report={report} />
+        </>
+      )}
 
       <div style={{ marginTop: 24, fontSize: 12, color: colors.textFaint }}>
         Generated {fmtDate(report.generatedAt)} · content in{" "}

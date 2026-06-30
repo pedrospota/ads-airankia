@@ -55,6 +55,13 @@ export type LabAdvertiser = {
   sampleHeadline?: string | null;
   sampleUrl?: string | null;
   viaKeywords: string[];
+  /**
+   * The representative ad WITH COPY (headline/description/campaign/sitelinks) —
+   * from Oxylabs in keyword/extended modes. In extended mode `oldestTop5` holds
+   * the transparency creatives (image + days), so this carries the ad text the
+   * per-competitor card needs (transparency creatives have no copy).
+   */
+  topAd?: LabAd | null;
 };
 
 /** A data-provenance line shown in the report so the source is always clear. */

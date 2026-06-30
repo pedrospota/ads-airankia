@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   const since = sql`now() - (${days} || ' days')::interval`;
 
   try {
-    const [totals, byDay, byProvider, byCategory, byModel, byUser, recent] =
+    const [totals, byDay, byProvider, byCategory, byModel, byUser, recent, byTool] =
       await Promise.all([
         rows<{
           cost_micros: number;
@@ -153,6 +153,29 @@ export async function GET(request: NextRequest) {
           ORDER BY occurred_at DESC
           LIMIT 40
         `),
+        // Per-tool spend — what each feature/tool consumes (from meta.module/tool),
+        // so spend is observable down to "spy/keyword_spend", "benchmark/report", etc.
+        rows<{
+          module: string | null;
+          tool: string | null;
+          cost_micros: number;
+          tokens_in: number;
+          tokens_out: number;
+          events: number;
+        }>(sql`
+          SELECT
+            meta->>'module' AS module,
+            COALESCE(meta->>'tool', meta->>'stage', resource) AS tool,
+            COALESCE(SUM(cost_micros), 0)::float8 AS cost_micros,
+            COALESCE(SUM(tokens_in), 0)::float8 AS tokens_in,
+            COALESCE(SUM(tokens_out), 0)::float8 AS tokens_out,
+            COUNT(*)::int AS events
+          FROM cost_events
+          WHERE occurred_at >= ${since}
+          GROUP BY module, tool
+          ORDER BY cost_micros DESC, events DESC
+          LIMIT 40
+        `),
       ]);
 
     return NextResponse.json({
@@ -170,6 +193,7 @@ export async function GET(request: NextRequest) {
       byProvider,
       byCategory,
       byModel,
+      byTool,
       byUser,
       recent,
     });

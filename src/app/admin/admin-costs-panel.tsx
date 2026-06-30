@@ -62,6 +62,14 @@ interface RecentRow {
   user_id: string | null;
   run_id: string | null;
 }
+interface ToolRow {
+  module: string | null;
+  tool: string | null;
+  cost_micros: number;
+  tokens_in: number;
+  tokens_out: number;
+  events: number;
+}
 interface CostsResp {
   days: number;
   currency: string;
@@ -70,6 +78,7 @@ interface CostsResp {
   byProvider: ProviderRow[];
   byCategory: CategoryRow[];
   byModel: ModelRow[];
+  byTool: ToolRow[];
   byUser: UserRow[];
   recent: RecentRow[];
 }
@@ -366,6 +375,22 @@ export function AdminCostsPanel() {
                 compact(m.tokens_in),
                 compact(m.tokens_out),
                 compact(m.events),
+              ])}
+            />
+          </div>
+
+          {/* By tool — per-feature spend (spy/keyword_spend, benchmark/report, …) */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>By tool / feature</div>
+            <Table
+              head={["Module", "Tool / stage", "Cost", "Tokens in", "Tokens out", "Calls"]}
+              rows={(data.byTool ?? []).map((t) => [
+                t.module ?? "—",
+                t.tool ?? "—",
+                money(t.cost_micros, cur),
+                compact(t.tokens_in),
+                compact(t.tokens_out),
+                compact(t.events),
               ])}
             />
           </div>

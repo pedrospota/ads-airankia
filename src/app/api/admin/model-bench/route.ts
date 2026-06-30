@@ -67,6 +67,56 @@ const SYSTEM = [
 
 const PROMPT = `COMPETITIVE INTELLIGENCE (JSON):\n${JSON.stringify(SAMPLE_BRIEF, null, 2)}`;
 
+// ----------------------------------------------------------------------------
+// STRUCTURED (tool-calling) probe. The campaign agents A1..A6 depend on the
+// model emitting valid JSON via function-calling — markdown quality says nothing
+// about whether a model can do that. This proves it: we force a single
+// "emit_campaign" tool call and validate the arguments it returns. Same key
+// handling / timing / error-name-only branching / real-cost accounting as the
+// text path, so the two conditions are directly comparable.
+// ----------------------------------------------------------------------------
+const STRUCT_SYSTEM = [
+  "You are a paid-search strategist that outputs machine-readable plans.",
+  "Plan a tiny Google Search campaign and return it ONLY by calling the emit_campaign tool.",
+  "Do not write any prose, explanation, or markdown — emit the tool call and nothing else.",
+].join(" ");
+
+const STRUCT_PROMPT = [
+  "Plan a small Google Search campaign for airankia.com.",
+  'Target exactly these two zero-competition keywords: "ai search visibility" and "llm prompt monitoring".',
+  "Use a $30/day budget. Pick the most sensible objective.",
+  "Return the plan ONLY via the emit_campaign tool.",
+].join(" ");
+
+// One function the model is FORCED to call (tool_choice below). Its parameters
+// are the exact JSON Schema the A1..A6 agents expect for a campaign payload.
+const EMIT_CAMPAIGN_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "emit_campaign",
+    description: "Emit a Google Search campaign plan as structured data.",
+    parameters: {
+      type: "object",
+      properties: {
+        objective: { type: "string", enum: ["leads", "sales", "traffic"] },
+        daily_budget_usd: { type: "number" },
+        ad_groups: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              keywords: { type: "array", items: { type: "string" } },
+            },
+            required: ["name", "keywords"],
+          },
+        },
+      },
+      required: ["objective", "daily_budget_usd", "ad_groups"],
+    },
+  },
+};
+
 type ModelResult = {
   model: string;
   ok: boolean;
@@ -81,6 +131,43 @@ type ModelResult = {
   output: string;
   error: string | null;
 };
+
+// The campaign shape we require back from the forced tool call.
+type StructuredCampaign = {
+  objective: string;
+  daily_budget_usd: number;
+  ad_groups: { name: string; keywords: string[] }[];
+};
+
+type StructuredResult = {
+  model: string;
+  ok: boolean;          // valid tool JSON = validJson && hasAllFields
+  status: number;
+  ms: number;
+  validJson: boolean;   // tool arguments JSON.parse'd cleanly
+  hasAllFields: boolean; // parsed object has every required field, correctly typed
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number | null;
+  parsed: StructuredCampaign | null;
+  error: string | null;
+};
+
+// Structural validation of the tool arguments: objective (string),
+// daily_budget_usd (number), and a NON-EMPTY ad_groups array where every entry
+// has a string name + a keywords array. Mirrors what A1..A6 actually consume.
+function isValidCampaign(v: unknown): v is StructuredCampaign {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.objective !== "string") return false;
+  if (typeof o.daily_budget_usd !== "number") return false;
+  if (!Array.isArray(o.ad_groups) || o.ad_groups.length === 0) return false;
+  return o.ad_groups.every((g) => {
+    if (!g || typeof g !== "object") return false;
+    const ag = g as Record<string, unknown>;
+    return typeof ag.name === "string" && Array.isArray(ag.keywords);
+  });
+}
 
 async function runOne(model: string, key: string, maxTokens: number): Promise<ModelResult> {
   const base: ModelResult = {
@@ -147,6 +234,94 @@ async function runOne(model: string, key: string, maxTokens: number): Promise<Mo
   }
 }
 
+// Tool-calling sibling of runOne(). Same fetch shape, same key handling (the
+// caller passes the already-cleaned safe key), same usage:{include:true} cost
+// accounting, same AbortSignal.timeout, and the SAME error-name-only branching
+// in catch (never interpolate the raw exception — key-leak safe).
+async function runStructured(model: string, key: string, maxTokens: number): Promise<StructuredResult> {
+  const base: StructuredResult = {
+    model, ok: false, status: 0, ms: 0, validJson: false, hasAllFields: false,
+    tokensIn: 0, tokensOut: 0, costUsd: null, parsed: null, error: null,
+  };
+  const started = Date.now();
+  try {
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: STRUCT_SYSTEM },
+          { role: "user", content: STRUCT_PROMPT },
+        ],
+        // Force the single function call — this is what we're actually testing.
+        tools: [EMIT_CAMPAIGN_TOOL],
+        tool_choice: { type: "function", function: { name: "emit_campaign" } },
+        max_tokens: maxTokens,
+        temperature: 0.2, // low temp: structured emission, not prose
+        usage: { include: true },
+      }),
+      signal: AbortSignal.timeout(150_000),
+    });
+    base.ms = Date.now() - started;
+    base.status = resp.status;
+    const bodyText = await resp.text().catch(() => "");
+    if (!resp.ok) {
+      base.error = `HTTP ${resp.status}: ${clip(bodyText)}`;
+      return base;
+    }
+    let j: {
+      choices?: {
+        message?: { tool_calls?: { function?: { name?: string; arguments?: string } }[] };
+        finish_reason?: string;
+      }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+      error?: { message?: string };
+    };
+    try {
+      j = JSON.parse(bodyText);
+    } catch {
+      base.error = `non-JSON response (${bodyText.length} bytes)`;
+      return base;
+    }
+    if (j?.error?.message) {
+      base.error = clip(j.error.message);
+      return base;
+    }
+    base.tokensIn = j?.usage?.prompt_tokens ?? 0;
+    base.tokensOut = j?.usage?.completion_tokens ?? 0;
+    base.costUsd = typeof j?.usage?.cost === "number" ? j.usage.cost : null;
+
+    const rawArgs = j?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    if (typeof rawArgs !== "string" || !rawArgs) {
+      base.error = "model returned no tool call";
+      return base;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawArgs);
+    } catch {
+      base.error = "tool arguments were not valid JSON";
+      return base;
+    }
+    base.validJson = true;
+    base.hasAllFields = isValidCampaign(parsed);
+    if (base.hasAllFields) {
+      base.parsed = parsed as StructuredCampaign;
+      base.ok = true;
+    } else {
+      base.error = "tool JSON missing or mistyped required campaign fields";
+    }
+    return base;
+  } catch (e) {
+    base.ms = Date.now() - started;
+    // Branch on name only — never interpolate the raw exception (key-leak safe).
+    const name = (e as Error)?.name;
+    base.error = name === "TimeoutError" || name === "AbortError" ? "timed out (>150s)" : "network error";
+    return base;
+  }
+}
+
 function clip(s: string): string {
   const t = (s || "").replace(/\s+/g, " ").trim();
   return t.length > 200 ? t.slice(0, 199) + "…" : t;
@@ -162,7 +337,7 @@ export async function POST(request: NextRequest) {
   }
   const safeKey = key.replace(/[^\x20-\x7E]/g, "");
 
-  let body: { models?: unknown; maxTokens?: unknown } = {};
+  let body: { models?: unknown; maxTokens?: unknown; mode?: unknown } = {};
   try {
     body = await request.json();
   } catch {
@@ -174,15 +349,38 @@ export async function POST(request: NextRequest) {
   const maxTokens = Number.isFinite(Number(body.maxTokens))
     ? Math.min(4000, Math.max(400, Math.round(Number(body.maxTokens))))
     : 1600; // matches the real synthesize() budget — the honest condition
+  // "text" (default, fully backward-compatible) | "structured" | "both".
+  const mode: "text" | "structured" | "both" =
+    body.mode === "structured" || body.mode === "both" ? body.mode : "text";
 
   // Run all models in parallel so total wall-clock ≈ the slowest single model
   // (keeps the endpoint under the platform timeout even with a slow reasoner).
-  const results = await Promise.all(models.map((m) => runOne(m, safeKey, maxTokens)));
+  // In "both" we also run text+structured concurrently inside one Promise.all so
+  // the wall-clock is still ≈ the single slowest call, not the sum.
+  let results: ModelResult[] = [];
+  let structuredResults: StructuredResult[] | undefined;
+
+  if (mode === "structured") {
+    structuredResults = await Promise.all(models.map((m) => runStructured(m, safeKey, maxTokens)));
+  } else if (mode === "both") {
+    const [textResults, structResults] = await Promise.all([
+      Promise.all(models.map((m) => runOne(m, safeKey, maxTokens))),
+      Promise.all(models.map((m) => runStructured(m, safeKey, maxTokens))),
+    ]);
+    results = textResults;
+    structuredResults = structResults;
+  } else {
+    results = await Promise.all(models.map((m) => runOne(m, safeKey, maxTokens)));
+  }
 
   return NextResponse.json({
     maxTokens,
+    mode,
     task: "executive-summary synthesis from a sample CompetitiveBrief",
     ranAt: new Date().toISOString(),
     results,
+    // Only present when structured ran ("structured" or "both") — keeps the
+    // default text response { maxTokens, task, ranAt, results } unbroken.
+    ...(structuredResults ? { structuredResults } : {}),
   });
 }

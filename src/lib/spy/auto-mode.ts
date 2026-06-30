@@ -21,7 +21,6 @@ import {
   emptyBrief,
   type CompetitiveBrief,
   type KeywordSpendSlice,
-  type BriefSynthesis,
 } from "./brief";
 
 const normKw = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
@@ -126,20 +125,17 @@ export async function runAutoMode(input: AutoModeInput): Promise<AutoModeResult>
   }
 
   // ---- Layer 4: ONE LLM synthesis pass over the assembled brief ----
-  const synthesis = await synthesize(brief, input.cost);
-  if (synthesis.cost) addSource("synthesis", "OpenRouter", 0);
-  brief.synthesis = synthesis.data;
+  // Returns MARKDOWN (not JSON) — robust across models that wrap/garble JSON.
+  const synthesisMd = await synthesize(brief, input.cost);
+  if (synthesisMd) addSource("synthesis", "OpenRouter", 0);
 
   // ---- Render the premium consolidated report ----
-  const reportMarkdown = renderReport(brief);
+  const reportMarkdown = renderReport(brief, synthesisMd);
   return { brief, reportMarkdown, cost: Number(totalCost.toFixed(4)) };
 }
 
 // ---------------------------------------------------------------------------
-async function synthesize(
-  brief: CompetitiveBrief,
-  cost: BenchmarkCostContext
-): Promise<{ data: BriefSynthesis | null; cost: boolean }> {
+async function synthesize(brief: CompetitiveBrief, cost: BenchmarkCostContext): Promise<string | null> {
   const data = {
     brand: brief.brand,
     market: brief.market.countryName,
@@ -153,60 +149,31 @@ async function synthesize(
     brandThreats: brief.brandThreats.map((t) => ({ keyword: t.brandKeyword, conquesters: t.conquesters.map((c) => c.domain) })),
     landings: brief.landing.map((l) => ({ domain: l.domain, offer: l.offer, pricing: l.pricing, primaryCta: l.primaryCta, valueProps: l.valueProps })),
   };
+  // Plain-MARKDOWN output (no JSON) — reliable across every model. Becomes the
+  // report's Executive Summary, layered on top of the deterministic data.
   const r = await benchmarkReport({
     cost,
-    maxTokens: 2200,
+    maxTokens: 1600,
     timeoutMs: 110_000,
     system:
-      `You are a senior Google Ads strategist. From the competitor intelligence JSON, output ONLY a compact JSON object ` +
-      `{"positioning": string, "opportunities": string[], "threats": string[], "recommendedAngle": string}. ` +
-      `positioning = one sentence on where the brand can win vs these rivals; opportunities = 3-5 concrete plays grounded in the data (cite domains/keywords); ` +
-      `threats = 2-4 real risks (who's spending most, who attacks the brand); recommendedAngle = the single sharpest campaign angle. ` +
-      `Use ONLY the data; no markdown, no prose outside the JSON.`,
+      `You are a senior Google Ads strategist. From the competitor intelligence JSON, write a tight EXECUTIVE SUMMARY in GitHub-flavored Markdown (no H1). Cover, grounded in the data (cite domains/keywords): ` +
+      `where this brand can win vs these rivals (positioning), 3-5 concrete opportunities, the real threats (who spends most, who attacks the brand), and the single sharpest **Recommended angle** for the campaign. ` +
+      `Use ONLY the data provided; be specific and decision-ready; no preamble.`,
     prompt: `COMPETITIVE INTELLIGENCE (JSON):\n${JSON.stringify(data)}`,
   });
-  if (!r.markdown) return { data: null, cost: false };
-  try {
-    const text = r.markdown.replace(/```json|```/g, "").trim();
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    const parsed = JSON.parse(text.slice(start, end + 1)) as Partial<BriefSynthesis>;
-    return {
-      data: {
-        positioning: String(parsed.positioning ?? ""),
-        opportunities: Array.isArray(parsed.opportunities) ? parsed.opportunities.map(String) : [],
-        threats: Array.isArray(parsed.threats) ? parsed.threats.map(String) : [],
-        recommendedAngle: String(parsed.recommendedAngle ?? ""),
-      },
-      cost: true,
-    };
-  } catch {
-    return { data: null, cost: true };
-  }
+  return r.markdown && r.markdown.trim() ? r.markdown.trim() : null;
 }
 
 // ---------------------------------------------------------------------------
 // Deterministic premium report — always complete, AI synthesis layered on top.
-function renderReport(b: CompetitiveBrief): string {
+function renderReport(b: CompetitiveBrief, synthesisMd: string | null): string {
   const L: string[] = [];
   L.push(`# Competitive Intelligence — ${b.brand.name || b.brand.domain || "Your brand"}`);
   L.push(`_${b.market.countryName} · ${b.competitors.length} competitors · generated ${new Date(b.generatedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}_`, ``);
 
-  // Executive summary (AI synthesis).
-  if (b.synthesis) {
-    L.push(`## Executive Summary`);
-    if (b.synthesis.positioning) L.push(b.synthesis.positioning, ``);
-    if (b.synthesis.recommendedAngle) L.push(`**Recommended angle:** ${b.synthesis.recommendedAngle}`, ``);
-    if (b.synthesis.opportunities.length) {
-      L.push(`**Opportunities**`);
-      b.synthesis.opportunities.forEach((o) => L.push(`- ${o}`));
-      L.push(``);
-    }
-    if (b.synthesis.threats.length) {
-      L.push(`**Threats**`);
-      b.synthesis.threats.forEach((t) => L.push(`- ${t}`));
-      L.push(``);
-    }
+  // Executive summary (AI synthesis, markdown) — layered on the deterministic data.
+  if (synthesisMd) {
+    L.push(`## Executive Summary`, ``, synthesisMd, ``);
   }
 
   // Spend leaderboard.

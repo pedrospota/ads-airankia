@@ -112,6 +112,24 @@ export function Header({
                   borderRadius: 10, padding: 4, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                 }}>
                   <Link
+                    href="/spy"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    style={{
+                      width: '100%', padding: '10px 14px', borderRadius: 6,
+                      background: 'transparent', cursor: 'pointer',
+                      fontSize: 13, color: colors.text, textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(16,185,129,0.1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    Ad Spy
+                  </Link>
+                  <Link
                     href="/admin"
                     role="menuitem"
                     onClick={() => setMenuOpen(false)}

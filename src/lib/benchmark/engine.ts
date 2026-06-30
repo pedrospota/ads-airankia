@@ -211,6 +211,8 @@ export async function startBenchmarkRun(input: {
   adSpy?: boolean;
   /** Optional manual Transparency-Center params (advanced settings). */
   transparency?: TransparencyParams;
+  /** Read the exact text off competitors' image creatives (Firecrawl OCR). */
+  ocr?: boolean;
 }): Promise<string> {
   const { ctx, entryMode } = input;
   const config = await getBenchmarkConfig();
@@ -268,6 +270,7 @@ export async function startBenchmarkRun(input: {
     adSpy,
     transparency: input.transparency,
     entryMode,
+    ocr: input.ocr === true,
   }).catch(async (e) => {
     console.error("[benchmark] run crashed", runId, e);
     await setRun(runId, {
@@ -296,6 +299,7 @@ export async function runBenchmark(
     adSpy?: boolean;
     transparency?: TransparencyParams;
     entryMode?: EntryMode;
+    ocr?: boolean;
   }
 ): Promise<void> {
   const adSpy = seeds.adSpy === true;
@@ -580,11 +584,15 @@ export async function runBenchmark(
           numCompetitors: config.maxCompetitors,
           transparency: seeds.transparency,
           guaranteedDomains,
+          // OCR only when the user opted in (it reads the text off image creatives).
+          ocr: seeds.ocr === true,
         };
         // Hard wall-clock cap so a slow Oxylabs/SerpApi/LLM can't freeze the run.
+        // OCR fans out to extra (paid) image calls, so allow more headroom for it.
+        const liveTimeoutMs = seeds.ocr ? 280_000 : 180_000;
         const labReport = await Promise.race([
-          runBenchmarkLabInApp(labQuery, cost, null, { skipOcr: true }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 180_000)),
+          runBenchmarkLabInApp(labQuery, cost, null, { skipOcr: seeds.ocr !== true }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), liveTimeoutMs)),
         ]);
         if (labReport && labReport.analysis?.markdown) {
           adIntelligence = {

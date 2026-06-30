@@ -73,6 +73,7 @@ export async function POST(request: NextRequest) {
     countryCode?: string;
     languageCode?: string;
     transparency?: unknown;
+    ocr?: boolean;
   };
   try {
     body = await request.json();
@@ -173,6 +174,7 @@ export async function POST(request: NextRequest) {
       manualDomains,
       adSpy: body.adSpy === true,
       transparency: parseTransparencyParams(body.transparency),
+      ocr: body.ocr === true,
     });
     return NextResponse.json({ runId });
   } catch (e) {

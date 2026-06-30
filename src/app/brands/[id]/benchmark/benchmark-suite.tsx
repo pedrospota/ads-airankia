@@ -134,6 +134,8 @@ export function BenchmarkSuite({
   const [langOverride, setLangOverride] = useState("");
   // Advanced manual Transparency-Center params (optional; parity with the Lab).
   const [transparency, setTransparency] = useState<TransparencyParams>({});
+  // OCR: read the exact text off competitors' image creatives (opt-in, paid step).
+  const [ocr, setOcr] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -275,6 +277,7 @@ export function BenchmarkSuite({
           countryCode: marketOverride || undefined,
           languageCode: langOverride || undefined,
           transparency,
+          ocr,
         }),
       });
       const data = await res.json();
@@ -299,6 +302,7 @@ export function BenchmarkSuite({
     marketOverride,
     langOverride,
     transparency,
+    ocr,
     openStream,
     loadRuns,
   ]);
@@ -432,6 +436,8 @@ export function BenchmarkSuite({
           setLangOverride={setLangOverride}
           transparency={transparency}
           setTransparency={setTransparency}
+          ocr={ocr}
+          setOcr={setOcr}
           knownCompetitors={knownCompetitors}
           brandWebsite={brandWebsite}
           canStart={canStart}
@@ -544,6 +550,8 @@ function EntryPanel({
   setLangOverride,
   transparency,
   setTransparency,
+  ocr,
+  setOcr,
   knownCompetitors,
   brandWebsite,
   canStart,
@@ -569,6 +577,8 @@ function EntryPanel({
   setLangOverride: (s: string) => void;
   transparency: TransparencyParams;
   setTransparency: (t: TransparencyParams) => void;
+  ocr: boolean;
+  setOcr: (b: boolean) => void;
   knownCompetitors: string[];
   brandWebsite: string | null;
   canStart: boolean;
@@ -1014,6 +1024,38 @@ function EntryPanel({
           </div>
         </div>
       </details>
+
+      {/* OCR toggle — read the exact text off competitors' image creatives */}
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          marginTop: 16,
+          padding: 12,
+          borderRadius: 10,
+          cursor: running ? "not-allowed" : "pointer",
+          background: ocr ? "rgba(16,185,129,0.08)" : colors.bgInput,
+          border: `1px solid ${ocr ? colors.accent : colors.border}`,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={ocr}
+          disabled={running}
+          onChange={(e) => setOcr(e.target.checked)}
+          style={{ marginTop: 2, width: 16, height: 16, accentColor: colors.accent, cursor: running ? "not-allowed" : "pointer" }}
+        />
+        <span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: colors.text, display: "block" }}>
+            🔎 Read the text on competitors&apos; image ads (OCR)
+          </span>
+          <span style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.4 }}>
+            Reads the exact copy off each Display creative and shows it next to the photo — also feeds the
+            analysis. Adds a little time. Leave off for a faster, image-only teardown.
+          </span>
+        </span>
+      </label>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 20 }}>
         <button

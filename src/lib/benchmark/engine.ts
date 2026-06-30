@@ -490,8 +490,12 @@ export async function runBenchmark(
   // NO OCR ("no more than that"), NO adding domains to the brand's competitor
   // list (this only reads the brand). Same engine as /benchmark-lab.
   //
-  //   - "by a keyword" / auto with keywords → extended  (Oxylabs → domains → Transparency)
-  //   - "by a competitor" / only domains    → company   (Transparency on the given domains)
+  //   - "by a keyword" / auto with keywords → extended  (Oxylabs kw search → domains → Transparency)
+  //   - "by a competitor" / only domains    → extended  (Oxylabs BRAND search on domain as kw
+  //                                                       → gets real ad text/headlines → Transparency)
+  //   Domain-as-keyword search in Oxylabs finds the competitor's own brand ads (they bid
+  //   on their own name) + any rivals bidding on their brand → full text copy + sitelinks.
+  //   This is the key quality upgrade vs. the old company-only mode (images, no text).
   //
   // PAID → runs only on the explicit opt-in. Capped + hard-timeout so it can
   // never hang the run (the 90% freeze Pedro hit); a failure/timeout just drops
@@ -502,11 +506,14 @@ export async function runBenchmark(
     try {
       await stage(runId, "Reading competitors' live Google Ads", 92);
       const c = findCountry(country);
-      const labMode: BenchmarkMode = seeds.keywords.length ? "extended" : "company";
+      // Always run extended mode: when keywords are given, search them in Oxylabs;
+      // when only domains are given, use the domains AS keywords (Oxylabs brand search)
+      // so we get real ad text (headline/description/sitelinks) for those competitors.
+      const labMode: BenchmarkMode = "extended";
       const labSeeds = seeds.keywords.length
         ? seeds.keywords.slice(0, 3) // cap: a few keywords keeps Oxylabs fast
         : seeds.domains.length
-          ? seeds.domains
+          ? seeds.domains.slice(0, 3) // domain-as-keyword: finds their brand ads + rivals
           : [ctx.offering || ctx.name].filter(Boolean);
       if (labSeeds.length) {
         const labQuery: LabQuery = {

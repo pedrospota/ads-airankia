@@ -404,7 +404,17 @@ export function BenchmarkSuite({
             setEntryMode(m);
             // Pre-fill the editable list when switching to "competitors" mode
             if (m === "competitors" && selectedCompetitors.length === 0) {
-              setSelectedCompetitors(knownCompetitors.slice(0, 20));
+              // Filter to valid domains only (company names like "Peec AI" have no TLD)
+              const cleaned = knownCompetitors
+                .slice(0, 20)
+                .map((c) => {
+                  try {
+                    const h = new URL(c.startsWith("http") ? c : `https://${c}`).hostname.replace(/^www\./, "").toLowerCase();
+                    return h.includes(".") ? h : null;
+                  } catch { return null; }
+                })
+                .filter((d): d is string => Boolean(d));
+              setSelectedCompetitors(cleaned);
             }
           }}
           manualKeyword={manualKeyword}
@@ -664,28 +674,42 @@ function EntryPanel({
             onChange={(e) => setManualDomain(e.target.value)}
             disabled={running}
           />
-          {knownCompetitors.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-              {knownCompetitors.slice(0, 8).map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setManualDomain(c)}
-                  disabled={running}
-                  style={{
-                    padding: "5px 11px",
-                    borderRadius: 999,
-                    fontSize: 12,
-                    cursor: running ? "not-allowed" : "pointer",
-                    background: "transparent",
-                    border: `1px solid ${colors.border}`,
-                    color: colors.textMuted,
-                  }}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          )}
+          {knownCompetitors.length > 0 && (() => {
+            // Only show competitors that resolve to a valid domain (names like
+            // "Peec AI" without a TLD silently fail the lookup).
+            const domainChips = knownCompetitors
+              .slice(0, 12)
+              .map((c) => {
+                try {
+                  const h = new URL(c.startsWith("http") ? c : `https://${c}`).hostname.replace(/^www\./, "").toLowerCase();
+                  return h.includes(".") ? h : null;
+                } catch { return null; }
+              })
+              .filter((d): d is string => Boolean(d));
+            if (!domainChips.length) return null;
+            return (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                {domainChips.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setManualDomain(d)}
+                    disabled={running}
+                    style={{
+                      padding: "5px 11px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      cursor: running ? "not-allowed" : "pointer",
+                      background: "transparent",
+                      border: `1px solid ${colors.border}`,
+                      color: colors.textMuted,
+                    }}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
       {entryMode === "auto" && (
@@ -1183,9 +1207,7 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
         </>
       )}
 
-      {/* brand footprint */}
-      <h2 style={sectionTitle}>📍 Your own keyword footprint</h2>
-      <KeywordChips colors={colors} keywords={report.brandKeywords.slice(0, 30)} />
+      {/* brand footprint removed — Pedro doesn't want it in the benchmark view */}
 
       {/* estimated investment */}
       {report.spendSummary && (
@@ -1240,7 +1262,9 @@ function ReportView({ colors, report }: { colors: Colors; report: BenchmarkRepor
 function DataAvailabilityBanner({ colors, report }: { colors: Colors; report: BenchmarkReport }) {
   const kd = report.meta.keywordData;
   // Older reports (pre-field) and fully-OK runs show no banner.
-  if (!kd || kd.status === "ok") return null;
+  // no_access = dev token permanently stuck on Test; error = transient — both are
+  // noise to the user since neither is actionable from this screen.
+  if (!kd || kd.status === "ok" || kd.status === "no_access" || kd.status === "error") return null;
 
   const AMBER = "#FBBF24";
   const amberBg = "rgba(251,191,36,0.10)";

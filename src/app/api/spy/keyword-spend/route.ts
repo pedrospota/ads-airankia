@@ -8,6 +8,7 @@ import {
   domainSpendOverview,
   domainPaidKeywords,
   type PaidKeyword,
+  type DomainSpend,
 } from "@/lib/spy/dataforseo";
 
 export const runtime = "nodejs";
@@ -15,10 +16,52 @@ export const dynamic = "force-dynamic";
 
 const normKw = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+// Per-domain summary used in the you-vs-them comparison.
+interface DomainMetrics {
+  domain: string;
+  monthlySpend: number;
+  paidKeywords: number;
+  clicks: number;
+  avgCpc: number | null;
+  avgPosition: number | null;
+  positions: { top: number; pos2to3: number; pos4to10: number; lower: number };
+}
+
+// A keyword BOTH domains bid on — brand vs competitor side by side.
+interface SharedKeyword {
+  keyword: string;
+  volume: number;
+  theirCpc: number | null;
+  theirPosition: number | null;
+  theirEtv: number;
+  yourCpc: number | null;
+  yourPosition: number | null;
+  yourEtv: number;
+}
+
+// Pure: derive a DomainMetrics from a domain's spend overview + its returned
+// keyword list. avgCpc = mean cpc where cpc != null && > 0 (null if none);
+// avgPosition = mean position where position != null, rounded to 1 dp (null if none).
+function metricsFor(domain: string, overview: DomainSpend | null, kwList: PaidKeyword[]): DomainMetrics {
+  const cpcs = kwList.map((k) => k.cpc).filter((c): c is number => c != null && c > 0);
+  const poss = kwList.map((k) => k.position).filter((p): p is number => p != null);
+  const avgCpc = cpcs.length ? Math.round((cpcs.reduce((a, b) => a + b, 0) / cpcs.length) * 100) / 100 : null;
+  const avgPosition = poss.length ? Math.round((poss.reduce((a, b) => a + b, 0) / poss.length) * 10) / 10 : null;
+  return {
+    domain,
+    monthlySpend: overview?.estimatedMonthlySpend ?? 0,
+    paidKeywords: overview?.paidKeywords ?? 0,
+    clicks: overview?.estimatedPaidTraffic ?? 0,
+    avgCpc,
+    avgPosition,
+    positions: overview?.positions ?? { top: 0, pos2to3: 0, pos4to10: 0, lower: 0 },
+  };
+}
+
 // POST /api/spy/keyword-spend
 // Body: { domain, brandDomain?, countryCode? }
 // Returns a competitor's estimated Google Ads spend + the paid keywords it bids
-// on, and (when brandDomain is given) the keyword gap vs your brand.
+// on, and (when brandDomain is given) the full you-vs-them comparison + gap.
 export async function POST(request: NextRequest) {
   const authClient = await createSupabaseServerClient();
   const { data: { user } } = await authClient.auth.getUser();
@@ -66,23 +109,58 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: overview.error || kw.error }, { status: 502 });
   }
 
-  // Optional gap vs the brand's own paid keywords.
+  // Optional you-vs-them comparison when the brand's own domain is provided.
+  let brandSpend: DomainSpend | null = null;
+  let comparison: { brand: DomainMetrics; competitor: DomainMetrics } | null = null;
   let gap: {
     brandDomain: string;
-    shared: PaidKeyword[];
-    steal: PaidKeyword[]; // only the competitor bids → opportunity
-    defend: number; // count of keywords only the brand bids on
+    steal: PaidKeyword[];     // competitor bids, brand does NOT → opportunity
+    shared: SharedKeyword[];  // BOTH bid → brand vs competitor side by side
+    defend: PaidKeyword[];    // brand bids, competitor does NOT → brand's own keywords
+    defendCount: number;      // full count of defend keywords before the cap
   } | null = null;
 
   if (brandDomain && brandDomain !== domain) {
-    const brandKw = await domainPaidKeywords(brandDomain, locationCode, languageCode, 300);
+    // Brand: spend overview + its paid keywords (in parallel).
+    const [brandOverview, brandKw] = await Promise.all([
+      domainSpendOverview(brandDomain, locationCode, languageCode),
+      domainPaidKeywords(brandDomain, locationCode, languageCode, 300),
+    ]);
+    meter("domain_rank_overview", brandOverview.cost);
     meter("ranked_keywords", brandKw.cost);
+
+    brandSpend = brandOverview.data;
+    comparison = {
+      brand: metricsFor(brandDomain, brandOverview.data, brandKw.data),
+      competitor: metricsFor(domain, overview.data, kw.data),
+    };
+
     const compSet = new Set(kw.data.map((k) => normKw(k.keyword)));
-    const brandSet = new Set(brandKw.data.map((k) => normKw(k.keyword)));
-    const shared = kw.data.filter((k) => brandSet.has(normKw(k.keyword)));
-    const steal = kw.data.filter((k) => !brandSet.has(normKw(k.keyword)));
-    const defend = brandKw.data.filter((k) => !compSet.has(normKw(k.keyword))).length;
-    gap = { brandDomain, shared, steal, defend };
+    const brandByKw = new Map(brandKw.data.map((k) => [normKw(k.keyword), k] as const));
+
+    // Competitor bids, brand does not → steal these.
+    const steal = kw.data.filter((k) => !brandByKw.has(normKw(k.keyword)));
+    // Both bid → pair competitor (their*) with the brand entry (your*).
+    const shared: SharedKeyword[] = kw.data
+      .filter((k) => brandByKw.has(normKw(k.keyword)))
+      .map((k) => {
+        const yours = brandByKw.get(normKw(k.keyword))!;
+        return {
+          keyword: k.keyword,
+          volume: k.volume,
+          theirCpc: k.cpc,
+          theirPosition: k.position,
+          theirEtv: k.etv,
+          yourCpc: yours.cpc,
+          yourPosition: yours.position,
+          yourEtv: yours.etv,
+        };
+      });
+    // Brand bids, competitor does not → brand's own keywords to defend.
+    const defendAll = brandKw.data.filter((k) => !compSet.has(normKw(k.keyword)));
+    const defend = [...defendAll].sort((a, b) => b.etv - a.etv).slice(0, 100);
+
+    gap = { brandDomain, steal, shared, defend, defendCount: defendAll.length };
   }
 
   return NextResponse.json({
@@ -91,6 +169,8 @@ export async function POST(request: NextRequest) {
     spend: overview.data,
     keywords: kw.data,
     totalPaidKeywords: kw.total,
+    brandSpend,
+    comparison,
     gap,
     cost: Number(totalCost.toFixed(4)),
     source: "DataForSEO Labs",

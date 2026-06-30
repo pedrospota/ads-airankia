@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
 import { hasSearchApiKey } from "@/lib/benchmark/config";
+import { brandCompetitorList } from "@/lib/benchmark/page-fetch";
 import { BenchmarkSuite } from "./benchmark-suite";
 
 export const runtime = "nodejs";
@@ -26,16 +27,17 @@ export default async function BenchmarkPage({
   const supabase = createSupabaseReadClient(session?.access_token);
   const { data: brand } = await supabase
     .from("brand_project")
-    .select("id, name, website, competitors")
+    .select("id, name, website, competitors, competitor_profiles")
     .eq("id", brandId)
     .single();
   if (!brand) redirect("/brands");
 
-  const competitors = Array.isArray(brand.competitors)
-    ? brand.competitors
-        .map((c: unknown) => (typeof c === "string" ? c.trim() : ""))
-        .filter(Boolean)
-    : [];
+  // Prefer the structured, domain-bearing competitor_profiles (kept current by the
+  // main app) over the legacy free-text competitors array.
+  const competitors = brandCompetitorList(
+    brand.competitor_profiles,
+    brand.competitors
+  );
 
   // Whether live competitor-ad spying + keyword-advertiser discovery is even
   // possible (a SearchApi key is configured). The key itself is never sent to

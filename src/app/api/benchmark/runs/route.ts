@@ -11,7 +11,7 @@ import {
   type BenchmarkBrandContext,
   type EntryMode,
 } from "@/lib/benchmark/engine";
-import { toDomain } from "@/lib/benchmark/page-fetch";
+import { toDomain, brandCompetitorList } from "@/lib/benchmark/page-fetch";
 import { parseTransparencyParams } from "@/lib/benchmark/lab-types";
 
 export const runtime = "nodejs";
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
   const { data: brand, error: brandError } = await readClient
     .from("brand_project")
     .select(
-      "id, workspace_id, name, industry, website, business_entity_offering, audience_client, audience_plural, audience_singular, competitors, main_country"
+      "id, workspace_id, name, industry, website, business_entity_offering, audience_client, audience_plural, audience_singular, competitors, competitor_profiles, main_country"
     )
     .eq("id", brandId)
     .single();
@@ -125,11 +125,13 @@ export async function POST(request: NextRequest) {
   }
 
   const website = (brand.website ?? "").trim() || null;
-  const competitors = Array.isArray(brand.competitors)
-    ? brand.competitors
-        .map((c: unknown) => (typeof c === "string" ? c.trim() : ""))
-        .filter(Boolean)
-    : [];
+  // Prefer the structured, domain-bearing competitor_profiles over the legacy
+  // free-text competitors array (the column the tool used to read, which held
+  // stale data for some brands).
+  const competitors = brandCompetitorList(
+    brand.competitor_profiles,
+    brand.competitors
+  );
   // Market + language: auto-detected from the brand by default. The optional
   // body overrides only kick in when the user explicitly changes them (a valid
   // ISO-2 country / 2-letter language). An override country re-derives language

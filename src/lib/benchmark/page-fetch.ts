@@ -29,6 +29,42 @@ export function toDomain(input: string): string | null {
   }
 }
 
+/**
+ * The brand's competitor list for the benchmark. PREFERS `brand_project
+ * .competitor_profiles` (jsonb of {name, domain, source}) — the structured,
+ * domain-bearing list the main app keeps current from its audit — and falls back
+ * to the legacy free-text `competitors` array only when profiles are absent.
+ * Returns the best identifier per competitor (its domain when present, else name).
+ */
+export function brandCompetitorList(
+  competitorProfiles: unknown,
+  competitorsArray: unknown
+): string[] {
+  if (Array.isArray(competitorProfiles) && competitorProfiles.length) {
+    const out = competitorProfiles
+      .map((c) => {
+        if (c && typeof c === "object") {
+          const o = c as Record<string, unknown>;
+          const domain = typeof o.domain === "string" ? o.domain.trim() : "";
+          const name = typeof o.name === "string" ? o.name.trim() : "";
+          return domain || name;
+        }
+        return typeof c === "string" ? c.trim() : "";
+      })
+      .filter(Boolean);
+    if (out.length) return [...new Set(out)];
+  }
+  return Array.isArray(competitorsArray)
+    ? [
+        ...new Set(
+          competitorsArray
+            .map((c) => (typeof c === "string" ? c.trim() : ""))
+            .filter(Boolean)
+        ),
+      ]
+    : [];
+}
+
 export function toUrl(input: string): string | null {
   const raw = input.trim();
   if (!raw) return null;

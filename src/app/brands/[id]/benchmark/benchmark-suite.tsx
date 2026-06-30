@@ -28,7 +28,7 @@ interface Props {
   adSpyAvailable: boolean;
 }
 
-type EntryMode = "auto" | "keyword" | "domain";
+type EntryMode = "auto" | "keyword" | "domain" | "competitors";
 
 interface RunListItem {
   id: string;
@@ -122,6 +122,9 @@ export function BenchmarkSuite({
   const [entryMode, setEntryMode] = useState<EntryMode>("auto");
   const [manualKeyword, setManualKeyword] = useState("");
   const [manualDomain, setManualDomain] = useState("");
+  // "competitors" mode: editable list pre-filled from knownCompetitors
+  const [selectedCompetitors, setSelectedCompetitors] = useState<string[]>([]);
+  const [competitorInput, setCompetitorInput] = useState("");
   // The live competitor-ad analysis (Oxylabs → domains → Transparency) IS the
   // benchmark, so it always runs when the data sources are configured — no toggle.
   // Pressing "Start the analysis" (clearly labelled paid) is the explicit consent.
@@ -266,6 +269,7 @@ export function BenchmarkSuite({
           entryMode,
           manualKeyword: entryMode === "keyword" ? manualKeyword.trim() : undefined,
           manualDomain: entryMode === "domain" ? manualDomain.trim() : undefined,
+          manualDomains: entryMode === "competitors" ? selectedCompetitors : undefined,
           // Only send the paid opt-in when a key is actually available.
           adSpy: adSpyAvailable || undefined,
           countryCode: marketOverride || undefined,
@@ -290,6 +294,7 @@ export function BenchmarkSuite({
     entryMode,
     manualKeyword,
     manualDomain,
+    selectedCompetitors,
     adSpyAvailable,
     marketOverride,
     langOverride,
@@ -334,7 +339,8 @@ export function BenchmarkSuite({
     !running &&
     (entryMode === "auto" ||
       (entryMode === "keyword" && manualKeyword.trim().length > 0) ||
-      (entryMode === "domain" && manualDomain.trim().length > 0));
+      (entryMode === "domain" && manualDomain.trim().length > 0) ||
+      (entryMode === "competitors" && selectedCompetitors.length > 0));
 
   // ==========================================================================
   return (
@@ -394,11 +400,21 @@ export function BenchmarkSuite({
         <EntryPanel
           colors={colors}
           entryMode={entryMode}
-          setEntryMode={setEntryMode}
+          setEntryMode={(m) => {
+            setEntryMode(m);
+            // Pre-fill the editable list when switching to "competitors" mode
+            if (m === "competitors" && selectedCompetitors.length === 0) {
+              setSelectedCompetitors(knownCompetitors.slice(0, 20));
+            }
+          }}
           manualKeyword={manualKeyword}
           setManualKeyword={setManualKeyword}
           manualDomain={manualDomain}
           setManualDomain={setManualDomain}
+          selectedCompetitors={selectedCompetitors}
+          setSelectedCompetitors={setSelectedCompetitors}
+          competitorInput={competitorInput}
+          setCompetitorInput={setCompetitorInput}
           adSpyAvailable={adSpyAvailable}
           marketOverride={marketOverride}
           setMarketOverride={setMarketOverride}
@@ -507,6 +523,10 @@ function EntryPanel({
   setManualKeyword,
   manualDomain,
   setManualDomain,
+  selectedCompetitors,
+  setSelectedCompetitors,
+  competitorInput,
+  setCompetitorInput,
   adSpyAvailable,
   marketOverride,
   setMarketOverride,
@@ -528,6 +548,10 @@ function EntryPanel({
   setManualKeyword: (s: string) => void;
   manualDomain: string;
   setManualDomain: (s: string) => void;
+  selectedCompetitors: string[];
+  setSelectedCompetitors: (d: string[]) => void;
+  competitorInput: string;
+  setCompetitorInput: (s: string) => void;
   adSpyAvailable: boolean;
   marketOverride: string;
   setMarketOverride: (s: string) => void;
@@ -543,10 +567,11 @@ function EntryPanel({
   onStart: () => void;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const modes: { id: EntryMode; icon: string; title: string; sub: string }[] = [
+  const modes: { id: EntryMode; icon: string; title: string; sub: string; hidden?: boolean }[] = [
     { id: "auto", icon: "✨", title: "Automatic", sub: "We pick the competitors and keywords for you" },
     { id: "keyword", icon: "🔑", title: "By a keyword", sub: "Start from a search term you care about" },
     { id: "domain", icon: "🌐", title: "By a competitor", sub: "Point at one specific competitor domain" },
+    { id: "competitors", icon: "📋", title: "Your competitor list", sub: "Use the competitors already on your profile (editable)", hidden: knownCompetitors.length === 0 },
   ];
 
   const inputStyle: React.CSSProperties = {
@@ -569,7 +594,7 @@ function EntryPanel({
       }}
     >
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        {modes.map((m) => {
+        {modes.filter((m) => !m.hidden).map((m) => {
           const active = entryMode === m.id;
           return (
             <button
@@ -675,6 +700,92 @@ function EntryPanel({
           ) : (
             "We'll detect competitors from your brand profile."
           )}
+        </div>
+      )}
+      {entryMode === "competitors" && (
+        <div style={{ marginTop: 16 }}>
+          <label style={{ fontSize: 13, color: colors.textMuted, display: "block", marginBottom: 8 }}>
+            Competitor domains to analyze — remove any you don&apos;t want, or add more:
+          </label>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              alignItems: "center",
+              background: colors.bgInput,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 10,
+              padding: 8,
+              minHeight: 50,
+            }}
+          >
+            {selectedCompetitors.map((d) => (
+              <span
+                key={d}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "rgba(16,185,129,0.12)",
+                  border: "1px solid rgba(16,185,129,0.3)",
+                  color: colors.accent,
+                  borderRadius: 8,
+                  padding: "5px 8px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {d}
+                <button
+                  onClick={() => setSelectedCompetitors(selectedCompetitors.filter((x) => x !== d))}
+                  disabled={running}
+                  aria-label={`Remove ${d}`}
+                  style={{ background: "none", border: "none", color: colors.accent, cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 0 }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <input
+              value={competitorInput}
+              disabled={running}
+              onChange={(e) => setCompetitorInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") {
+                  e.preventDefault();
+                  const val = competitorInput.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+                  if (val && !selectedCompetitors.includes(val)) {
+                    setSelectedCompetitors([...selectedCompetitors, val]);
+                  }
+                  setCompetitorInput("");
+                } else if (e.key === "Backspace" && !competitorInput && selectedCompetitors.length) {
+                  setSelectedCompetitors(selectedCompetitors.slice(0, -1));
+                }
+              }}
+              onBlur={() => {
+                const val = competitorInput.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+                if (val && !selectedCompetitors.includes(val)) {
+                  setSelectedCompetitors([...selectedCompetitors, val]);
+                  setCompetitorInput("");
+                }
+              }}
+              placeholder={selectedCompetitors.length ? "Add another domain…" : "e.g. semrush.com"}
+              style={{
+                flex: 1,
+                minWidth: 160,
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                color: colors.text,
+                fontSize: 14,
+                padding: "5px 4px",
+              }}
+            />
+          </div>
+          <span style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 6, display: "block" }}>
+            Pre-filled from your brand profile · Transparency Center lookup · no keyword search needed
+          </span>
         </div>
       )}
 
@@ -2218,5 +2329,6 @@ function HistoryPanel({
 function entryModeLabel(m: string): string {
   if (m === "keyword") return "by keyword";
   if (m === "domain") return "by competitor";
+  if (m === "competitors") return "from competitor list";
   return "automatic";
 }

@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
     entryMode?: string;
     manualKeyword?: string;
     manualDomain?: string;
+    manualDomains?: string[];
     adSpy?: boolean;
     countryCode?: string;
     languageCode?: string;
@@ -90,7 +91,18 @@ export async function POST(request: NextRequest) {
       ? "keyword"
       : body.entryMode === "domain"
         ? "domain"
-        : "auto";
+        : body.entryMode === "competitors"
+          ? "competitors"
+          : "auto";
+
+  const manualDomains =
+    entryMode === "competitors" && Array.isArray(body.manualDomains)
+      ? body.manualDomains
+          .filter((d): d is string => typeof d === "string")
+          .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0])
+          .filter(Boolean)
+          .slice(0, 20)
+      : undefined;
 
   // Resolve the brand profile (Supabase, read-only) for context + geo.
   const {
@@ -158,6 +170,7 @@ export async function POST(request: NextRequest) {
       entryMode,
       manualKeyword: body.manualKeyword ?? null,
       manualDomain: body.manualDomain ?? null,
+      manualDomains,
       adSpy: body.adSpy === true,
       transparency: parseTransparencyParams(body.transparency),
     });

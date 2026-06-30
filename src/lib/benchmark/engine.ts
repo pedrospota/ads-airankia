@@ -70,7 +70,7 @@ export interface BenchmarkBrandContext {
   countryCode: string;
 }
 
-export type EntryMode = "auto" | "keyword" | "domain";
+export type EntryMode = "auto" | "keyword" | "domain" | "competitors";
 
 // ---- geo resolution (no LLM; small maps, TLD fallback) ---------------------
 
@@ -178,6 +178,9 @@ export async function startBenchmarkRun(input: {
   entryMode: EntryMode;
   manualKeyword?: string | null;
   manualDomain?: string | null;
+  /** User-edited list of competitor domains (for the "competitors" entry mode).
+   *  These replace the brand's saved competitor list for the live pipeline. */
+  manualDomains?: string[];
   /** End user's per-run opt-in to live competitor ads + keyword-advertiser
    *  discovery (PAID SearchApi). Default false → free run, no spend. */
   adSpy?: boolean;
@@ -186,9 +189,19 @@ export async function startBenchmarkRun(input: {
 }): Promise<string> {
   const { ctx, entryMode } = input;
   const config = await getBenchmarkConfig();
-  const adSpy = input.adSpy === true;
+  // "competitors" mode always runs the live Transparency pipeline (it IS the analysis)
+  const adSpy = input.adSpy === true || entryMode === "competitors";
 
-  const seedDomains = deriveCompetitorDomains(ctx.competitors, ctx.domain);
+  let seedDomains: string[];
+  if (entryMode === "competitors" && input.manualDomains?.length) {
+    // User's edited competitor list overrides the brand's saved list
+    seedDomains = input.manualDomains
+      .map((d) => toDomain(d))
+      .filter((d): d is string => Boolean(d));
+  } else {
+    seedDomains = deriveCompetitorDomains(ctx.competitors, ctx.domain);
+  }
+
   const manualDomain = input.manualDomain
     ? toDomain(input.manualDomain)
     : null;

@@ -145,6 +145,12 @@ export type LabQuery = {
   numCompetitors: number;
   /** Optional manual Transparency-Center params (Lab advanced panel). */
   transparency?: TransparencyParams;
+  /** Extended mode only: domains that MUST be looked up in the Transparency
+   *  Center regardless of what the Oxylabs keyword search discovers. Used by
+   *  domain-entry brand runs ("by a competitor" / "your competitor list") so a
+   *  flaky/empty Oxylabs brand-name search can never yield an empty report — the
+   *  explicitly-requested competitor's creatives are always pulled. */
+  guaranteedDomains?: string[];
 };
 
 /** A frequency stat with its share of the whole (count + percentage). */

@@ -1272,15 +1272,6 @@ function DataAvailabilityBanner({ colors, report }: { colors: Colors; report: Be
 
   type Tone = { icon: string; color: string; bg: string; border: string; title: string; body: string };
   const tones: Record<typeof kd.status, Tone> = {
-    no_access: {
-      icon: "🔌",
-      color: AMBER,
-      bg: amberBg,
-      border: amberBorder,
-      title: "Real keyword numbers aren't connected yet",
-      body:
-        "Google's Keyword Planner needs Basic API access to return search volumes, CPC and the traffic forecast — the current token only has Test access, so those figures are empty below. Everything that doesn't depend on it (the competitor teardowns) is fully real. The moment Basic access (or the dedicated planner credential) is connected, this report fills with real numbers automatically — no re-setup needed.",
-    },
     quota: {
       icon: "⏳",
       color: AMBER,
@@ -1307,15 +1298,6 @@ function DataAvailabilityBanner({ colors, report }: { colors: Colors; report: Be
       title: "Some keyword data is incomplete",
       body:
         "Most numbers came back, but at least one Keyword Planner call didn't — a few figures below may be missing or under-counted.",
-    },
-    error: {
-      icon: "⚠️",
-      color: AMBER,
-      bg: amberBg,
-      border: amberBorder,
-      title: "Keyword data couldn't be loaded",
-      body:
-        "Something went wrong fetching the Keyword Planner numbers, so the volumes and forecast below are empty. The competitor teardowns are still real — re-run to try again.",
     },
   };
 

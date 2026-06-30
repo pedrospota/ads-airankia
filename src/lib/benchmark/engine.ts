@@ -116,6 +116,31 @@ export function resolveLanguageCode(countryCode: string): string {
   return ISO_TO_LANG[countryCode.toUpperCase()] ?? "es";
 }
 
+/**
+ * Pick the strongest DISCOVERY keywords from the brand's footprint to seed the
+ * live Oxylabs ad search in auto mode. We want specific, commercial 2–4-word
+ * phrases (e.g. "ai seo software") that surface real advertisers — not 1-word
+ * heads ("seo") that return a random auction, nor very long tails. `keywords` is
+ * already sorted by search volume, so we keep that order.
+ */
+function pickDiscoveryKeywords(
+  keywords: { text: string }[],
+  n: number
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of keywords) {
+    const t = (k.text ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (!t || seen.has(t)) continue;
+    const words = t.split(" ");
+    if (words.length < 2 || words.length > 4) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
 /** Pull domain-like entries out of a free-form competitors list. */
 export function deriveCompetitorDomains(
   competitors: string[],
@@ -242,6 +267,7 @@ export async function startBenchmarkRun(input: {
     manualDomain,
     adSpy,
     transparency: input.transparency,
+    entryMode,
   }).catch(async (e) => {
     console.error("[benchmark] run crashed", runId, e);
     await setRun(runId, {
@@ -269,6 +295,7 @@ export async function runBenchmark(
     manualDomain?: string | null;
     adSpy?: boolean;
     transparency?: TransparencyParams;
+    entryMode?: EntryMode;
   }
 ): Promise<void> {
   const adSpy = seeds.adSpy === true;
@@ -510,11 +537,36 @@ export async function runBenchmark(
       // when only domains are given, use the domains AS keywords (Oxylabs brand search)
       // so we get real ad text (headline/description/sitelinks) for those competitors.
       const labMode: BenchmarkMode = "extended";
-      const labSeeds = seeds.keywords.length
-        ? seeds.keywords.slice(0, 3) // cap: a few keywords keeps Oxylabs fast
-        : seeds.domains.length
-          ? seeds.domains.slice(0, 3) // domain-as-keyword: finds their brand ads + rivals
-          : [ctx.offering || ctx.name].filter(Boolean);
+      const entryMode = seeds.entryMode ?? "auto";
+      const domainEntry = entryMode === "domain" || entryMode === "competitors";
+
+      // Decide what Oxylabs searches (this both discovers advertisers AND captures
+      // their real ad text) and which domains are guaranteed in Transparency:
+      //   - explicit keyword       → search that keyword
+      //   - by competitor / list   → brand-search the seed domains + guarantee them
+      //   - AUTO                    → DISCOVER the competitive set from the brand's
+      //                               top keywords (this is what produces the rich
+      //                               multi-competitor teardown Pedro wants); fall
+      //                               back to the saved domains only if we have no
+      //                               keywords to search.
+      let labSeeds: string[];
+      let guaranteedDomains: string[] | undefined;
+      if (seeds.keywords.length) {
+        labSeeds = seeds.keywords.slice(0, 3); // cap keeps Oxylabs fast
+      } else if (domainEntry && seeds.domains.length) {
+        labSeeds = seeds.domains.slice(0, 3); // domain-as-keyword: their brand ads + rivals
+        guaranteedDomains = seeds.domains.slice(0, config.maxCompetitors);
+      } else {
+        const discovery = pickDiscoveryKeywords(brandKeywords, 3);
+        if (discovery.length) {
+          labSeeds = discovery; // auto: discover advertisers on the brand's top terms
+        } else if (seeds.domains.length) {
+          labSeeds = seeds.domains.slice(0, 3);
+          guaranteedDomains = seeds.domains.slice(0, config.maxCompetitors);
+        } else {
+          labSeeds = [ctx.offering || ctx.name].filter(Boolean);
+        }
+      }
       if (labSeeds.length) {
         const labQuery: LabQuery = {
           keywords: labSeeds,
@@ -527,6 +579,7 @@ export async function runBenchmark(
           numKeywords: labSeeds.length,
           numCompetitors: config.maxCompetitors,
           transparency: seeds.transparency,
+          guaranteedDomains,
         };
         // Hard wall-clock cap so a slow Oxylabs/SerpApi/LLM can't freeze the run.
         const labReport = await Promise.race([

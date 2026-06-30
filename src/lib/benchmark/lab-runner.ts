@@ -170,6 +170,11 @@ function wordFreqRows(texts: string[], limit: number): { word: string; count: nu
 }
 
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
+
+// Normalize any user/API input to a bare registrable domain ("https://www.X.com/a" → "x.com").
+function cleanDomain(d: string): string {
+  return d.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].toLowerCase().trim();
+}
 const median = (xs: number[]): number => {
   if (!xs.length) return 0;
   const s = [...xs].sort((a, b) => a - b);
@@ -669,16 +674,16 @@ async function runExtendedMode(
         });
       }
     }
-    discoveredDomains = discoveredDomains.slice(0, query.numCompetitors);
   } else {
     // extended_company: use keywords as domain list directly.
-    discoveredDomains = query.keywords
-      .map((k) =>
-        k.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].toLowerCase().trim()
-      )
-      .filter(Boolean)
-      .slice(0, query.numCompetitors);
+    discoveredDomains = query.keywords.map(cleanDomain).filter(Boolean);
   }
+
+  // GUARANTEE: domains the caller explicitly requested are ALWAYS analyzed, even
+  // when Oxylabs returned nothing for the brand-name search (a flaky scrape must
+  // never produce an empty report). Prioritized first so they survive the cap.
+  const guaranteed = (query.guaranteedDomains ?? []).map(cleanDomain).filter(Boolean);
+  discoveredDomains = uniq([...guaranteed, ...discoveredDomains]).slice(0, query.numCompetitors);
 
   // Step 2: SerpApi Transparency per domain + collect image URLs — in parallel.
   const transparencyResults = await Promise.all(

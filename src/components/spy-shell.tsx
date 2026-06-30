@@ -9,6 +9,7 @@ import { useTheme } from "@/components/theme-provider";
 // sidebar — kept SEPARATE from the AI benchmark pipeline so each can be tested in
 // isolation. Only the live ones are clickable; the rest show the roadmap.
 const TOOLS: { href: string; icon: string; label: string; live: boolean; source: string }[] = [
+  { href: "/spy/report", icon: "📄", label: "Premium Report", live: true, source: "All tools → one report" },
   { href: "/spy/keyword-spend", icon: "💰", label: "Keyword & Spend Spy", live: true, source: "DataForSEO" },
   { href: "/spy/landing", icon: "🔬", label: "Landing X-Ray", live: true, source: "Firecrawl + AI" },
   { href: "/spy/brand-defense", icon: "🛡️", label: "Brand Defense", live: true, source: "Oxylabs" },

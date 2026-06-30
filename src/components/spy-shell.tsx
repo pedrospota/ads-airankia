@@ -10,9 +10,9 @@ import { useTheme } from "@/components/theme-provider";
 // isolation. Only the live ones are clickable; the rest show the roadmap.
 const TOOLS: { href: string; icon: string; label: string; live: boolean; source: string }[] = [
   { href: "/spy/keyword-spend", icon: "💰", label: "Keyword & Spend Spy", live: true, source: "DataForSEO" },
-  { href: "/spy/landing", icon: "🔬", label: "Landing X-Ray", live: false, source: "Firecrawl + AI" },
-  { href: "/spy/brand-defense", icon: "🛡️", label: "Brand Defense", live: false, source: "Oxylabs" },
-  { href: "/spy/discovery", icon: "🔍", label: "Competitor Discovery", live: false, source: "DataForSEO" },
+  { href: "/spy/landing", icon: "🔬", label: "Landing X-Ray", live: true, source: "Firecrawl + AI" },
+  { href: "/spy/brand-defense", icon: "🛡️", label: "Brand Defense", live: true, source: "Oxylabs" },
+  { href: "/spy/discovery", icon: "🔍", label: "Competitor Discovery", live: true, source: "DataForSEO" },
   { href: "/spy/monitor", icon: "🔔", label: "Monitor & Alerts", live: false, source: "Snapshots" },
 ];
 

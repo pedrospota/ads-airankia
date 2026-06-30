@@ -36,70 +36,6 @@ import type {
 } from "./lab-types";
 import type { BenchmarkCostContext } from "./types";
 
-// Senior-strategist benchmark prompt — produces the rich, decision-ready report
-// format (landscape → per-competitor teardown → copy analysis → keyword mining →
-// positioning map), in the brand's language, from the real Oxylabs + SerpApi +
-// OCR data only.
-const SYSTEM_PROMPT = `Act like a senior performance-marketing strategist running a competitor benchmark to uncover rivals' Google Ads strategies. You receive RAW JSON from up to three real data sources:
-- Oxylabs (source: google_ads): the live PAID results on a keyword. Each ad has: title (headline), description (desc), landing page (url), root destination (destinationUrl), the decoded campaign + campaignLabel + targetedKeyword + matchType from the tracking URL, sitelinks, and position/positionOverall.
-- SerpApi (engine: google_ads_transparency_center): a domain's active ad creatives, each with first_shown/last_shown, total_days_shown (age in days), format, the FULL creative image URL, the advertiser legal name, and target_domain.
-- Firecrawl OCR: the text extracted from each ad image (keyed by image URL).
-
-Write the report in the brand's language. Use GitHub-flavored Markdown. Use ONLY the real data provided — never invent advertisers, numbers, URLs or quotes. If a field is missing, omit it gracefully. Produce EXACTLY these sections, in this order:
-
-# Competitive Intelligence Report
-
-## Competitive Landscape Overview
-Country analyzed · search query (or domain) · total ads found · total unique competitors (domains) · average ad age in days (ONLY when transparency data is present).
-
-## Top Competitors & Their Ad Strategies
-For EACH competitor (ranked by ad presence / position) a compact table with rows: Ad Position, Main Headline, Description, Landing Page, Campaign Label (decoded from the tracking URL when present), Key USPs, Sitelinks, Calls to Action detected.
-
-## Top 5 Oldest Ads (longest-running = proven winners)
-ONLY when transparency data is present. For each: the FULL creative image URL (https://tpc.googlesyndication.com/...), days active, advertiser, landing URL, and any text extracted from the image via OCR.
-
-## Ad Copy & Headlines Analysis
-A "Most Used Words in Headlines" table (Word | Frequency | % of ads) and a "Most Used Words in Descriptions" table (Word | Frequency | % of ads). Exclude generic stopwords.
-
-## Keyword Ranking Recommendations
-At least 10 keywords mined from the most-used terms across headlines/descriptions and the targetedKeyword fields. Split into High-Priority and Niche, ranked by commercial intent.
-
-## Brand vs. Competitor Strategy
-State Yes/No whether any advertiser bids on competitor brand terms or positions against rivals, with the evidence.
-
-## Landing Page Strategy Insights
-Table: Competitor | Landing Page | Offer / Strategy.
-
-## Strategic Recommendations
-Headlines that win (patterns from the winners) · description angles to test · sitelinks you need · gaps to exploit (what NO competitor is doing).
-
-## Competitive Positioning Map
-A simple ASCII quadrant placing the competitors (e.g. feature complexity vs price, or breadth vs speed).
-
-## Legal Entities / Brands Running Ads
-Every advertiser domain with its legal entity name (from transparency advertiser_legal_name when available).
-
-HARD RULES:
-- ALWAYS output FULL image URLs (https://tpc.googlesyndication.com/archive/simgad/...). NEVER output CR IDs like CR12154176544763281409.
-- Extract the real landing/destination URLs and campaign labels from the data.
-- Percentages must be computed from the real counts.
-- Keep it concrete and decision-ready — the kind of teardown a strategist hands a client.`;
-
-// Single-string structured output so the report flows through callStructured()
-// (which enforces provider routing, deadlines and cost metering) cleanly.
-const REPORT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    report: {
-      type: "string",
-      description:
-        "The complete competitor-intelligence benchmark report in GitHub-flavored Markdown, in the brand's language, following the exact section structure from the system prompt.",
-    },
-  },
-  required: ["report"],
-};
-
 export function labRunnerConfigured(): boolean {
   const hasOxylabs =
     Boolean(process.env.OXYLABS_USERNAME?.trim() || process.env.OXYLABS_USER?.trim());
@@ -113,32 +49,45 @@ export function labRunnerConfigured(): boolean {
 // ---------------------------------------------------------------------------
 // SerpApi raw creative shape (what comes back from the API).
 // ---------------------------------------------------------------------------
+// Real SerpApi google_ads_transparency_center creative shape (confirmed by probe):
+//   advertiser_id, advertiser (= legal name e.g. "Semrush INC"), ad_creative_id (CR…),
+//   format, target_domain, image (FULL tpc.googlesyndication.com URL), width, height,
+//   total_days_shown, first_shown/last_shown (UNIX seconds), details_link.
+// Text-format creatives carry NO headline/description here — that text only comes
+// from Oxylabs (keyword mode) or the Firecrawl OCR (extended mode).
 interface RawTransCreative {
   advertiser?: string | null;
   advertiser_id?: string | null;
   advertiser_legal_name?: string | null;
   legal_name?: string | null;
+  ad_creative_id?: string | null;
   target_domain?: string | null;
   format?: string | null;
-  first_shown?: string | null;
+  first_shown?: string | number | null;
   first_shown_date?: string | null;
-  last_shown?: string | null;
+  last_shown?: string | number | null;
   last_shown_date?: string | null;
   total_days_shown?: number | null;
   days?: number | null;
-  // Full image URL — we want THIS, not the CR id.
   image?: string | null;
   thumbnail?: string | null;
   preview?: string | null;
-  // Detail / landing links.
   details_link?: string | null;
   link?: string | null;
   final_url?: string | null;
   url?: string | null;
-  // Creative text.
   headline?: string | null;
   description?: string | null;
   body?: string | null;
+}
+
+// UNIX-seconds (or ISO) → "YYYY-MM-DD" for display; null-safe.
+function toDateStr(v: string | number | null | undefined): string | null {
+  if (v == null) return null;
+  if (typeof v === "number") {
+    try { return new Date(v * 1000).toISOString().slice(0, 10); } catch { return null; }
+  }
+  return v;
 }
 
 function rawToLabAd(c: RawTransCreative, domain: string, keyword: string): LabAd & {
@@ -158,17 +107,21 @@ function rawToLabAd(c: RawTransCreative, domain: string, keyword: string): LabAd
     (c.preview?.startsWith("http") ? c.preview : null) ??
     null;
 
+  // Real landing isn't in the transparency payload — use the verified target
+  // domain as the destination; details_link is the ad-detail page on Google.
   const landingUrl =
-    c.final_url ?? c.url ?? c.details_link ?? c.link ?? null;
+    c.final_url ?? c.url ?? (c.target_domain ? `https://${c.target_domain}` : null) ?? c.details_link ?? null;
+  // Legal name lives in `advertiser` (e.g. "Semrush INC"), NOT advertiser_legal_name.
+  const legal = c.advertiser_legal_name ?? c.legal_name ?? c.advertiser ?? null;
 
   return {
     advertiser: c.advertiser ?? null,
     advertiserDomain: c.target_domain ?? domain,
-    legalName: c.advertiser_legal_name ?? c.legal_name ?? null,
-    legalNameRaw: c.advertiser_legal_name ?? c.legal_name ?? null,
+    legalName: legal,
+    legalNameRaw: legal,
     format: c.format ?? "text",
-    firstShown: c.first_shown ?? c.first_shown_date ?? null,
-    lastShown: c.last_shown ?? c.last_shown_date ?? null,
+    firstShown: toDateStr(c.first_shown ?? c.first_shown_date),
+    lastShown: toDateStr(c.last_shown ?? c.last_shown_date),
     daysActive,
     imageUrl,
     imageUrlRaw: imageUrl ?? undefined,
@@ -181,114 +134,242 @@ function rawToLabAd(c: RawTransCreative, domain: string, keyword: string): LabAd
 }
 
 // ---------------------------------------------------------------------------
-// Strategic teardown via the app's unified LLM layer (model/provider per /admin,
-// cost metered). Non-fatal — returns null if the LLM call fails so the
-// deterministic dashboard data is still returned.
+// DETERMINISTIC full report — computes EVERY section from the real data so the
+// benchmark ALWAYS renders completely, with zero dependency on the (flaky) LLM.
+// Rendered by <MarkdownReport> (GFM tables + clickable image/landing URLs).
 // ---------------------------------------------------------------------------
-// Huge fields that bloat the prompt (Google tracking/aclk URLs, preview scripts)
-// without helping the report — dropped before the data is sent to the LLM. The
-// untrimmed payload was timing the model out (70s deadline) → empty reports.
-const HUGE_KEYS = new Set([
-  "data_rw", "trackingUrl", "details_script_link", "details_link", "data_pcu",
-  "references", "favicon", "details_script", "link",
+const STOP = new Set([
+  "the","a","an","and","or","for","to","of","in","on","with","your","you","our","my","is","are","be",
+  "get","got","now","best","top","new","free","all","one","it","that","this","from","by","at","as","more",
+  "most","up","out","no","yes","vs","&","el","la","los","las","un","una","y","o","para","de","del","en",
+  "con","tu","tus","su","sus","mi","es","son","ya","lo","que","por","más","mas","mejor","gratis","nuevo","todo","todos",
 ]);
-const TEXT_KEYS = new Set(["description", "desc", "body", "text", "snippet"]);
+function tokenize(s: string | null | undefined): string[] {
+  return (s || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+}
+const goodTerm = (t: string) => t.length > 2 && !STOP.has(t) && !/^\d+$/.test(t);
 
-function trimForPrompt(v: unknown, depth = 0): unknown {
-  if (depth > 7) return undefined;
-  if (Array.isArray(v)) return v.slice(0, 12).map((x) => trimForPrompt(x, depth + 1));
-  if (v && typeof v === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (HUGE_KEYS.has(k)) continue;
-      if (TEXT_KEYS.has(k) && typeof val === "string" && val.length > 280) {
-        out[k] = val.slice(0, 280) + "…";
-      } else {
-        const w = trimForPrompt(val, depth + 1);
-        if (w !== undefined) out[k] = w;
-      }
-    }
-    return out;
+function wordFreqRows(texts: string[], limit: number): { word: string; count: number; pct: number }[] {
+  const docs = texts.map((t) => (t || "").trim()).filter(Boolean);
+  const freq = new Map<string, number>();
+  for (const t of docs) {
+    for (const w of new Set(tokenize(t).filter(goodTerm))) freq.set(w, (freq.get(w) ?? 0) + 1);
   }
-  return v;
+  return [...freq.entries()]
+    .map(([word, count]) => ({ word, count, pct: docs.length ? Math.round((count / docs.length) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word))
+    .slice(0, limit);
 }
 
-// Deterministic Markdown report straight from the structured advertiser data —
-// the safety net when the LLM is unavailable/slow, so the benchmark NEVER comes
-// back with an empty teardown.
-function buildDeterministicReport(query: LabQuery, advertisers: LabAdvertiser[]): string {
+const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
+
+function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string {
+  const L: string[] = [];
+  L.push(`# Competitive Intelligence Report`, ``);
+
+  if (!advertisers.length) {
+    L.push(`No advertisers were found running ads for **${query.keywords.join(", ")}** in ${query.countryName} right now.`);
+    L.push(``, `_This can happen when no one is bidding on the term at this moment, or for a very niche query. Try a broader keyword._`);
+    return L.join("\n");
+  }
+
   const allAds = advertisers.flatMap((a) => a.oldestTop5);
+  const headlines = allAds.map((a) => a.headline).filter((x): x is string => Boolean(x));
+  const descriptions = allAds.map((a) => a.description).filter((x): x is string => Boolean(x));
   const days = allAds.map((a) => a.daysActive ?? 0).filter((n) => n > 0);
   const avg = days.length ? Math.round(days.reduce((s, n) => s + n, 0) / days.length) : 0;
   const totalAds = advertisers.reduce((n, a) => n + a.totalAds, 0);
-  const lines: string[] = [];
-  lines.push(`# Competitive Intelligence Report`, ``);
-  lines.push(`## Competitive Landscape Overview`);
-  lines.push(`- **Query / input:** ${query.keywords.join(", ")}`);
-  lines.push(`- **Country analyzed:** ${query.countryName}`);
-  lines.push(`- **Total ads found:** ${totalAds}`);
-  lines.push(`- **Competitors (domains):** ${advertisers.length}`);
-  if (avg > 0) lines.push(`- **Average ad age:** ${avg} days`);
-  lines.push(``);
-  lines.push(`## Competitors & Their Ads`);
-  for (const a of advertisers) {
-    lines.push(``, `### ${a.domain} — ${a.totalAds} ad(s)`);
-    const legal = a.oldestTop5.find((ad) => ad.legalName)?.legalName;
-    if (legal) lines.push(`Legal entity: ${legal}`);
-    for (const ad of a.oldestTop5.slice(0, 5)) {
-      const bits: string[] = [];
-      if (ad.headline) bits.push(`**${ad.headline}**`);
-      if (ad.daysActive) bits.push(`${ad.daysActive} days active`);
-      if (ad.imageUrl) bits.push(ad.imageUrl);
-      if (ad.detailsLink) bits.push(ad.detailsLink);
-      lines.push(`- ${bits.join(" · ") || "(creative)"}`);
+
+  // ---- Overview ----
+  L.push(`## Competitive Landscape Overview`);
+  L.push(`- **Query / input:** ${query.keywords.join(", ")}`);
+  L.push(`- **Country analyzed:** ${query.countryName}`);
+  L.push(`- **Total ads found:** ${totalAds}`);
+  L.push(`- **Competitors (unique domains):** ${advertisers.length}`);
+  if (avg > 0) L.push(`- **Average ad age:** ${avg} days`);
+  L.push(``);
+
+  // ---- Top competitors & their ad strategies ----
+  L.push(`## Top Competitors & Their Ad Strategies`);
+  advertisers.slice(0, 10).forEach((a, i) => {
+    const ad = a.oldestTop5[0];
+    const legal = a.oldestTop5.find((x) => x.legalName)?.legalName;
+    const sitelinks = uniq(a.oldestTop5.flatMap((x) => x.sitelinks ?? []));
+    L.push(``, `### ${i + 1}. ${a.domain}${legal ? ` (${legal})` : ""} — ${a.totalAds} ad(s)`);
+    L.push(`| Attribute | Details |`, `| --- | --- |`);
+    if (ad?.position) L.push(`| Ad position | #${ad.position} |`);
+    if (ad?.headline) L.push(`| Headline | ${ad.headline} |`);
+    if (ad?.description) L.push(`| Description | ${ad.description} |`);
+    const landing = ad?.detailsLink ?? a.sampleUrl;
+    if (landing) L.push(`| Landing page | ${landing} |`);
+    if (ad?.campaign) L.push(`| Campaign label | ${ad.campaign} |`);
+    if (sitelinks.length) L.push(`| Sitelinks | ${sitelinks.slice(0, 6).join(", ")} |`);
+    if (a.viaKeywords.length) L.push(`| Seen on keyword(s) | ${a.viaKeywords.join(", ")} |`);
+  });
+  L.push(``);
+
+  // ---- Top 5 oldest ads (only when transparency images exist) ----
+  const withImages = allAds.filter((a) => a.imageUrl && (a.daysActive ?? 0) > 0)
+    .sort((a, b) => (b.daysActive ?? 0) - (a.daysActive ?? 0));
+  if (withImages.length) {
+    L.push(`## Top 5 Oldest Ads (longest-running = proven winners)`);
+    L.push(`| Advertiser | Days active | Image URL | Landing |`, `| --- | --- | --- | --- |`);
+    for (const ad of withImages.slice(0, 5)) {
+      L.push(`| ${ad.advertiser ?? ad.advertiserDomain ?? "—"} | ${ad.daysActive} | ${ad.imageUrl} | ${ad.detailsLink ?? "—"} |`);
+    }
+    L.push(``);
+  }
+
+  // ---- Ad copy & headlines analysis ----
+  L.push(`## Ad Copy & Headlines Analysis`);
+  if (headlines.length) {
+    L.push(``, `**Most used words in headlines** (${headlines.length} headlines):`);
+    L.push(`| Word | Frequency | % of headlines |`, `| --- | --- | --- |`);
+    for (const r of wordFreqRows(headlines, 10)) L.push(`| ${r.word} | ${r.count}/${headlines.length} | ${r.pct}% |`);
+  }
+  if (descriptions.length) {
+    L.push(``, `**Most used words in descriptions** (${descriptions.length} descriptions):`);
+    L.push(`| Word | Frequency | % of descriptions |`, `| --- | --- | --- |`);
+    for (const r of wordFreqRows(descriptions, 10)) L.push(`| ${r.word} | ${r.count}/${descriptions.length} | ${r.pct}% |`);
+  }
+  if (!headlines.length && !descriptions.length) {
+    L.push(`Ad copy text isn't available for these creatives (image ads — run Extended mode for OCR text).`);
+  }
+  L.push(``);
+
+  // ---- Keyword ranking recommendations (>= 10) ----
+  const corpus = [...headlines, ...descriptions];
+  const terms = wordFreqRows(corpus, 20).map((r) => r.word);
+  const bigrams = new Map<string, number>();
+  for (const t of corpus) {
+    const toks = tokenize(t).filter(goodTerm);
+    for (let i = 0; i < toks.length - 1; i++) {
+      const bg = `${toks[i]} ${toks[i + 1]}`;
+      bigrams.set(bg, (bigrams.get(bg) ?? 0) + 1);
     }
   }
-  lines.push(``, `_Note: the AI narrative was unavailable, so this is the raw structured data straight from Oxylabs + the Transparency Center._`);
-  return lines.join("\n");
+  const qset = new Set(query.keywords.map((k) => k.toLowerCase().trim()));
+  let recs = uniq([
+    ...[...bigrams.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k),
+    ...terms,
+  ]).filter((k) => !qset.has(k));
+  const primary = query.keywords[0] ?? "";
+  for (const m of ["software", "tool", "pricing", "alternative", "reviews", "for business", "online", "platform"]) {
+    if (recs.length >= 12) break;
+    const cand = primary ? `${primary} ${m}` : m;
+    if (!qset.has(cand) && !recs.includes(cand)) recs.push(cand);
+  }
+  recs = recs.slice(0, 12);
+  L.push(`## Keyword Ranking Recommendations`);
+  L.push(`Mined from the words competitors actually use in their ads — ranked by frequency:`);
+  recs.forEach((k, i) => L.push(`${i + 1}. ${k}`));
+  L.push(``);
+
+  // ---- Brand-vs-competitor detection ----
+  const brandTokens = new Set(advertisers.flatMap((a) => (a.domain.split(".")[0] || "").split(/[-_]/).filter((t) => t.length > 2)));
+  const vs: string[] = [];
+  for (const a of advertisers) {
+    const own = new Set((a.domain.split(".")[0] || "").split(/[-_]/));
+    const text = a.oldestTop5.map((x) => `${x.headline ?? ""} ${x.description ?? ""}`).join(" ").toLowerCase();
+    const namesRival = [...brandTokens].some((t) => !own.has(t) && text.includes(t));
+    if (namesRival || /\b(vs|versus|alternative|compare|better than)\b/.test(text)) vs.push(a.domain);
+  }
+  L.push(`## Brand vs. Competitor Strategy`);
+  L.push(vs.length
+    ? `**Yes** — these advertisers reference rival brands or comparison angles in their copy: ${uniq(vs).join(", ")}.`
+    : `**No** — no advertiser is openly bidding on or naming a competitor brand in the copy we captured.`);
+  L.push(``);
+
+  // ---- Landing page strategy ----
+  L.push(`## Landing Page Strategy`);
+  L.push(`| Competitor | Landing page | Campaign |`, `| --- | --- | --- |`);
+  for (const a of advertisers.slice(0, 10)) {
+    const ad = a.oldestTop5[0];
+    L.push(`| ${a.domain} | ${ad?.detailsLink ?? a.sampleUrl ?? "—"} | ${ad?.campaign ?? "—"} |`);
+  }
+  L.push(``);
+
+  // ---- Strategic recommendations (data-derived) ----
+  const topHead = wordFreqRows(headlines, 4).map((r) => r.word);
+  const topDesc = wordFreqRows(descriptions, 4).map((r) => r.word);
+  const topSitelinks = uniq(allAds.flatMap((a) => a.sitelinks ?? [])).slice(0, 6);
+  L.push(`## Strategic Recommendations`);
+  if (topHead.length) L.push(`- **Winning headline pattern:** lead with ${topHead.map((w) => `\`${w}\``).join(", ")} — the terms most competitors put in their headlines.`);
+  if (topDesc.length) L.push(`- **Description angles to test:** ${topDesc.map((w) => `\`${w}\``).join(", ")}.`);
+  if (topSitelinks.length) L.push(`- **Sitelinks competitors rely on:** ${topSitelinks.join(", ")} — match or beat these.`);
+  L.push(`- **Gaps to exploit:** look for angles no competitor uses (pricing transparency, speed/"in minutes", small-business focus, guarantees) — these stand out in a crowded auction.`);
+  L.push(``);
+
+  // ---- Legal entities ----
+  const legals = advertisers
+    .map((a) => ({ domain: a.domain, legal: a.oldestTop5.find((x) => x.legalName)?.legalName }))
+    .filter((x) => x.legal);
+  if (legals.length) {
+    L.push(`## Legal Entities Running Ads`);
+    for (const x of legals) L.push(`- **${x.legal}** — ${x.domain}`);
+    L.push(``);
+  }
+
+  return L.join("\n");
 }
 
 async function analyze(
   query: LabQuery,
   mode: BenchmarkMode,
   advertisers: LabAdvertiser[],
-  rawData: unknown[],
   cost: BenchmarkCostContext
 ): Promise<{ model: string; markdown: string } | null> {
-  const domains = advertisers.map((a) => a.domain);
-  // Bound the payload so the model answers within its deadline.
-  let payload = JSON.stringify(trimForPrompt(rawData));
-  if (payload.length > 48_000) payload = payload.slice(0, 48_000) + "\n…(truncated)";
+  if (!advertisers.length) return null;
 
+  // The DETERMINISTIC report is the guaranteed base — every section, always,
+  // straight from the data. No LLM dependency for completeness ("siempre sale").
+  const base = buildFullReport(query, advertisers);
+
+  // Best-effort AI strategic narrative ON TOP, from a SMALL summary (not raw JSON),
+  // so it answers within the deadline. If it fails, the report is still complete.
+  let aiSection = "";
   try {
-    const data = await benchmarkLlm<{ report: string }>({
+    const summary = advertisers.slice(0, 8).map((a) => ({
+      domain: a.domain,
+      totalAds: a.totalAds,
+      legal: a.oldestTop5.find((x) => x.legalName)?.legalName ?? null,
+      ads: a.oldestTop5.slice(0, 3).map((x) => ({
+        headline: x.headline, description: x.description, campaign: x.campaign,
+        sitelinks: x.sitelinks, landing: x.detailsLink, daysActive: x.daysActive,
+      })),
+    }));
+    const data = await benchmarkLlm<{ analysis: string }>({
       tier: "opus",
-      system: `${SYSTEM_PROMPT}\n\nOutput language: ${query.language}.`,
+      system:
+        `You are a senior Google Ads strategist. From the competitor ad data, write a concise STRATEGIC ANALYSIS ` +
+        `in the brand's language (code: ${query.language}). Cover: (1) headline/angle patterns that win, (2) ` +
+        `description angles to test, (3) sitelinks to add, (4) gaps no competitor covers, (5) a short ASCII ` +
+        `positioning map. GitHub-flavored Markdown. Use ONLY the data provided; invent nothing.`,
       prompt:
-        `INPUT: ${query.keywords.join(", ")}\n` +
-        `MODE: ${mode}\n` +
-        `COUNTRY: ${query.countryName}\n` +
-        `COMPETITOR DOMAINS: ${domains.join(", ") || "(discovered from the data below)"}\n\n` +
-        `RAW DATA (Oxylabs google_ads + SerpApi transparency${mode.startsWith("extended") ? " + Firecrawl OCR" : ""}):\n` +
-        payload,
-      schema: REPORT_SCHEMA,
-      toolName: "deliver_benchmark_report",
-      toolDescription: "Return the finished competitor-intelligence benchmark report as Markdown.",
-      maxTokens: 8000,
+        `Input: ${query.keywords.join(", ")} · Country: ${query.countryName} · Mode: ${mode}\n` +
+        `Competitor ad data:\n${JSON.stringify(summary)}`,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { analysis: { type: "string" } },
+        required: ["analysis"],
+      },
+      toolName: "deliver_strategic_analysis",
+      toolDescription: "Return the strategic analysis section as Markdown.",
+      maxTokens: 2500,
       stage: "benchmark_report",
       cost,
     });
-    const markdown = data?.report?.trim() ?? "";
-    if (markdown) return { model: "Claude · Opus tier (provider per /admin)", markdown };
+    const a = data?.analysis?.trim();
+    if (a) aiSection = `\n\n---\n\n## AI Strategic Analysis\n\n${a}`;
   } catch (e) {
-    console.error("[benchmark-lab] report LLM failed, using deterministic fallback", e);
+    console.error("[benchmark-lab] AI strategic narrative skipped (data report still complete)", e);
   }
 
-  // LLM down/slow → never return an empty teardown.
-  if (advertisers.length > 0) {
-    return { model: "Deterministic (AI narrative unavailable)", markdown: buildDeterministicReport(query, advertisers) };
-  }
-  return null;
+  return {
+    model: aiSection ? "Deterministic data + AI strategy" : "Deterministic (always complete)",
+    markdown: base + aiSection,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -303,8 +384,12 @@ async function runKeywordMode(
   const rawForLlm: unknown[] = [];
   const allImageUrls: string[] = [];
 
-  for (const keyword of query.keywords) {
-    const result = await oxylabsKeywordAds(keyword, query.geo, cost);
+  // Oxylabs calls in PARALLEL (were sequential).
+  const results = await Promise.all(
+    query.keywords.map(async (keyword) => ({ keyword, result: await oxylabsKeywordAds(keyword, query.geo, cost) }))
+  );
+
+  for (const { keyword, result } of results) {
     rawForLlm.push(result);
 
     for (const ad of result.ads) {
@@ -318,7 +403,7 @@ async function runKeywordMode(
           totalAds: 0,
           oldestTop5: [],
           sampleHeadline: ad.title ?? null,
-          sampleUrl: ad.url ?? null,
+          sampleUrl: ad.url ?? ad.destinationUrl ?? null,
           viaKeywords: [],
         };
         byDomain.set(key, adv);
@@ -326,7 +411,10 @@ async function runKeywordMode(
       if (!adv.viaKeywords.includes(keyword)) adv.viaKeywords.push(keyword);
       adv.totalAds++;
 
-      // Build a LabAd from the Oxylabs ad (no transparency data here).
+      // Build a rich LabAd from the Oxylabs ad — this is the keyword-mode data
+      // that feeds every report section (headline, description, landing, campaign,
+      // sitelinks, CTAs, position).
+      const sitelinks = (ad.sitelinks ?? []).map((s) => s.title).filter((t): t is string => Boolean(t));
       const labAd: LabAd = {
         advertiser: ad.title ?? null,
         advertiserDomain: key,
@@ -336,11 +424,15 @@ async function runKeywordMode(
         lastShown: null,
         daysActive: null,
         imageUrl: null,
-        detailsLink: ad.url ?? null,
+        detailsLink: ad.url ?? ad.destinationUrl ?? null,
         targetDomain: key,
         viaKeyword: keyword,
         headline: ad.title ?? null,
-        cta: null,
+        description: ad.description ?? null,
+        campaign: ad.campaignLabel ?? ad.campaign ?? null,
+        sitelinks,
+        position: ad.position ?? null,
+        cta: sitelinks[0] ?? null,
       };
       if (adv.oldestTop5.length < 5) adv.oldestTop5.push(labAd);
     }
@@ -577,11 +669,10 @@ export async function runBenchmarkLabInApp(
       break;
   }
 
-  const { advertisers, rawData, allImageUrls } = result;
+  const { advertisers, allImageUrls } = result;
 
-  // Strategic teardown via the unified LLM layer (OCR text is already embedded
-  // in rawData for the extended modes, so the model sees it directly).
-  const analysis = await analyze(query, mode, advertisers, rawData, costCtx);
+  // Report = deterministic full teardown (always complete) + best-effort AI strategy.
+  const analysis = await analyze(query, mode, advertisers, costCtx);
 
   // Aggregate stats.
   const allAds = advertisers.flatMap((a) => a.oldestTop5);

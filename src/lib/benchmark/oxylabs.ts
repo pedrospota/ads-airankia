@@ -131,65 +131,9 @@ export interface OxylabsResult {
   ads: OxylabsAd[];
 }
 
-/**
- * Real-time Google Ads SERP for one keyword via Oxylabs.
- * Returns the unique advertiser domains + every ad row found.
- * Never throws — on any failure returns { advertisers:[], ads:[] }.
- */
-export async function oxylabsKeywordAds(
-  keyword: string,
-  geoLocation: string,
-  cost: BenchmarkCostContext
-): Promise<OxylabsResult> {
-  const c = creds();
-  if (!c) {
-    return { keyword, geoLocation, advertisers: [], ads: [] };
-  }
-
-  const auth =
-    "Basic " +
-    Buffer.from(`${c.username}:${c.password}`).toString("base64");
-
-  let data: unknown;
-  try {
-    const resp = await fetch("https://realtime.oxylabs.io/v1/queries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: auth },
-      body: JSON.stringify({
-        source: "google_ads",
-        query: keyword,
-        geo_location: geoLocation,
-        parse: true,
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!resp.ok) {
-      meter(cost, keyword, "http_" + resp.status);
-      return { keyword, geoLocation, advertisers: [], ads: [] };
-    }
-    data = await resp.json();
-  } catch {
-    meter(cost, keyword, "exception");
-    return { keyword, geoLocation, advertisers: [], ads: [] };
-  }
-
-  // Oxylabs parsed google_ads: ads live under results[0].content.results.
-  // Different Oxylabs parser versions put them in different buckets — be defensive.
-  const raw = data as { results?: { content?: Record<string, unknown> }[] };
-  const content: Record<string, unknown> = raw?.results?.[0]?.content ?? {};
-  const buckets: Record<string, unknown> =
-    (content.results as Record<string, unknown> | undefined) ?? content;
-  const rawAds: Record<string, unknown>[] = [];
-  for (const key of ["paid", "ads", "top_ads", "bottom_ads", "shopping"]) {
-    const arr = (buckets as Record<string, unknown>)?.[key];
-    if (Array.isArray(arr)) rawAds.push(...arr);
-  }
-
-  const ads: OxylabsAd[] = rawAds.map((a) => {
-    const url =
-      (a.url as string | null) ??
-      (a.link as string | null) ??
-      null;
+function mapOxylabsAds(rawAds: Record<string, unknown>[]): OxylabsAd[] {
+  return rawAds.map((a) => {
+    const url = (a.url as string | null) ?? (a.link as string | null) ?? null;
     const pcu = a.data_pcu;
     const destinationUrl =
       Array.isArray(pcu) && typeof pcu[0] === "string" ? (pcu[0] as string) : null;
@@ -213,16 +157,9 @@ export async function oxylabsKeywordAds(
             ? a.position
             : null,
       positionOverall: typeof a.pos_overall === "number" ? a.pos_overall : null,
-      title:
-        (a.title as string | null) ?? (a.headline as string | null) ?? null,
-      description:
-        (a.desc as string | null) ??
-        (a.description as string | null) ??
-        null,
-      displayedUrl:
-        (a.url_shown as string | null) ??
-        (a.displayed_url as string | null) ??
-        null,
+      title: (a.title as string | null) ?? (a.headline as string | null) ?? null,
+      description: (a.desc as string | null) ?? (a.description as string | null) ?? null,
+      displayedUrl: (a.url_shown as string | null) ?? (a.displayed_url as string | null) ?? null,
       url,
       destinationUrl,
       trackingUrl,
@@ -235,13 +172,77 @@ export async function oxylabsKeywordAds(
       sitelinks,
     };
   });
+}
 
-  const advertisers = [
-    ...new Set(ads.map((x) => x.domain).filter((d): d is string => Boolean(d))),
-  ];
+/**
+ * Real-time Google Ads SERP for one keyword via Oxylabs.
+ * Returns the unique advertiser domains + every ad row found.
+ *
+ * Oxylabs `google_ads` is INTERMITTENT: most calls return the parsed object
+ * (content.results.paid), but some return an empty/unparsed array — which used
+ * to yield empty reports. We RETRY (up to 4×) on that unparsed case. A genuinely
+ * parsed-but-ad-less SERP is returned as-is (no wasted retries).
+ * Never throws — on any failure returns { advertisers:[], ads:[] }.
+ */
+export async function oxylabsKeywordAds(
+  keyword: string,
+  geoLocation: string,
+  cost: BenchmarkCostContext
+): Promise<OxylabsResult> {
+  const empty: OxylabsResult = { keyword, geoLocation, advertisers: [], ads: [] };
+  const c = creds();
+  if (!c) return empty;
 
-  meter(cost, keyword, "ok");
-  return { keyword, geoLocation, advertisers, ads };
+  const auth = "Basic " + Buffer.from(`${c.username}:${c.password}`).toString("base64");
+
+  const MAX = 4; // Oxylabs returns the parsed object only ~half the time; retry the rest.
+  for (let attempt = 1; attempt <= MAX; attempt++) {
+    let data: unknown;
+    try {
+      const resp = await fetch("https://realtime.oxylabs.io/v1/queries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: auth },
+        body: JSON.stringify({ source: "google_ads", query: keyword, geo_location: geoLocation, parse: true }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!resp.ok) {
+        meter(cost, keyword, "http_" + resp.status);
+        if (attempt < MAX) continue;
+        return empty;
+      }
+      data = await resp.json();
+    } catch {
+      meter(cost, keyword, "exception");
+      if (attempt < MAX) continue;
+      return empty;
+    }
+
+    const raw = data as { results?: { content?: unknown }[] };
+    const content = raw?.results?.[0]?.content;
+    const parsedOk =
+      !!content &&
+      !Array.isArray(content) &&
+      typeof content === "object" &&
+      typeof (content as Record<string, unknown>).results === "object" &&
+      (content as Record<string, unknown>).results !== null;
+    const buckets = (parsedOk ? (content as Record<string, unknown>).results : {}) as Record<string, unknown>;
+
+    const rawAds: Record<string, unknown>[] = [];
+    for (const key of ["paid", "ads", "top_ads", "bottom_ads", "shopping"]) {
+      const arr = buckets?.[key];
+      if (Array.isArray(arr)) rawAds.push(...(arr as Record<string, unknown>[]));
+    }
+    const ads = mapOxylabsAds(rawAds);
+    const advertisers = [...new Set(ads.map((x) => x.domain).filter((d): d is string => Boolean(d)))];
+
+    // Got ads, or a genuinely parsed (but ad-less) SERP → done. Otherwise retry.
+    if (ads.length > 0 || parsedOk) {
+      meter(cost, keyword, "ok");
+      return { keyword, geoLocation, advertisers, ads };
+    }
+    meter(cost, keyword, "unparsed_retry_" + attempt);
+  }
+  return empty;
 }
 
 function meter(cost: BenchmarkCostContext, keyword: string, outcome: string): void {

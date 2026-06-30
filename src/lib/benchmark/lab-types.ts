@@ -33,6 +33,14 @@ export type LabAd = {
   /** Creative text, when available (demo + future richer scrape / AI extract). */
   headline?: string | null;
   cta?: string | null;
+  /** Ad description / body copy (Oxylabs `desc`). */
+  description?: string | null;
+  /** Campaign label decoded from the tracking URL (Oxylabs). */
+  campaign?: string | null;
+  /** Sitelink titles (ad extensions). */
+  sitelinks?: string[];
+  /** Position on the SERP (Oxylabs `pos`). */
+  position?: number | null;
 };
 
 export type AdvertiserSource = "oxylabs" | "serpapi" | "manual";

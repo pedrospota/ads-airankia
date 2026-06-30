@@ -236,9 +236,20 @@ export function MarkdownReport({ markdown, colors }: { markdown: string; colors:
     }
     if (/^>\s?/.test(line)) {
       flushAll();
+      // Merge consecutive "> " lines into ONE blockquote (skipping bare ">"
+      // separators) so multi-line callouts render as a single box, not stacked
+      // empties.
+      const quoteLines: string[] = [];
+      let j = idx;
+      while (j < lines.length && /^>\s?/.test(lines[j].trimEnd())) {
+        const inner = lines[j].trimEnd().replace(/^>\s?/, "");
+        if (inner.trim()) quoteLines.push(inner);
+        j++;
+      }
+      idx = j - 1;
       blocks.push(
         <blockquote key={`q${key++}`} style={{ margin: "0 0 12px", padding: "8px 14px", borderLeft: `3px solid ${colors.accent}`, background: "rgba(16,185,129,0.06)", borderRadius: "0 8px 8px 0", color: colors.textMuted, fontSize: 13.5 }}>
-          {renderInline(line.replace(/^>\s?/, ""), colors, `q${key}`)}
+          {renderInline(quoteLines.join(" "), colors, `q${key}`)}
         </blockquote>,
       );
       continue;

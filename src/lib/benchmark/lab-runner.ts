@@ -25,7 +25,7 @@ import { oxylabsKeywordAds } from "./oxylabs";
 import { serpApiTransparency, type SerpApiTransparencyOpts } from "./serpapi-transparency";
 import { ocrImagesBatch } from "./firecrawl-ocr";
 import { computeAnalytics } from "./lab-analytics";
-import { benchmarkNarrative } from "./llm";
+import { benchmarkReport } from "./llm";
 import type {
   LabAd,
   LabAdvertiser,
@@ -209,6 +209,87 @@ function extractCTAs(ad: LabAd | null | undefined, sitelinks: string[]): string[
   return uniq(out).slice(0, 6);
 }
 
+// Localized labels for the deterministic appended sections (gallery, word-freq,
+// footer) so a non-English AI report doesn't abruptly switch to English. en + es
+// cover the active markets; anything else falls back to English.
+function labels(lang: string) {
+  const es = (lang || "").toLowerCase().startsWith("es");
+  return es
+    ? {
+        displayHeading: "🖼️ Anuncios Display — Creativos Visuales",
+        displayIntro: "Creativos de imagen/video activos ahora, del Centro de Transparencia de Google Ads (los más antiguos primero = ganadores probados).",
+        competitor: "Competidor", creative: "Creativo", ocrCol: "Texto en el creativo (OCR)", daysActive: "Días activo", landing: "Landing",
+        ocrHint: "_Activa **OCR** para leer el texto exacto de cada creativo._",
+        wordFreqHeading: "📊 Palabras más usadas (conteo exacto, de los datos)",
+        headlineWords: "Palabras más usadas en titulares", descriptionWords: "Palabras más usadas en descripciones",
+        word: "Palabra", frequency: "Frecuencia",
+        writtenBy: "Escrito por", grounded: "basado en datos reales de anuncios", tokensNa: "uso de tokens no disponible",
+      }
+    : {
+        displayHeading: "🖼️ Display Ads — Visual Creatives",
+        displayIntro: "Image/video creatives running right now, from the Google Ads Transparency Center (longest-running first = proven winners).",
+        competitor: "Competitor", creative: "Creative", ocrCol: "Text on creative (OCR)", daysActive: "Days active", landing: "Landing",
+        ocrHint: "_Turn on **OCR** to read the exact text written on each creative._",
+        wordFreqHeading: "📊 Most-used words (exact counts, from the data)",
+        headlineWords: "Most-used words in headlines", descriptionWords: "Most-used words in descriptions",
+        word: "Word", frequency: "Frequency",
+        writtenBy: "Written by", grounded: "grounded in live ad data", tokensNa: "token usage unavailable",
+      };
+}
+
+// The 🖼️ Display Ads gallery (photos + OCR text) — reused by both the
+// deterministic report and the AI-first path (appended after the AI write-up so
+// the creative photos ALWAYS render, even though the LLM writes the prose).
+function buildDisplaySection(advertisers: LabAdvertiser[], lang = "en"): string {
+  const displayAds = advertisers.flatMap((a) =>
+    a.oldestTop5.filter((ad) => Boolean(ad.imageUrl)).map((ad) => ({ ad, domain: a.domain })),
+  );
+  if (!displayAds.length) return "";
+  const t = labels(lang);
+  const sorted = [...displayAds].sort((a, b) => (b.ad.daysActive ?? 0) - (a.ad.daysActive ?? 0));
+  const anyOcr = sorted.some((x) => x.ad.ocrText);
+  const L: string[] = [];
+  L.push(`## ${t.displayHeading}`);
+  L.push(t.displayIntro, ``);
+  if (anyOcr) {
+    L.push(`| ${t.competitor} | ${t.creative} | ${t.ocrCol} | ${t.daysActive} |`, `| --- | --- | --- | --- |`);
+    for (const { ad, domain } of sorted.slice(0, 15)) {
+      L.push(`| ${domain} | ![ad](${ad.imageUrl}) | ${clip(ad.ocrText, 130)} | ${ad.daysActive ?? "—"} |`);
+    }
+  } else {
+    L.push(`| ${t.competitor} | ${t.creative} | ${t.landing} | ${t.daysActive} |`, `| --- | --- | --- | --- |`);
+    for (const { ad, domain } of sorted.slice(0, 15)) {
+      L.push(`| ${domain} | ![ad](${ad.imageUrl}) | ${ad.detailsLink ?? "—"} | ${ad.daysActive ?? "—"} |`);
+    }
+    L.push(``, t.ocrHint);
+  }
+  return L.join("\n");
+}
+
+// Exact word-frequency tables (computed from the data, never LLM-counted) — the
+// LLM is told NOT to fabricate these counts; we append the real ones instead.
+function buildWordFreqSection(advertisers: LabAdvertiser[], lang = "en"): string {
+  const copyAds = advertisers.flatMap((a) => [a.topAd, ...a.oldestTop5].filter((x): x is LabAd => Boolean(x)));
+  const headlines = copyAds.map((a) => a.headline).filter((x): x is string => Boolean(x));
+  const ocrTexts = advertisers.flatMap((a) => a.oldestTop5).map((a) => a.ocrText).filter((x): x is string => Boolean(x));
+  const descriptions = [...copyAds.map((a) => a.description).filter((x): x is string => Boolean(x)), ...ocrTexts];
+  if (!headlines.length && !descriptions.length) return "";
+  const t = labels(lang);
+  const L: string[] = [];
+  L.push(`## ${t.wordFreqHeading}`);
+  if (headlines.length) {
+    L.push(``, `**${t.headlineWords}** (${headlines.length}):`);
+    L.push(`| ${t.word} | ${t.frequency} | % |`, `| --- | --- | --- |`);
+    for (const r of wordFreqRows(headlines, 10)) L.push(`| ${r.word} | ${r.count}/${headlines.length} | ${r.pct}% |`);
+  }
+  if (descriptions.length) {
+    L.push(``, `**${t.descriptionWords}** (${descriptions.length}):`);
+    L.push(`| ${t.word} | ${t.frequency} | % |`, `| --- | --- | --- |`);
+    for (const r of wordFreqRows(descriptions, 10)) L.push(`| ${r.word} | ${r.count}/${descriptions.length} | ${r.pct}% |`);
+  }
+  return L.join("\n");
+}
+
 function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string {
   const L: string[] = [];
   L.push(`# Competitive Intelligence Report`, ``);
@@ -290,28 +371,8 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   L.push(``);
 
   // ===================== 🖼️ DISPLAY ADS =====================
-  if (displayAds.length) {
-    const sorted = [...displayAds].sort((a, b) => (b.ad.daysActive ?? 0) - (a.ad.daysActive ?? 0));
-    const anyOcr = sorted.some((x) => x.ad.ocrText);
-    L.push(`## 🖼️ Display Ads — Visual Creatives`);
-    L.push(
-      `Image/video creatives running right now, pulled from the Google Ads Transparency Center (longest-running first = proven winners).`,
-      ``,
-    );
-    if (anyOcr) {
-      L.push(`| Competitor | Creative | Text on creative (OCR) | Days active |`, `| --- | --- | --- | --- |`);
-      for (const { ad, domain } of sorted.slice(0, 15)) {
-        L.push(`| ${domain} | ![ad](${ad.imageUrl}) | ${clip(ad.ocrText, 130)} | ${ad.daysActive ?? "—"} |`);
-      }
-    } else {
-      L.push(`| Competitor | Creative | Landing | Days active |`, `| --- | --- | --- | --- |`);
-      for (const { ad, domain } of sorted.slice(0, 15)) {
-        L.push(`| ${domain} | ![ad](${ad.imageUrl}) | ${ad.detailsLink ?? "—"} | ${ad.daysActive ?? "—"} |`);
-      }
-      L.push(``, `_Turn on **OCR** to read the exact text written on each creative._`);
-    }
-    L.push(``);
-  }
+  const disp = buildDisplaySection(advertisers, query.language);
+  if (disp) L.push(disp, ``);
 
   // ---- Keyword ranking recommendations (clean, split High-Priority / Niche) ----
   // Corpus now also includes any OCR text so image-only competitors still feed it.
@@ -415,14 +476,12 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
       q[top ? (right ? "tr" : "tl") : right ? "br" : "bl"].push(p.name);
     }
     const cell = (xs: string[]) => (xs.length ? xs.join(", ") : "—");
+    // Markdown TABLE (not ASCII art — the renderer collapses whitespace/fences).
     L.push(`## Competitive Positioning Map`);
-    L.push("```");
-    L.push("BROAD CREATIVE / MANY EXTENSIONS");
-    L.push(`  ${cell(q.tl)}   │   ${cell(q.tr)}`);
-    L.push("  ───────────────────────┼───────────────────────");
-    L.push(`  ${cell(q.bl)}   │   ${cell(q.br)}`);
-    L.push("FOCUSED          LOW AD VOLUME → HIGH AD VOLUME");
-    L.push("```");
+    L.push(`Two axes: **ad volume** (columns) × **creative breadth / extensions** (rows).`, ``);
+    L.push(`| Creative breadth ↓ / Ad volume → | Low volume | High volume |`, `| --- | --- | --- |`);
+    L.push(`| **Broad creative, many extensions** | ${cell(q.tl)} | ${cell(q.tr)} |`);
+    L.push(`| **Focused** | ${cell(q.bl)} | ${cell(q.br)} |`);
     L.push(``);
   }
 
@@ -442,53 +501,140 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   return L.join("\n");
 }
 
+// System prompt that makes the LLM write the gold-standard competitor teardown
+// (the format Pedro pinned by example). The AI is the PRIMARY writer; it works
+// off the REAL scraped data only. The display-ad photo gallery is appended
+// deterministically afterwards (guaranteed), so the prompt omits it.
+function reportSystemPrompt(languageCode: string): string {
+  return [
+    `You are a world-class Google Ads competitive strategist. You receive REAL, freshly-scraped competitor ad data (Oxylabs Google Ads SERPs + Google Ads Transparency Center + OCR). Write a sharp, decision-ready COMPETITIVE INTELLIGENCE REPORT.`,
+    ``,
+    `LANGUAGE: write the entire report in the language with code "${languageCode}".`,
+    ``,
+    `ABSOLUTE RULES:`,
+    `- Use ONLY the data provided. NEVER invent advertisers, headlines, descriptions, URLs, sitelinks or campaigns. If a field is missing, omit it — do not guess.`,
+    `- Quote headlines, descriptions, sitelinks and campaign labels VERBATIM.`,
+    `- Do NOT compute or state exact word-frequency counts or percentages — you cannot count reliably, and exact frequency tables are added automatically after your text. Describe messaging patterns qualitatively instead.`,
+    `- Be interpretive and specific — read like an expert analyst, not a data dump. End each section with the "so what / do this".`,
+    `- No preamble and no "let me know if…" closing. Just the report.`,
+    ``,
+    `FORMATTING (a minimal Markdown renderer — stay strictly within this):`,
+    `- Use only: "# / ## / ###" headings, "|" tables, "-" bullet lists, "1." numbered lists, "> " quotes, **bold**, and [text](url) links.`,
+    `- NEVER use fenced code blocks (\`\`\`), ASCII art, HTML, nested tables, or nested lists — they render broken.`,
+    `- TABLE CELLS: never put a raw "|" or a line break inside a cell. If ad copy contains "|", replace it with "/". Keep each cell on one line.`,
+    `- Do NOT output any image markdown — the creative photo gallery is appended automatically; never invent image URLs.`,
+    `- Begin the report with a single "# " H1 title (e.g. "# Competitive Intelligence Report").`,
+    ``,
+    `Produce EXACTLY these sections, in order:`,
+    ``,
+    `## Competitive Landscape Overview`,
+    `One tight paragraph + bullets: country, the search query/input, total ads found, number of unique competitors, and the single biggest takeaway.`,
+    ``,
+    `## Top Competitors & Their Ad Strategies`,
+    `For EACH competitor (ranked by ad position, then ad volume), a "### N. BRAND (domain) — position #X" block with a 2-column | Attribute | Details | table containing: Ad position, Headline (verbatim), Description (verbatim), Landing page, Campaign label, Key USPs (the concrete number-claims). Then a short bulleted "Sitelinks strategy" and "Calls to action detected", and ONE sentence interpreting their angle. Use the ad-longevity (oldestAdDaysActive) to flag proven, long-running winners.`,
+    ``,
+    `## Ad Copy & Messaging Patterns`,
+    `2–3 sentences on the dominant words/angles every competitor leans on and what's conspicuously absent. Qualitative only — NO frequency tables (those are appended with exact counts).`,
+    ``,
+    `## Keyword Ranking Recommendations`,
+    `🔥 High-priority keywords (anchored to the category with commercial intent) and 🔍 Niche keywords (the distinctive angles competitors use). Real, buyable phrases only — no junk word-pairs.`,
+    ``,
+    `## Brand vs. Competitor Strategy`,
+    `Are advertisers naming/comparing rivals, or running "vs / alternative" angles? Name who and how — or state plainly that nobody is (an open lane to capture switchers).`,
+    ``,
+    `## Landing Page Strategy`,
+    `A | Competitor | Landing page | Offer type | table, reading the destination URL + campaign label to infer the offer (free trial, demo, pricing, etc.).`,
+    ``,
+    `## Strategic Recommendations`,
+    `Concrete plays for the user's own campaign: the winning headline pattern, description angles to test, sitelinks to add, and — most important — the GAPS no competitor covers (the opportunity to own).`,
+    ``,
+    `## Competitive Positioning Map`,
+    `A Markdown TABLE (not ASCII art) placing each competitor by the two axes that best separate them in THIS data (e.g. ad-volume vs creative breadth). Use a 3-column grid: header "| <row axis> ↓ / <col axis> → | Low | High |", then two rows for the low/high of the row axis, putting each competitor's name in the matching cell. Note in one line where the open "[YOUR OPPORTUNITY]" quadrant is.`,
+    ``,
+    `## Legal Entities Running Ads`,
+    `The real legal entities from the data, ranked by ad presence, each with a one-line note (biggest spender, new entrant, etc.).`,
+  ].join("\n");
+}
+
 async function analyze(
   query: LabQuery,
   mode: BenchmarkMode,
   advertisers: LabAdvertiser[],
   cost: BenchmarkCostContext
 ): Promise<{ model: string; markdown: string } | null> {
-  if (!advertisers.length) return null;
+  // Empty result → still return an honest report (buildFullReport renders the
+  // "no advertisers found — try a broader keyword" guidance), never null, so the
+  // UI always shows SOMETHING and explains why.
+  if (!advertisers.length) {
+    return { model: "No competitors found", markdown: buildFullReport(query, advertisers) };
+  }
 
-  // The DETERMINISTIC report is the guaranteed base — every section, always,
-  // straight from the data. No LLM dependency for completeness ("siempre sale").
-  const base = buildFullReport(query, advertisers);
+  // Deterministic, EXACT data sections appended after the AI prose: the word-freq
+  // tables (the LLM is told not to fabricate counts) and the creative photo
+  // gallery (the LLM can't render images). Both localized to the brand language.
+  const wordFreqSection = buildWordFreqSection(advertisers, query.language);
+  const displaySection = buildDisplaySection(advertisers, query.language);
+  const t = labels(query.language);
 
-  // Best-effort AI strategic narrative ON TOP, from a SMALL summary (not raw JSON).
-  // Uses a PLAIN-TEXT call (no schema) so it works with the /admin model even when
-  // that model is weak at structured output. If it fails, the report is complete.
-  const summary = advertisers.slice(0, 8).map((a) => ({
-    domain: a.domain,
-    totalAds: a.totalAds,
-    legal: a.oldestTop5.find((x) => x.legalName)?.legalName ?? null,
-    topAd: a.topAd
-      ? { headline: a.topAd.headline, description: a.topAd.description, campaign: a.topAd.campaign, sitelinks: a.topAd.sitelinks, landing: a.topAd.detailsLink }
-      : null,
-    // OCR text read off the image creatives (when OCR is on) — lets the strategist
-    // analyze image-only competitors too.
-    creativeText: uniq(a.oldestTop5.map((x) => x.ocrText).filter((t): t is string => Boolean(t))).slice(0, 3),
-    oldestDays: a.oldestTop5.map((x) => x.daysActive ?? 0).filter((n) => n > 0).slice(0, 3),
-  }));
-  const narrative = await benchmarkNarrative({
-    cost,
-    maxTokens: 2200,
-    system:
-      `You are a senior Google Ads strategist. From the competitor ad data, write a sharp STRATEGIC ANALYSIS ` +
-      `in the brand's language (language code: ${query.language}). Cover, with specifics from the data: ` +
-      `(1) the headline/angle patterns that win, (2) description angles to test, (3) sitelinks to add, ` +
-      `(4) gaps NO competitor covers, (5) each competitor's positioning in one line. ` +
-      `GitHub-flavored Markdown, concise, decision-ready. Use ONLY the data provided; invent nothing. ` +
-      `Do NOT repeat raw tables — give the "so what, do this" interpretation.`,
-    prompt:
-      `Keyword/input: ${query.keywords.join(", ")} · Country: ${query.countryName} · Mode: ${mode}\n` +
-      `Competitor ad data (JSON):\n${JSON.stringify(summary)}`,
+  // Rich, fully-grounded data payload for the AI writer (the real scraped fields).
+  const competitors = advertisers.slice(0, 10).map((a, i) => {
+    const ad = a.topAd ?? a.oldestTop5.find((x) => x.headline) ?? a.oldestTop5[0];
+    const sitelinks = uniq([...(a.topAd?.sitelinks ?? []), ...a.oldestTop5.flatMap((x) => x.sitelinks ?? [])]).slice(0, 8);
+    const body = ad?.description ?? ad?.ocrText ?? null;
+    const oldestDays = Math.max(0, ...a.oldestTop5.map((x) => x.daysActive ?? 0));
+    return {
+      rank: i + 1,
+      domain: a.domain,
+      legalName: a.oldestTop5.find((x) => x.legalName)?.legalName ?? a.topAd?.legalName ?? null,
+      totalAds: a.totalAds,
+      adPosition: ad?.position ?? null,
+      headline: ad?.headline ?? null,
+      description: body,
+      landingPage: ad?.detailsLink ?? a.sampleUrl ?? null,
+      campaignLabel: ad?.campaign ?? null,
+      sitelinks,
+      keyUSPs: extractUSPs(body),
+      ctasDetected: extractCTAs(ad, sitelinks),
+      oldestAdDaysActive: oldestDays || null,
+      seenOnKeywords: a.viaKeywords,
+      ocrTextOnImages: uniq(a.oldestTop5.map((x) => x.ocrText).filter((t): t is string => Boolean(t))).slice(0, 2),
+    };
   });
-  const aiSection = narrative ? `\n\n---\n\n## AI Strategic Analysis\n\n${narrative}` : "";
-
-  return {
-    model: aiSection ? "Data report + AI strategy" : "Deterministic (always complete)",
-    markdown: base + aiSection,
+  const data = {
+    searchQueryOrInput: query.keywords,
+    country: query.countryName,
+    languageCode: query.language,
+    mode,
+    totalAdsFound: advertisers.reduce((n, a) => n + a.totalAds, 0),
+    uniqueCompetitors: advertisers.length,
+    competitors,
   };
+
+  // AI is the PRIMARY writer. benchmarkReport never silently nulls — on failure it
+  // returns a precise reason we surface to the user.
+  const r = await benchmarkReport({
+    cost,
+    maxTokens: 4200,
+    timeoutMs: 95_000,
+    system: reportSystemPrompt(query.language),
+    prompt: `COMPETITOR AD DATA (JSON — use ONLY this, quote it verbatim):\n${JSON.stringify(data)}`,
+  });
+
+  if (r.markdown) {
+    const tokensLine =
+      r.tokensIn || r.tokensOut
+        ? `${r.tokensIn.toLocaleString("en-US")} in + ${r.tokensOut.toLocaleString("en-US")} tokens`
+        : t.tokensNa;
+    const footer = `\n\n---\n_🤖 ${t.writtenBy} **${r.model}** · ${tokensLine} · ${t.grounded}._`;
+    const appendix = [wordFreqSection, displaySection].filter(Boolean).join("\n\n");
+    const markdown = r.markdown + (appendix ? `\n\n${appendix}` : "") + footer;
+    return { model: r.model ?? "AI", markdown };
+  }
+
+  // AI unavailable → full deterministic report, but TELL the user exactly why on a
+  // SINGLE blockquote line (no more silent "Deterministic", no empty quote boxes).
+  const banner = `> ⚠️ **The AI strategist didn't run:** ${r.error ?? "unknown reason"} — showing the complete data report below; fix it in /admin to get the AI write-up.\n\n`;
+  return { model: `Deterministic — AI unavailable`, markdown: banner + buildFullReport(query, advertisers) };
 }
 
 // ---------------------------------------------------------------------------

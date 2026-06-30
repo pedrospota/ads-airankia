@@ -91,16 +91,25 @@ export async function benchmarkReport(opts: {
         model,
       );
     }
+    // Read the body ONCE as text, then parse safely — a non-JSON / empty 200 body
+    // must never throw to the outer catch and become an opaque "Unexpected error".
+    const bodyText = await resp.text().catch(() => "");
     if (!resp.ok) {
-      await resp.text().catch(() => ""); // drain body; do NOT surface raw API internals
-      const hint = resp.status === 401 ? " (bad or expired key)" : resp.status === 402 ? " (out of credits)" : resp.status === 404 ? " (model id not found)" : "";
-      return fail(`The AI model "${model}" couldn't be reached — HTTP ${resp.status}${hint}. Check it in /admin.`, model);
+      const hint = resp.status === 401 ? " (bad or expired key)" : resp.status === 402 ? " (out of credits)" : resp.status === 404 ? " (model id not found)" : resp.status === 400 ? " (bad request — often an invalid model id)" : "";
+      // The OpenRouter error body names the exact problem (e.g. "X is not a valid
+      // model ID"); it carries no secret, so surface it — it's the actionable bit.
+      return fail(`The AI model "${model}" couldn't be reached — HTTP ${resp.status}${hint}. ${clipErr(bodyText)}`.trim(), model);
     }
-    const j = (await resp.json()) as {
+    let j: {
       choices?: { message?: { content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
       error?: { message?: string };
     };
+    try {
+      j = JSON.parse(bodyText);
+    } catch {
+      return fail(`The AI model "${model}" returned a non-JSON response (HTTP ${resp.status}, ${bodyText.length} bytes) — try another model in /admin.`, model);
+    }
     if (j?.error?.message) return fail(`The AI model "${model}" returned an error: ${clipErr(j.error.message)}`, model);
     const text = j?.choices?.[0]?.message?.content?.trim() ?? "";
     const tokensIn = j?.usage?.prompt_tokens ?? 0;

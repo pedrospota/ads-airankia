@@ -397,7 +397,12 @@ export function AdminModelSettings() {
       const res = await fetch("/api/admin/models", { signal: ac.signal });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
-      setModels((data.models ?? []) as ORModel[]);
+      // Drop OpenRouter's auto-"latest" alias models (their ids are prefixed with
+      // "~"). They're unstable pointers — e.g. ~moonshotai/kimi-latest returns an
+      // empty 200 and silently breaks the agents. Always pick a versioned model.
+      setModels(
+        ((data.models ?? []) as ORModel[]).filter((m) => !m.id.startsWith("~"))
+      );
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
       setModelsError(

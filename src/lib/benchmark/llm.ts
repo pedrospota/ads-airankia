@@ -14,9 +14,68 @@
 // ============================================================================
 
 import { callStructured } from "@/lib/llm";
+import { getLlmConfig, getOpenRouterKey } from "@/lib/llm/settings";
 import { recordCost } from "@/lib/cost-ledger";
 import type { AgentId } from "@/lib/engine/types";
 import type { BenchmarkCostContext } from "./types";
+
+/**
+ * Plain-text (NON-structured) completion for the benchmark's narrative section.
+ * The structured/tool path fails on models weak at function-calling (the /admin
+ * model moonshotai/kimi-latest "didn't return a valid structured object"), but
+ * those models write Markdown fine — so for free-form prose we skip the schema.
+ * OpenRouter only; returns null on the Anthropic provider or any failure (the
+ * deterministic report still stands). Never throws.
+ */
+export async function benchmarkNarrative(opts: {
+  system: string;
+  prompt: string;
+  cost: BenchmarkCostContext;
+  maxTokens?: number;
+}): Promise<string | null> {
+  try {
+    const config = await getLlmConfig();
+    const key = await getOpenRouterKey();
+    if (config.provider !== "openrouter" || !key || !config.defaultModel) return null;
+
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: config.defaultModel,
+        messages: [
+          { role: "system", content: opts.system },
+          { role: "user", content: opts.prompt },
+        ],
+        max_tokens: opts.maxTokens ?? 2500,
+        temperature: 0.4,
+      }),
+      signal: AbortSignal.timeout(70_000),
+    });
+    if (!resp.ok) return null;
+    const j = (await resp.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    const text = j?.choices?.[0]?.message?.content?.trim() ?? "";
+    void recordCost({
+      category: "llm",
+      provider: "openrouter",
+      resource: config.defaultModel,
+      tokensIn: j?.usage?.prompt_tokens ?? 0,
+      tokensOut: j?.usage?.completion_tokens ?? 0,
+      costMicros: 0,
+      userId: opts.cost.userId ?? null,
+      brandId: opts.cost.brandId ?? null,
+      workspaceId: opts.cost.workspaceId ?? null,
+      runId: opts.cost.runId ?? null,
+      meta: { module: "benchmark", stage: "narrative" },
+    });
+    return text || null;
+  } catch {
+    return null;
+  }
+}
 
 const TIER_AGENT: Record<"opus" | "sonnet", AgentId> = {
   opus: "structure_architect",

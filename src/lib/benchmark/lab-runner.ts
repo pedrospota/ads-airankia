@@ -25,7 +25,7 @@ import { oxylabsKeywordAds } from "./oxylabs";
 import { serpApiTransparency, type SerpApiTransparencyOpts } from "./serpapi-transparency";
 import { ocrImagesBatch } from "./firecrawl-ocr";
 import { computeAnalytics } from "./lab-analytics";
-import { benchmarkLlm } from "./llm";
+import { benchmarkNarrative } from "./llm";
 import type {
   LabAd,
   LabAdvertiser,
@@ -149,11 +149,19 @@ function tokenize(s: string | null | undefined): string[] {
 }
 const goodTerm = (t: string) => t.length > 2 && !STOP.has(t) && !/^\d+$/.test(t);
 
+// Collapse plural/singular so "tool"/"tools", "agency"/"agencies" count together.
+function normWord(w: string): string {
+  if (w.length > 4 && w.endsWith("ies")) return w.slice(0, -3) + "y";
+  if (w.length > 4 && w.endsWith("es") && !/(s|x|z|ch|sh)es$/.test(w)) return w.slice(0, -1);
+  if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
+  return w;
+}
+
 function wordFreqRows(texts: string[], limit: number): { word: string; count: number; pct: number }[] {
   const docs = texts.map((t) => (t || "").trim()).filter(Boolean);
   const freq = new Map<string, number>();
   for (const t of docs) {
-    for (const w of new Set(tokenize(t).filter(goodTerm))) freq.set(w, (freq.get(w) ?? 0) + 1);
+    for (const w of new Set(tokenize(t).filter(goodTerm).map(normWord))) freq.set(w, (freq.get(w) ?? 0) + 1);
   }
   return [...freq.entries()]
     .map(([word, count]) => ({ word, count, pct: docs.length ? Math.round((count / docs.length) * 100) : 0 }))
@@ -162,6 +170,32 @@ function wordFreqRows(texts: string[], limit: number): { word: string; count: nu
 }
 
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
+const median = (xs: number[]): number => {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+};
+
+// Concrete, number-bearing USP claims pulled from the ad copy ("21 tools",
+// "140+ SEO issues", "1000+ agencies", "save 30+ hours").
+function extractUSPs(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const frags = text.split(/[.•|]|—|\s-\s/).map((s) => s.trim()).filter(Boolean);
+  return uniq(frags.filter((f) => /\d/.test(f) && f.length >= 4 && f.length <= 55)).slice(0, 4);
+}
+
+const ACTION =
+  /\b(get|try|track|save|fix|compare|start|boost|reach|optimi[sz]e|score|deliver|run|improve|create|build|find|see|learn|download|sign up|book|request|automate|generate|grow|manage|scale|join|discover|unlock|drive)\b/i;
+
+// CTAs = sitelink extensions + imperative phrases mined from the copy.
+function extractCTAs(ad: LabAd | null | undefined, sitelinks: string[]): string[] {
+  const out: string[] = [...sitelinks];
+  const text = `${ad?.headline ?? ""}. ${ad?.description ?? ""}`;
+  for (const frag of text.split(/[.•|]|—/).map((s) => s.trim())) {
+    if (ACTION.test(frag) && frag.length >= 6 && frag.length <= 50) out.push(frag);
+  }
+  return uniq(out).slice(0, 6);
+}
 
 function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string {
   const L: string[] = [];
@@ -205,7 +239,11 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
     const landing = ad?.detailsLink ?? a.sampleUrl;
     if (landing) L.push(`| Landing page | ${landing} |`);
     if (ad?.campaign) L.push(`| Campaign label | ${ad.campaign} |`);
+    const usps = extractUSPs(ad?.description);
+    if (usps.length) L.push(`| Key USPs | ${usps.join(" · ")} |`);
     if (sitelinks.length) L.push(`| Sitelinks | ${sitelinks.slice(0, 6).join(", ")} |`);
+    const ctas = extractCTAs(ad, sitelinks);
+    if (ctas.length) L.push(`| CTAs detected | ${ctas.join(" · ")} |`);
     if (a.viaKeywords.length) L.push(`| Seen on keyword(s) | ${a.viaKeywords.join(", ")} |`);
   });
   L.push(``);
@@ -239,32 +277,50 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   }
   L.push(``);
 
-  // ---- Keyword ranking recommendations (>= 10) ----
+  // ---- Keyword ranking recommendations (clean, split High-Priority / Niche) ----
   const corpus = [...headlines, ...descriptions];
-  const terms = wordFreqRows(corpus, 20).map((r) => r.word);
-  const bigrams = new Map<string, number>();
-  for (const t of corpus) {
-    const toks = tokenize(t).filter(goodTerm);
-    for (let i = 0; i < toks.length - 1; i++) {
-      const bg = `${toks[i]} ${toks[i + 1]}`;
-      bigrams.set(bg, (bigrams.get(bg) ?? 0) + 1);
-    }
-  }
+  const terms = wordFreqRows(corpus, 20).map((r) => r.word).filter((t) => t.length > 2);
   const qset = new Set(query.keywords.map((k) => k.toLowerCase().trim()));
-  let recs = uniq([
-    ...[...bigrams.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k),
-    ...terms,
-  ]).filter((k) => !qset.has(k));
-  const primary = query.keywords[0] ?? "";
-  for (const m of ["software", "tool", "pricing", "alternative", "reviews", "for business", "online", "platform"]) {
-    if (recs.length >= 12) break;
-    const cand = primary ? `${primary} ${m}` : m;
-    if (!qset.has(cand) && !recs.includes(cand)) recs.push(cand);
-  }
-  recs = recs.slice(0, 12);
+  const primary = (query.keywords[0] ?? "").toLowerCase().trim();
+  const cat = primary.replace(/^(best|top|cheap|free)\s+/i, "").trim() || primary; // "ai seo tools"
+  const catWords = cat.split(/\s+/);
+  const tail = catWords[catWords.length - 1] || "tools";            // "tools"
+  const base = catWords.slice(0, -1).join(" ") || cat;              // "ai seo"
+  // High-priority: the query + commercial-intent variants anchored to the category.
+  const high = uniq(
+    [
+      primary,
+      cat,
+      `${base} software`,
+      `${base} platform`,
+      `${cat} pricing`,
+      `${cat} comparison`,
+      `${base} for agencies`,
+      `${base} reviews`,
+    ].map((s) => s.trim()).filter((k) => k.length > 3),
+  ).slice(0, 10);
+  // Niche: the distinctive terms competitors actually use, as buyable phrases —
+  // dropping generic words that make weak keywords ("issue tools", "brand tools").
+  const catSet = new Set(catWords);
+  const NICHE_STOP = new Set([
+    "search", "brand", "brands", "insight", "insights", "result", "results", "issue", "issues",
+    "content", "traffic", "online", "platform", "tool", "team", "teams", "data", "report", "reports",
+    "time", "way", "ways", "customer", "customers", "growth", "performance", "reach", "score", "boost",
+  ]);
+  const niche = uniq(
+    terms
+      .filter((t) => !catSet.has(t) && !qset.has(t) && t.length > 2 && !NICHE_STOP.has(t))
+      .slice(0, 6)
+      .map((t) => `${t} ${tail}`),
+  ).slice(0, 6);
   L.push(`## Keyword Ranking Recommendations`);
-  L.push(`Mined from the words competitors actually use in their ads — ranked by frequency:`);
-  recs.forEach((k, i) => L.push(`${i + 1}. ${k}`));
+  L.push(`Mined from the terms competitors actually use in their ads.`, ``);
+  L.push(`**🔥 High-priority keywords**`);
+  high.forEach((k) => L.push(`- ${k}`));
+  if (niche.length) {
+    L.push(``, `**🔍 Niche / angle keywords**`);
+    niche.forEach((k) => L.push(`- ${k}`));
+  }
   L.push(``);
 
   // ---- Brand-vs-competitor detection ----
@@ -294,21 +350,55 @@ function buildFullReport(query: LabQuery, advertisers: LabAdvertiser[]): string 
   // ---- Strategic recommendations (data-derived) ----
   const topHead = wordFreqRows(headlines, 4).map((r) => r.word);
   const topDesc = wordFreqRows(descriptions, 4).map((r) => r.word);
-  const topSitelinks = uniq(allAds.flatMap((a) => a.sitelinks ?? [])).slice(0, 6);
+  const topSitelinks = uniq(advertisers.flatMap((a) => [...(a.topAd?.sitelinks ?? []), ...a.oldestTop5.flatMap((x) => x.sitelinks ?? [])]));
+  const allUSPs = uniq(advertisers.flatMap((a) => extractUSPs(a.topAd?.description))).slice(0, 6);
   L.push(`## Strategic Recommendations`);
   if (topHead.length) L.push(`- **Winning headline pattern:** lead with ${topHead.map((w) => `\`${w}\``).join(", ")} — the terms most competitors put in their headlines.`);
   if (topDesc.length) L.push(`- **Description angles to test:** ${topDesc.map((w) => `\`${w}\``).join(", ")}.`);
-  if (topSitelinks.length) L.push(`- **Sitelinks competitors rely on:** ${topSitelinks.join(", ")} — match or beat these.`);
-  L.push(`- **Gaps to exploit:** look for angles no competitor uses (pricing transparency, speed/"in minutes", small-business focus, guarantees) — these stand out in a crowded auction.`);
+  if (allUSPs.length) L.push(`- **Proof points rivals lean on:** ${allUSPs.join(" · ")} — counter with your own concrete numbers.`);
+  if (topSitelinks.length) L.push(`- **Sitelinks to add:** ${topSitelinks.slice(0, 6).join(", ")} — match or beat these.`);
+  L.push(`- **Gaps to exploit:** angles few/none use — pricing transparency, speed ("in minutes"), small-business focus, guarantees/ROI. These stand out in a crowded auction.`);
   L.push(``);
 
-  // ---- Legal entities ----
+  // ---- Competitive positioning map (2×2: ad volume × creative breadth) ----
+  if (advertisers.length >= 2) {
+    const pts = advertisers.slice(0, 8).map((a) => ({
+      name: (a.domain.split(".")[0] || a.domain).toUpperCase(),
+      vol: a.totalAds,
+      breadth:
+        uniq([...(a.topAd?.sitelinks ?? []), ...a.oldestTop5.flatMap((x) => x.sitelinks ?? [])]).length +
+        extractUSPs(a.topAd?.description).length,
+    }));
+    const mv = median(pts.map((p) => p.vol));
+    const mb = median(pts.map((p) => p.breadth));
+    const q: Record<"tl" | "tr" | "bl" | "br", string[]> = { tl: [], tr: [], bl: [], br: [] };
+    for (const p of pts) {
+      const top = p.breadth >= mb;
+      const right = p.vol >= mv;
+      q[top ? (right ? "tr" : "tl") : right ? "br" : "bl"].push(p.name);
+    }
+    const cell = (xs: string[]) => (xs.length ? xs.join(", ") : "—");
+    L.push(`## Competitive Positioning Map`);
+    L.push("```");
+    L.push("BROAD CREATIVE / MANY EXTENSIONS");
+    L.push(`  ${cell(q.tl)}   │   ${cell(q.tr)}`);
+    L.push("  ───────────────────────┼───────────────────────");
+    L.push(`  ${cell(q.bl)}   │   ${cell(q.br)}`);
+    L.push("FOCUSED          LOW AD VOLUME → HIGH AD VOLUME");
+    L.push("```");
+    L.push(``);
+  }
+
+  // ---- Legal entities (ranked by ad presence) ----
   const legals = advertisers
-    .map((a) => ({ domain: a.domain, legal: a.oldestTop5.find((x) => x.legalName)?.legalName }))
-    .filter((x) => x.legal);
+    .map((a) => ({ domain: a.domain, legal: a.oldestTop5.find((x) => x.legalName)?.legalName, ads: a.totalAds }))
+    .filter((x) => x.legal)
+    .sort((a, b) => b.ads - a.ads);
   if (legals.length) {
     L.push(`## Legal Entities Running Ads`);
-    for (const x of legals) L.push(`- **${x.legal}** — ${x.domain}`);
+    legals.forEach((x, i) =>
+      L.push(`- **${x.legal}** (${x.domain})${i === 0 ? " — biggest ad presence" : ""} · ${x.ads} ads tracked`),
+    );
     L.push(``);
   }
 
@@ -327,49 +417,36 @@ async function analyze(
   // straight from the data. No LLM dependency for completeness ("siempre sale").
   const base = buildFullReport(query, advertisers);
 
-  // Best-effort AI strategic narrative ON TOP, from a SMALL summary (not raw JSON),
-  // so it answers within the deadline. If it fails, the report is still complete.
-  let aiSection = "";
-  try {
-    const summary = advertisers.slice(0, 8).map((a) => ({
-      domain: a.domain,
-      totalAds: a.totalAds,
-      legal: a.oldestTop5.find((x) => x.legalName)?.legalName ?? null,
-      ads: a.oldestTop5.slice(0, 3).map((x) => ({
-        headline: x.headline, description: x.description, campaign: x.campaign,
-        sitelinks: x.sitelinks, landing: x.detailsLink, daysActive: x.daysActive,
-      })),
-    }));
-    const data = await benchmarkLlm<{ analysis: string }>({
-      tier: "opus",
-      system:
-        `You are a senior Google Ads strategist. From the competitor ad data, write a concise STRATEGIC ANALYSIS ` +
-        `in the brand's language (code: ${query.language}). Cover: (1) headline/angle patterns that win, (2) ` +
-        `description angles to test, (3) sitelinks to add, (4) gaps no competitor covers, (5) a short ASCII ` +
-        `positioning map. GitHub-flavored Markdown. Use ONLY the data provided; invent nothing.`,
-      prompt:
-        `Input: ${query.keywords.join(", ")} · Country: ${query.countryName} · Mode: ${mode}\n` +
-        `Competitor ad data:\n${JSON.stringify(summary)}`,
-      schema: {
-        type: "object",
-        additionalProperties: false,
-        properties: { analysis: { type: "string" } },
-        required: ["analysis"],
-      },
-      toolName: "deliver_strategic_analysis",
-      toolDescription: "Return the strategic analysis section as Markdown.",
-      maxTokens: 2500,
-      stage: "benchmark_report",
-      cost,
-    });
-    const a = data?.analysis?.trim();
-    if (a) aiSection = `\n\n---\n\n## AI Strategic Analysis\n\n${a}`;
-  } catch (e) {
-    console.error("[benchmark-lab] AI strategic narrative skipped (data report still complete)", e);
-  }
+  // Best-effort AI strategic narrative ON TOP, from a SMALL summary (not raw JSON).
+  // Uses a PLAIN-TEXT call (no schema) so it works with the /admin model even when
+  // that model is weak at structured output. If it fails, the report is complete.
+  const summary = advertisers.slice(0, 8).map((a) => ({
+    domain: a.domain,
+    totalAds: a.totalAds,
+    legal: a.oldestTop5.find((x) => x.legalName)?.legalName ?? null,
+    topAd: a.topAd
+      ? { headline: a.topAd.headline, description: a.topAd.description, campaign: a.topAd.campaign, sitelinks: a.topAd.sitelinks, landing: a.topAd.detailsLink }
+      : null,
+    oldestDays: a.oldestTop5.map((x) => x.daysActive ?? 0).filter((n) => n > 0).slice(0, 3),
+  }));
+  const narrative = await benchmarkNarrative({
+    cost,
+    maxTokens: 2200,
+    system:
+      `You are a senior Google Ads strategist. From the competitor ad data, write a sharp STRATEGIC ANALYSIS ` +
+      `in the brand's language (language code: ${query.language}). Cover, with specifics from the data: ` +
+      `(1) the headline/angle patterns that win, (2) description angles to test, (3) sitelinks to add, ` +
+      `(4) gaps NO competitor covers, (5) each competitor's positioning in one line. ` +
+      `GitHub-flavored Markdown, concise, decision-ready. Use ONLY the data provided; invent nothing. ` +
+      `Do NOT repeat raw tables — give the "so what, do this" interpretation.`,
+    prompt:
+      `Keyword/input: ${query.keywords.join(", ")} · Country: ${query.countryName} · Mode: ${mode}\n` +
+      `Competitor ad data (JSON):\n${JSON.stringify(summary)}`,
+  });
+  const aiSection = narrative ? `\n\n---\n\n## AI Strategic Analysis\n\n${narrative}` : "";
 
   return {
-    model: aiSection ? "Deterministic data + AI strategy" : "Deterministic (always complete)",
+    model: aiSection ? "Data report + AI strategy" : "Deterministic (always complete)",
     markdown: base + aiSection,
   };
 }

@@ -1,42 +1,41 @@
 "use client";
 
+// ============================================================================
+// Brand-level Premium spy report — the auto-filled, "just press start" sibling
+// of /spy/report's ReportClient. No manual domain/competitor entry: the brand's
+// own website + its known competitors are already in hand, so we only offer an
+// optional Market and a single Generate button. POSTs to the same /api/spy/report
+// and renders the same consolidated markdown report.
+// ============================================================================
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
-import { useSpyBrand } from "@/components/spy-brand-context";
-import { toDomain } from "@/lib/benchmark/page-fetch";
 import { MarkdownReport } from "@/components/markdown-report";
 import { COUNTRIES } from "@/lib/benchmark/countries";
+import { toDomain } from "@/lib/benchmark/page-fetch";
 
-export function ReportClient() {
+export function BrandSpyReport({
+  brandWebsite,
+  knownCompetitors,
+}: {
+  brandWebsite: string | null;
+  knownCompetitors: string[];
+}) {
   const { colors } = useTheme();
-  const [brandDomain, setBrandDomain] = useState("");
-  const [competitors, setCompetitors] = useState("");
   const [countryCode, setCountryCode] = useState("US");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<{ markdown: string; cost: number; competitors: string[] } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const { selected } = useSpyBrand();
-  const appliedBrandRef = useRef<string | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // Prefill brand domain + competitors from the selected brand — only when the
-  // brand id actually changes (never on keystrokes). Manual leaves fields as-is.
-  useEffect(() => {
-    const id = selected?.id ?? null;
-    if (!id || id === appliedBrandRef.current) return;
-    appliedBrandRef.current = id;
-    if (selected?.website) {
-      const d = toDomain(selected.website);
-      if (d) setBrandDomain(d);
-    }
-    if (selected?.competitors.length) setCompetitors(selected.competitors.join(", "));
-  }, [selected?.id]);
+  const brandDomain = brandWebsite ? toDomain(brandWebsite) ?? brandWebsite.trim() : null;
+  const competitors = knownCompetitors.map((c) => c.trim()).filter(Boolean);
 
   const run = useCallback(async () => {
-    if (!brandDomain.trim()) {
-      setError("Enter your brand domain.");
+    if (!brandDomain) {
+      setError("This brand has no website on file.");
       return;
     }
     abortRef.current?.abort();
@@ -45,13 +44,12 @@ export function ReportClient() {
     setLoading(true);
     setError(null);
     try {
-      const list = competitors.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
       const res = await fetch("/api/spy/report", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",
         signal: ac.signal,
-        body: JSON.stringify({ brandDomain: brandDomain.trim(), competitors: list, countryCode }),
+        body: JSON.stringify({ brandDomain, competitors, countryCode }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
@@ -79,7 +77,7 @@ export function ReportClient() {
   return (
     <div style={{ maxWidth: 900 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 800, color: colors.text, margin: 0 }}>📄 Premium Report</h1>
+        <h2 style={{ fontSize: 22, fontWeight: 800, color: colors.text, margin: 0 }}>📄 Premium spy report</h2>
         <span style={{ fontSize: 11, fontWeight: 600, color: colors.accent, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 999, padding: "3px 9px" }}>
           all tools · one report
         </span>
@@ -89,30 +87,32 @@ export function ReportClient() {
         <strong style={{ color: colors.text }}> landing teardowns</strong>, who attacks your brand, and an AI strategy — in one consolidated report.
       </p>
 
-      <div style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 16, padding: 20, marginTop: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
-          <div>
-            <label style={label}>Your domain</label>
-            <input style={input} placeholder="e.g. airankia.com" value={brandDomain} onChange={(e) => setBrandDomain(e.target.value)} />
-          </div>
-          <div>
+      {!brandDomain ? (
+        <div style={{ marginTop: 16, padding: "16px 18px", borderRadius: 14, background: colors.bgCard, border: `1px solid ${colors.border}`, color: colors.textMuted, fontSize: 14, lineHeight: 1.6 }}>
+          Add a website to this brand to generate its premium spy report.
+        </div>
+      ) : (
+        <div style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 16, padding: 20, marginTop: 16 }}>
+          <p style={{ fontSize: 13.5, color: colors.textMuted, margin: "0 0 16px", lineHeight: 1.6 }}>
+            We&apos;ll analyze <strong style={{ color: colors.text }}>{brandDomain}</strong> against{" "}
+            <strong style={{ color: colors.text }}>{competitors.length}</strong>{" "}
+            competitor{competitors.length === 1 ? "" : "s"}
+            {competitors.length === 0 ? " (auto-discovered)" : ""}.
+          </p>
+          <div style={{ maxWidth: 280 }}>
             <label style={label}>Market</label>
             <select style={{ ...input, cursor: "pointer" }} value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
               {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.flag} {c.name}</option>)}
             </select>
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
+            <button onClick={run} disabled={loading} style={{ padding: "12px 28px", borderRadius: 12, border: "none", cursor: loading ? "default" : "pointer", fontSize: 14.5, fontWeight: 700, background: loading ? "rgba(16,185,129,0.4)" : colors.accent, color: "#06281D" }}>
+              {loading ? "Compiling report…" : "Generate report"}
+            </button>
+            <span style={{ fontSize: 12, color: colors.textFaint }}>Runs all tools · ~$0.10–0.20 · 1–2 min</span>
+          </div>
         </div>
-        <div style={{ marginTop: 14 }}>
-          <label style={label}>Competitors (optional — leave blank to auto-discover)</label>
-          <textarea style={{ ...input, minHeight: 64, resize: "vertical" }} placeholder="semrush.com, surferseo.com, ahrefs.com" value={competitors} onChange={(e) => setCompetitors(e.target.value)} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16 }}>
-          <button onClick={run} disabled={loading} style={{ padding: "12px 28px", borderRadius: 12, border: "none", cursor: loading ? "default" : "pointer", fontSize: 14.5, fontWeight: 700, background: loading ? "rgba(16,185,129,0.4)" : colors.accent, color: "#06281D" }}>
-            {loading ? "Compiling report…" : "Generate report"}
-          </button>
-          <span style={{ fontSize: 12, color: colors.textFaint }}>Runs all tools · ~$0.10–0.20 · 1–2 min</span>
-        </div>
-      </div>
+      )}
 
       {error && <div style={{ marginTop: 16, padding: "12px 16px", borderRadius: 12, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "#F87171", fontSize: 13.5 }}>{error}</div>}
 

@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
 import { hasSearchApiKey } from "@/lib/benchmark/config";
 import { brandCompetitorList } from "@/lib/benchmark/page-fetch";
-import { BenchmarkSuite } from "./benchmark-suite";
+import { BenchmarkTabs } from "./benchmark-tabs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export default async function BenchmarkPage({
   const adSpyAvailable = await hasSearchApiKey();
 
   return (
-    <BenchmarkSuite
+    <BenchmarkTabs
       brandId={brand.id}
       brandName={brand.name ?? ""}
       brandWebsite={brand.website ?? null}

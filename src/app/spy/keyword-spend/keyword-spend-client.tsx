@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
+import { useSpyBrand } from "@/components/spy-brand-context";
+import { toDomain } from "@/lib/benchmark/page-fetch";
 import { COUNTRIES } from "@/lib/benchmark/countries";
 
 type Colors = ReturnType<typeof useTheme>["colors"];
@@ -73,8 +75,22 @@ export function KeywordSpendClient({ configured }: { configured: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const { selected } = useSpyBrand();
+  const appliedBrandRef = useRef<string | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Prefill "your domain" from the selected brand — only when the brand id
+  // actually changes (never on keystrokes). Manual (no brand) leaves fields as-is.
+  useEffect(() => {
+    const id = selected?.id ?? null;
+    if (!id || id === appliedBrandRef.current) return;
+    appliedBrandRef.current = id;
+    if (selected?.website) {
+      const d = toDomain(selected.website);
+      if (d) setBrandDomain(d);
+    }
+  }, [selected?.id]);
 
   const run = useCallback(async () => {
     const d = domain.trim();
@@ -117,6 +133,13 @@ export function KeywordSpendClient({ configured }: { configured: boolean }) {
     fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase",
     color: colors.textMuted, marginBottom: 6, display: "block",
   };
+  const chipStyle = (active: boolean): React.CSSProperties => ({
+    fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+    color: active ? "#06281D" : colors.textMuted,
+    background: active ? colors.accent : colors.bgInput,
+    border: `1px solid ${active ? colors.accent : colors.border}`,
+    borderRadius: 999, padding: "3px 10px",
+  });
 
   const hasBrand = brandDomain.trim().length > 0;
 
@@ -145,6 +168,20 @@ export function KeywordSpendClient({ configured }: { configured: boolean }) {
             <label style={label}>Competitor domain</label>
             <input style={input} placeholder="e.g. semrush.com" value={domain}
               onChange={(e) => setDomain(e.target.value)} onKeyDown={(e) => e.key === "Enter" && run()} />
+            {selected && selected.competitors.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 10.5, color: colors.textFaint, marginBottom: 5 }}>
+                  Quick-pick from {selected.name}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {selected.competitors.map((c) => (
+                    <button key={c} type="button" onClick={() => setDomain(c)} style={chipStyle(c === domain.trim())}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <label style={label}>Your domain (optional · for the comparison)</label>

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
+import { useSpyBrand } from "@/components/spy-brand-context";
+import { toDomain } from "@/lib/benchmark/page-fetch";
 import { COUNTRIES } from "@/lib/benchmark/countries";
 
 type Colors = ReturnType<typeof useTheme>["colors"];
@@ -37,8 +39,23 @@ export function BrandDefenseClient({ configured }: { configured: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const { selected } = useSpyBrand();
+  const appliedBrandRef = useRef<string | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Prefill brand domain + name from the selected brand — only when the brand id
+  // actually changes (never on keystrokes). Manual (no brand) leaves fields as-is.
+  useEffect(() => {
+    const id = selected?.id ?? null;
+    if (!id || id === appliedBrandRef.current) return;
+    appliedBrandRef.current = id;
+    if (selected?.website) {
+      const d = toDomain(selected.website);
+      if (d) setBrandDomain(d);
+    }
+    if (selected?.name) setBrandName(selected.name);
+  }, [selected?.id]);
 
   const run = useCallback(async () => {
     const dom = brandDomain.trim();

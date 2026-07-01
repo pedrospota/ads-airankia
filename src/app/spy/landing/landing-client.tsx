@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
+import { useSpyBrand } from "@/components/spy-brand-context";
+import { toDomain } from "@/lib/benchmark/page-fetch";
 
 type Colors = ReturnType<typeof useTheme>["colors"];
 
@@ -45,8 +47,22 @@ export function LandingClient({ aiConfigured }: { aiConfigured: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const { selected } = useSpyBrand();
+  const appliedBrandRef = useRef<string | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Prefill the URL field from the selected brand — only when the brand id
+  // actually changes (never on keystrokes). Manual (no brand) leaves it as-is.
+  useEffect(() => {
+    const id = selected?.id ?? null;
+    if (!id || id === appliedBrandRef.current) return;
+    appliedBrandRef.current = id;
+    if (selected?.website) {
+      const d = toDomain(selected.website);
+      if (d) setUrl(d);
+    }
+  }, [selected?.id]);
 
   const run = useCallback(async () => {
     const u = url.trim();

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
+import { SpyBrandProvider, useSpyBrand } from "@/components/spy-brand-context";
 
 // Each ad-spy capability is its OWN tool (own route), navigable from this left
 // sidebar — kept SEPARATE from the AI benchmark pipeline so each can be tested in
@@ -17,11 +18,64 @@ const TOOLS: { href: string; icon: string; label: string; live: boolean; source:
   { href: "/spy/monitor", icon: "🔔", label: "Monitor & Alerts", live: false, source: "Snapshots" },
 ];
 
+// Brand picker — MUST render inside <SpyBrandProvider> so useSpyBrand() works.
+// Sits above the tools list and drives the shared brand selection that every spy
+// tool reads to prefill its inputs (website + competitor domains).
+function BrandPicker() {
+  const { colors } = useTheme();
+  const { brands, selected, setSelected } = useSpyBrand();
+
+  return (
+    <div style={{ padding: "0 10px 14px" }}>
+      <label
+        style={{
+          display: "block",
+          fontSize: 11,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: 0.6,
+          color: colors.textMuted,
+          marginBottom: 6,
+        }}
+      >
+        Brand
+      </label>
+      <select
+        value={selected?.id ?? ""}
+        onChange={(e) => setSelected(e.target.value || null)}
+        style={{
+          width: "100%",
+          fontSize: 13,
+          padding: "7px 8px",
+          borderRadius: 8,
+          background: colors.bgInput,
+          border: `1px solid ${colors.border}`,
+          color: colors.text,
+        }}
+      >
+        <option value="">— Manual (no brand) —</option>
+        {brands.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      {selected && (
+        <div style={{ fontSize: 10.5, color: colors.textFaint, marginTop: 6, lineHeight: 1.35 }}>
+          Tools prefill {selected.website ?? "—"} + {selected.competitors.length} competitor
+          {selected.competitors.length === 1 ? "" : "s"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SpyShell({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
   const pathname = usePathname();
 
   return (
+    <SpyBrandProvider>
     <div style={{ minHeight: "100vh", background: colors.bg }}>
       <Header breadcrumbs={[{ label: "Ad Spy" }]} />
       <div style={{ display: "flex", gap: 0, maxWidth: 1320, margin: "0 auto", alignItems: "stretch" }}>
@@ -34,6 +88,7 @@ export function SpyShell({ children }: { children: React.ReactNode }) {
             minHeight: "calc(100vh - 56px)",
           }}
         >
+          <BrandPicker />
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: colors.textMuted, padding: "0 10px 12px" }}>
             Ad-spy tools
           </div>
@@ -82,5 +137,6 @@ export function SpyShell({ children }: { children: React.ReactNode }) {
         <main style={{ flex: 1, minWidth: 0, padding: "24px 28px" }}>{children}</main>
       </div>
     </div>
+    </SpyBrandProvider>
   );
 }

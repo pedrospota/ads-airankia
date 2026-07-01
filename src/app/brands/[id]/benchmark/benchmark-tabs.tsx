@@ -9,11 +9,22 @@
 // main) so navigation stays consistent across tabs.
 // ============================================================================
 
+import Link from "next/link";
 import { useState } from "react";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
 import { BenchmarkSuite } from "./benchmark-suite";
 import { BrandSpyReport } from "./brand-spy-report";
+
+// Per-brand launcher → every Ad Spy tool, pre-scoped to THIS brand via ?brand=id
+// (the SpyBrandProvider reads that param and auto-selects the brand on arrival).
+const SPY_TOOLS: { href: string; icon: string; label: string }[] = [
+  { href: "/spy/keyword-spend", icon: "💰", label: "Keyword & Spend" },
+  { href: "/spy/landing", icon: "🔬", label: "Landing X-Ray" },
+  { href: "/spy/brand-defense", icon: "🛡️", label: "Brand Defense" },
+  { href: "/spy/discovery", icon: "🔍", label: "Competitor Discovery" },
+  { href: "/spy/report", icon: "📄", label: "Premium Report" },
+];
 
 interface Props {
   brandId: string;
@@ -44,6 +55,50 @@ export function BenchmarkTabs(props: Props) {
 
   return (
     <div className="min-h-screen">
+      {/* Per-brand Ad Spy launcher — every tool deep-linked + pre-scoped to this brand. */}
+      <div style={{ borderBottom: `1px solid ${colors.border}`, background: colors.bg }}>
+        <div
+          className="max-w-5xl mx-auto px-6"
+          style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "10px 24px" }}
+        >
+          <span
+            style={{
+              fontSize: 11.5,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: colors.textMuted,
+              marginRight: 2,
+            }}
+          >
+            🕵️ Spy this brand →
+          </span>
+          {SPY_TOOLS.map((t) => (
+            <Link
+              key={t.href}
+              href={`${t.href}?brand=${encodeURIComponent(props.brandId)}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "5px 11px",
+                borderRadius: 999,
+                fontSize: 12.5,
+                fontWeight: 600,
+                textDecoration: "none",
+                background: colors.bgInput,
+                border: `1px solid ${colors.border}`,
+                color: colors.text,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ fontSize: 13 }}>{t.icon}</span>
+              {t.label}
+            </Link>
+          ))}
+        </div>
+      </div>
+
       {/* Section switcher — compact segmented control, page-width aligned. */}
       <div style={{ borderBottom: `1px solid ${colors.border}`, background: colors.bg }}>
         <div className="max-w-5xl mx-auto px-6" style={{ display: "flex", gap: 8, padding: "12px 24px" }}>

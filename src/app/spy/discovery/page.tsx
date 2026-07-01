@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
-import { discoveryConfigured } from "@/lib/spy/discovery";
+import { oxylabsConfigured } from "@/lib/benchmark/oxylabs";
 import { DiscoveryClient } from "./discovery-client";
 
 export const runtime = "nodejs";
@@ -11,5 +11,7 @@ export default async function DiscoveryPage() {
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) redirect("/login");
 
-  return <DiscoveryClient configured={discoveryConfigured()} />;
+  // Paid discovery scrapes live Google Ads via Oxylabs — that's the primitive
+  // that must be configured (DataForSEO is only an optional keyword-seed source).
+  return <DiscoveryClient configured={oxylabsConfigured()} />;
 }

@@ -23,7 +23,7 @@ const TOOLS: { href: string; icon: string; label: string; live: boolean; source:
 // tool reads to prefill its inputs (website + competitor domains).
 function BrandPicker() {
   const { colors } = useTheme();
-  const { brands, selected, setSelected } = useSpyBrand();
+  const { brands, selected, setSelected, loading, error, reload } = useSpyBrand();
 
   return (
     <div style={{ padding: "0 10px 14px" }}>
@@ -40,6 +40,32 @@ function BrandPicker() {
       >
         Brand
       </label>
+      {loading ? (
+        <div style={{ fontSize: 12.5, color: colors.textFaint, padding: "7px 2px" }}>
+          Loading brands…
+        </div>
+      ) : error ? (
+        <div style={{ fontSize: 12.5, color: colors.textMuted, padding: "2px" }}>
+          <div style={{ marginBottom: 6 }}>Couldn&apos;t load brands</div>
+          <button
+            type="button"
+            onClick={() => reload()}
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "5px 12px",
+              borderRadius: 8,
+              background: colors.bgInput,
+              border: `1px solid ${colors.border}`,
+              color: colors.text,
+              cursor: "pointer",
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+      <>
       <select
         value={selected?.id ?? ""}
         onChange={(e) => setSelected(e.target.value || null)}
@@ -65,6 +91,8 @@ function BrandPicker() {
           Tools prefill {selected.website ?? "—"} + {selected.competitors.length} competitor
           {selected.competitors.length === 1 ? "" : "s"}
         </div>
+      )}
+      </>
       )}
     </div>
   );

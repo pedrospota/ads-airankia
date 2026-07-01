@@ -38,6 +38,7 @@ export interface AutoModeInput {
 export interface AutoModeResult {
   brief: CompetitiveBrief;
   reportMarkdown: string;
+  executiveSummary: string | null;
   cost: number;
 }
 
@@ -131,7 +132,7 @@ export async function runAutoMode(input: AutoModeInput): Promise<AutoModeResult>
 
   // ---- Render the premium consolidated report ----
   const reportMarkdown = renderReport(brief, synthesisMd);
-  return { brief, reportMarkdown, cost: Number(totalCost.toFixed(4)) };
+  return { brief, reportMarkdown, executiveSummary: synthesisMd, cost: Number(totalCost.toFixed(4)) };
 }
 
 // ---------------------------------------------------------------------------

@@ -57,6 +57,8 @@ export async function POST(request: NextRequest) {
       cost,
     });
     return NextResponse.json({
+      brief: result.brief,
+      executiveSummary: result.executiveSummary,
       reportMarkdown: result.reportMarkdown,
       competitors: result.brief.competitors,
       cost: result.cost,

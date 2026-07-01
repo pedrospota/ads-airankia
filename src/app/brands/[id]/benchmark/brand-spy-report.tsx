@@ -10,9 +10,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
-import { MarkdownReport } from "@/components/markdown-report";
+import { SpyReportDashboard } from "@/app/spy/report/spy-report-dashboard";
 import { COUNTRIES } from "@/lib/benchmark/countries";
 import { toDomain } from "@/lib/benchmark/page-fetch";
+import type { CompetitiveBrief } from "@/lib/spy/brief";
 
 export function BrandSpyReport({
   brandWebsite,
@@ -25,7 +26,7 @@ export function BrandSpyReport({
   const [countryCode, setCountryCode] = useState("US");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<{ markdown: string; cost: number; competitors: string[] } | null>(null);
+  const [report, setReport] = useState<{ brief: CompetitiveBrief; executiveSummary: string | null; cost: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -53,7 +54,7 @@ export function BrandSpyReport({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
-      setReport({ markdown: data.reportMarkdown, cost: data.cost, competitors: data.competitors });
+      setReport({ brief: data.brief, executiveSummary: data.executiveSummary, cost: data.cost });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -124,12 +125,7 @@ export function BrandSpyReport({
 
       {report && !loading && (
         <div style={{ marginTop: 20 }}>
-          <div style={{ background: colors.bgCard, border: `1px solid ${colors.border}`, borderRadius: 16, padding: 22 }}>
-            <MarkdownReport markdown={report.markdown} colors={colors} />
-          </div>
-          <div style={{ fontSize: 11.5, color: colors.textFaint, marginTop: 10 }}>
-            Compiled from DataForSEO + Oxylabs + Firecrawl + AI · {report.competitors.length} competitors · cost ${report.cost.toFixed(4)}
-          </div>
+          <SpyReportDashboard brief={report.brief} executiveSummary={report.executiveSummary} cost={report.cost} />
         </div>
       )}
     </div>

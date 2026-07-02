@@ -50,20 +50,20 @@ export function Header({
               ADS
             </span>
           </Link>
-          {/* Suite nav — Performance/Security are the merged gads-sentinel optimizer,
-              served under /performance via a same-origin reverse-proxy. Plain <a> so it
-              does a real navigation into that app (not client-side routing). */}
+          {/* Suite nav — Performance/Seguridad are native Next.js pages backed by
+              the gads-sentinel headless API (server-to-server), so we use <Link>
+              for normal client-side routing. */}
           <nav className="flex items-center gap-1" style={{ marginLeft: 6 }}>
-            <a href="/performance/cockpit"
+            <Link href="/performance"
                style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
                         padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
               Performance
-            </a>
-            <a href="/performance/dashboard"
+            </Link>
+            <Link href="/security"
                style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
                         padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
               Seguridad
-            </a>
+            </Link>
           </nav>
           {breadcrumbs?.map((crumb, i) => (
             <span key={i} className="flex items-center gap-3">

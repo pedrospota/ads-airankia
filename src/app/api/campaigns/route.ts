@@ -3,6 +3,7 @@ import { adsDb } from "@/lib/ads-db";
 import { campaigns, placements } from "@/lib/schema";
 import { and, eq } from "drizzle-orm";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
+import { getAccessibleBrand } from "@/lib/brand-access";
 
 // POST: Create campaign as DRAFT (DB only, no Google Ads)
 export async function POST(request: NextRequest) {
@@ -21,10 +22,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "brandId, campaignName, and urls are required" }, { status: 400 });
   }
 
+  // Membership check via RLS: the caller must belong to the brand's workspace.
+  // Also the workspace_id comes from the brand itself, never trusted from the body.
+  const brand = await getAccessibleBrand(supabase, brandId);
+  if (!brand) {
+    return NextResponse.json({ error: "brand not found" }, { status: 404 });
+  }
+
   try {
     // 1. Create campaign as draft in our DB
     const [campaign] = await adsDb.insert(campaigns).values({
-      brandId, workspaceId, userId: user.id,
+      brandId, workspaceId: brand.workspace_id || workspaceId, userId: user.id,
       status: "draft",
       dailyBudgetCents: Math.max(dailyBudgetCents || 100, 100),
       totalBudgetCents: 0, spentCents: 0,
@@ -68,6 +76,13 @@ export async function GET(request: NextRequest) {
 
   if (!brandId) {
     return NextResponse.json({ error: "brandId required" }, { status: 400 });
+  }
+
+  // Membership check via RLS — a signed-in user must not list another
+  // workspace's campaigns by guessing brandIds.
+  const brand = await getAccessibleBrand(supabase, brandId);
+  if (!brand) {
+    return NextResponse.json({ error: "brand not found" }, { status: 404 });
   }
 
   // Display-only: Search campaigns live behind the Search engine routes and must

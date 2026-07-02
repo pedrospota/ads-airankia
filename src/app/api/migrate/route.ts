@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
 import { adsDb } from "@/lib/ads-db";
 import { sql } from "drizzle-orm";
+import { getAdminUser } from "@/lib/admin";
 
 export async function POST() {
+  // Admin-only: this endpoint touches the DB schema. It was previously
+  // reachable unauthenticated — anyone on the internet could fire migrations.
+  const admin = await getAdminUser();
+  if (!admin) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   const migrations = [
     // wallets
     sql`CREATE TABLE IF NOT EXISTS wallets (

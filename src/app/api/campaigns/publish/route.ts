@@ -3,6 +3,7 @@ import { adsDb } from "@/lib/ads-db";
 import { campaigns, placements } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
+import { getAccessibleBrand } from "@/lib/brand-access";
 import { createBudget, createCampaign, createAdGroup, addPlacements } from "@/lib/google-ads";
 
 // POST: Publish a draft campaign to Google Ads (creates it PAUSED)
@@ -16,6 +17,13 @@ export async function POST(request: NextRequest) {
   // Get campaign from DB
   const [campaign] = await adsDb.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+
+  // Ownership check via RLS: the caller must belong to the workspace of the
+  // brand this campaign hangs from — publishing was previously possible by
+  // guessing campaign UUIDs.
+  const brand = await getAccessibleBrand(supabase, campaign.brandId);
+  if (!brand) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+
   if (campaign.googleCampaignId) return NextResponse.json({ error: "Already published to Google Ads" }, { status: 400 });
 
   // Get placements

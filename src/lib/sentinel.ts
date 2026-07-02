@@ -185,3 +185,108 @@ export function fmtWhen(iso: string | null | undefined): string {
   if (days < 30) return `hace ${days} d`;
   return d.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
 }
+
+// ---------------------------------------------------------------------------
+// Full-platform surface (native integration of the whole optimizer).
+// Types are permissive on purpose: the engine returns the raw payloads the
+// Python views render, so shapes may grow — render defensively.
+// ---------------------------------------------------------------------------
+
+export interface AccountFull {
+  account_id?: string;
+  name?: string | null;
+  analyzed_at?: string | null;
+  diagnostic?: Record<string, unknown> | null;
+  ai_plan?: {
+    business?: Record<string, unknown> | null;
+    optimizations?: Array<Record<string, unknown>> | null;
+    signals?: Record<string, unknown> | null;
+    measured?: Array<Record<string, unknown>> | null;
+    computed_at?: string | null;
+  } | null;
+  recommendations?: Array<Record<string, unknown>> | null;
+  audit?: {
+    grade?: string;
+    score?: number;
+    n_fail?: number;
+    n_warn?: number;
+    n_suppressed?: number;
+    categories?: Array<{ label?: string; score?: number; checks?: Array<Record<string, unknown>> }>;
+    checks?: Array<Record<string, unknown>>;
+  } | null;
+  audit_ai?: Record<string, unknown> | null;
+  approvals?: Array<{ rec_key?: string; title?: string | null; detail?: Record<string, unknown>; approved_by?: string | null; approved_at?: string | null }> | null;
+  shadow_bets?: Array<Record<string, unknown>> | null;
+  business_profile?: {
+    objetivo?: string | null; cpa_objetivo?: number | null; roas_objetivo?: number | null;
+    marca_intencional?: boolean; fase?: string | null; excluir_campanas?: string[]; notas?: string | null;
+  } | null;
+}
+
+export interface SimBet {
+  account_id?: string; account_name?: string | null; rec_id?: string;
+  action_family?: string | null; target?: string | null; objective?: string | null;
+  kind?: string; status?: string; dollars_at_stake?: number | null;
+  effect_pct_net?: number | null; confidence?: number | null; missed_usd?: number | null;
+  opened_at?: string | null; resolved_at?: string | null;
+}
+
+export function fetchAccountFull(id: string): Promise<AccountFull> {
+  return sentinelFetch<AccountFull>(`/api/v1/accounts/${encodeURIComponent(id)}/full`);
+}
+
+export function fetchRecommendations(): Promise<{ accounts?: Array<{ account_id?: string; name?: string; computed_at?: string | null; recs?: Array<Record<string, unknown>> }> }> {
+  return sentinelFetch("/api/v1/recommendations");
+}
+
+export function fetchSimulacion(account?: string): Promise<{ bets?: SimBet[] }> {
+  return sentinelFetch(`/api/v1/simulacion${account ? `?account=${encodeURIComponent(account)}` : ""}`);
+}
+
+export function fetchBacktest(): Promise<Record<string, unknown>> {
+  return sentinelFetch("/api/v1/backtest");
+}
+
+export function fetchSalud(): Promise<{
+  token_connected?: boolean; minutes_since_last_run?: number | null;
+  n_recommendations?: number; n_open_findings?: number;
+  collectors?: Array<{ collector?: string; status?: string; started_at?: string | null; accounts_scanned?: number; items?: number; error?: string | null }>;
+}> {
+  return sentinelFetch("/api/v1/salud");
+}
+
+export function fetchCosts(days = 30): Promise<{ rows?: Array<{ day?: string; kind?: string; model?: string; calls?: number; prompt_tokens?: number; completion_tokens?: number; cost_usd?: number }> }> {
+  return sentinelFetch(`/api/v1/costs?days=${days}`);
+}
+
+export function fetchOptimizers(days = 14): Promise<{ days?: number; rows?: Array<{ person?: string; account_id?: string; account_name?: string; n_changes?: number; types?: Record<string, number> }> }> {
+  return sentinelFetch(`/api/v1/optimizers?days=${days}`);
+}
+
+async function sentinelPost<T>(path: string, body: unknown): Promise<T> {
+  const baseUrl = process.env.SENTINEL_API_URL;
+  const apiKey = process.env.SENTINEL_API_KEY;
+  if (!baseUrl || !apiKey) {
+    throw new Error("El optimizador no está configurado (SENTINEL_API_URL / SENTINEL_API_KEY).");
+  }
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`El optimizador respondió ${res.status} en ${path}.`);
+  return (await res.json()) as T;
+}
+
+export function postApprove(id: string, body: { rec_key: string; title?: string; detail?: Record<string, unknown>; approved_by?: string }): Promise<{ ok?: boolean }> {
+  return sentinelPost(`/api/v1/accounts/${encodeURIComponent(id)}/approve`, body);
+}
+
+export function postRevert(id: string, rec_key: string): Promise<{ ok?: boolean }> {
+  return sentinelPost(`/api/v1/accounts/${encodeURIComponent(id)}/revert`, { rec_key });
+}
+
+export function postRules(id: string, rules: Record<string, unknown>): Promise<{ ok?: boolean }> {
+  return sentinelPost(`/api/v1/accounts/${encodeURIComponent(id)}/rules`, rules);
+}

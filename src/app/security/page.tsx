@@ -86,7 +86,7 @@ export default async function SecurityPage() {
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">Seguridad</h1>
+          <h1 className="text-3xl font-bold">Seguridad — Monitor</h1>
           <p className="mt-2" style={{ opacity: 0.4 }}>
             Monitoreo anti-hijacking: cambios de URL, presupuesto y hallazgos críticos — 7 días
           </p>

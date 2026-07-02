@@ -6,6 +6,14 @@ import { useTheme } from "./theme-provider";
 import { ModeSwitch } from "./mode-switch";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 
+const PLATFORM_NAV = [
+  { href: "/brands", label: "Marcas" },
+  { href: "/performance", label: "Performance" },
+  { href: "/security", label: "Seguridad" },
+  { href: "/spy", label: "Spy" },
+  { href: "/conexiones", label: "Conexiones" },
+];
+
 export function Header({
   breadcrumbs,
   action,
@@ -50,20 +58,16 @@ export function Header({
               ADS
             </span>
           </Link>
-          {/* Suite nav — Performance/Seguridad are native Next.js pages backed by
-              the gads-sentinel headless API (server-to-server), so we use <Link>
-              for normal client-side routing. */}
+          {/* Platform nav — all native Next.js pages, so we use <Link> for
+              normal client-side routing. */}
           <nav className="flex items-center gap-1" style={{ marginLeft: 6 }}>
-            <Link href="/performance"
-               style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
-                        padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
-              Performance
-            </Link>
-            <Link href="/security"
-               style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
-                        padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
-              Seguridad
-            </Link>
+            {PLATFORM_NAV.map((item) => (
+              <Link key={item.href} href={item.href}
+                 style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
+                          padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
+                {item.label}
+              </Link>
+            ))}
           </nav>
           {breadcrumbs?.map((crumb, i) => (
             <span key={i} className="flex items-center gap-3">

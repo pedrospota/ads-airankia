@@ -50,6 +50,21 @@ export function Header({
               ADS
             </span>
           </Link>
+          {/* Suite nav — Performance/Security are the merged gads-sentinel optimizer,
+              served under /performance via a same-origin reverse-proxy. Plain <a> so it
+              does a real navigation into that app (not client-side routing). */}
+          <nav className="flex items-center gap-1" style={{ marginLeft: 6 }}>
+            <a href="/performance/cockpit"
+               style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
+                        padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
+              Performance
+            </a>
+            <a href="/performance/dashboard"
+               style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
+                        padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
+              Seguridad
+            </a>
+          </nav>
           {breadcrumbs?.map((crumb, i) => (
             <span key={i} className="flex items-center gap-3">
               <span style={{ color: colors.border }}>/</span>

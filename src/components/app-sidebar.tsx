@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./theme-provider";
 
-const SIDEBAR_WIDTH = 230;
+const SIDEBAR_WIDTH = 220;
 
 /* ---------------------------------------------------------------------------
  * Inline SVG icons (stroke-based, inherit currentColor). Kept tiny on purpose
@@ -213,10 +213,11 @@ function findActiveHref(pathname: string): string | null {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { theme, colors } = useTheme();
+  const { colors } = useTheme();
   const activeHref = findActiveHref(pathname ?? "");
-  const hoverBg =
-    theme === "dark" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)";
+  // Hover = surface (#101012 dark), active = surface2 (#151518 dark).
+  const hoverBg = colors.bgCard;
+  const activeBg = colors.surface2;
 
   return (
     <div
@@ -225,10 +226,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         flexDirection: "column",
         height: "100%",
         overflowY: "auto",
-        padding: "16px 12px 24px",
       }}
     >
-      {/* Brand */}
+      {/* Brand row (56px, aligned to the 24px text inset of nav items) */}
       <Link
         href="/brands"
         onClick={onNavigate}
@@ -236,25 +236,32 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           display: "flex",
           alignItems: "center",
           gap: 8,
-          padding: "4px 10px 14px",
+          height: 56,
+          flexShrink: 0,
+          padding: "0 24px",
           textDecoration: "none",
         }}
       >
-        <img
-          src="/airankia-logo.png"
-          alt="AI Rankia"
-          style={{ height: 24, width: "auto" }}
-        />
         <span
           style={{
-            fontSize: 10,
+            fontSize: 15,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+            color: colors.text,
+          }}
+        >
+          AI Rankia
+        </span>
+        <span
+          style={{
+            fontSize: 9,
             fontWeight: 700,
-            padding: "2px 6px",
+            padding: "1px 5px",
             borderRadius: 4,
-            background: "rgba(16,185,129,0.15)",
+            background: "rgba(16,185,129,0.12)",
             color: colors.accent,
             border: "1px solid rgba(16,185,129,0.3)",
-            letterSpacing: "0.05em",
+            letterSpacing: "0.06em",
           }}
         >
           ADS
@@ -264,23 +271,24 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Groups */}
       <nav
         aria-label="Navegación principal"
-        style={{ display: "flex", flexDirection: "column", gap: 18 }}
+        style={{ padding: "0 12px 32px" }}
       >
         {NAV_GROUPS.map((group) => (
-          <div key={group.label}>
+          <div key={group.label} style={{ marginTop: 24 }}>
             <div
               style={{
-                fontSize: 10,
-                fontWeight: 600,
+                fontSize: 11,
+                fontWeight: 500,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
                 color: colors.textFaint,
-                padding: "0 10px 6px",
+                padding: "0 12px",
+                marginBottom: 6,
               }}
             >
               {group.label}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
               {group.items.map((item) => {
                 const active = item.href === activeHref;
                 return (
@@ -290,18 +298,17 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
                     style={{
+                      position: "relative",
                       display: "flex",
                       alignItems: "center",
                       gap: 9,
-                      padding: "7px 10px",
-                      borderRadius: 8,
+                      padding: "7px 12px",
+                      borderRadius: 6,
                       fontSize: 13,
-                      fontWeight: active ? 600 : 500,
+                      fontWeight: active ? 500 : 450,
                       textDecoration: "none",
-                      color: active ? colors.accent : colors.textMuted,
-                      background: active
-                        ? "rgba(16,185,129,0.12)"
-                        : "transparent",
+                      color: active ? colors.text : colors.textMuted,
+                      background: active ? activeBg : "transparent",
                     }}
                     onMouseEnter={(e) => {
                       if (!active) e.currentTarget.style.background = hoverBg;
@@ -311,6 +318,20 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                         e.currentTarget.style.background = "transparent";
                     }}
                   >
+                    {active && (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 7,
+                          bottom: 7,
+                          width: 2,
+                          borderRadius: 2,
+                          background: colors.accent,
+                        }}
+                      />
+                    )}
                     <Icon name={item.icon} />
                     {item.label}
                   </Link>
@@ -388,7 +409,6 @@ export function AppSidebar() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
         }}
       >
         <svg

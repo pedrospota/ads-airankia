@@ -1,40 +1,44 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
+import {
+  PageHeader,
+  StatCard,
+  Card,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  Badge,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
 import { fetchSalud, fmtNum, fmtWhen } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
 export const dynamic = "force-dynamic";
 
-const ACCENT = "#10b981";
-const AMBER = "#f59e0b";
-const RED = "#ef4444";
-const GRAY = "rgba(128,128,128,0.6)";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
-
 type Salud = Awaited<ReturnType<typeof fetchSalud>>;
 
+type Tone = "ok" | "warn" | "danger" | "muted";
+
 /** Frescura del último análisis: <=90 min ok, <=180 aviso, más = alerta. */
-function freshness(mins: number | null | undefined): { color: string; label: string } {
+function freshness(mins: number | null | undefined): { tone: Tone; label: string } {
   if (mins == null || !Number.isFinite(mins)) {
-    return { color: GRAY, label: "Sin corridas registradas" };
+    return { tone: "muted", label: "Sin corridas registradas" };
   }
-  if (mins <= 90) return { color: ACCENT, label: "Al día" };
-  if (mins <= 180) return { color: AMBER, label: "Con retraso" };
-  return { color: RED, label: "Detenido" };
+  if (mins <= 90) return { tone: "ok", label: "Al día" };
+  if (mins <= 180) return { tone: "warn", label: "Con retraso" };
+  return { tone: "danger", label: "Detenido" };
 }
 
 /** Estados de collector del engine: running | ok | noaccess | error. */
-function statusColor(status: string | null | undefined): string {
+function statusTone(status: string | null | undefined): Tone {
   const s = (status ?? "").toLowerCase();
-  if (s === "ok" || s === "success") return ACCENT;
-  if (s === "error" || s === "failed") return RED;
-  return AMBER; // running, noaccess, desconocido
+  if (s === "ok" || s === "success") return "ok";
+  if (s === "error" || s === "failed") return "danger";
+  return "warn"; // running, noaccess, desconocido
 }
 
 export default async function SaludPage() {
@@ -65,140 +69,99 @@ export default async function SaludPage() {
         ]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Salud del sistema</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Estado del optimizador: conexión, frescura de datos y colectores
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title="Salud del sistema"
+          subtitle="Estado del optimizador: conexión, frescura de datos y colectores"
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar el estado del sistema. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar el estado del sistema. ${error}`} />
         ) : (
           <>
-            {/* Hero de estado */}
+            {/* Estado general */}
             <div
-              className="flex flex-wrap items-center gap-x-10 gap-y-4 mb-8"
-              style={{ ...CARD_STYLE, borderLeft: `4px solid ${fresh.color}` }}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4"
+              style={{ gap: 16, marginBottom: 32 }}
             >
-              <div>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Último análisis
-                </p>
-                <p className="text-2xl font-bold mt-1" style={{ color: fresh.color }}>
-                  {mins != null && Number.isFinite(mins) ? `hace ${fmtNum(mins)} min` : "—"}
-                </p>
-                <p className="text-xs mt-1" style={{ opacity: 0.5 }}>
-                  {fresh.label}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Google Ads
-                </p>
-                <p
-                  className="text-2xl font-bold mt-1"
-                  style={{ color: tokenOk ? ACCENT : RED }}
-                >
-                  {tokenOk ? "Conectado" : "Desconectado"}
-                </p>
-                <p className="text-xs mt-1" style={{ opacity: 0.5 }}>
-                  {tokenOk ? "Token de acceso activo" : "Reconecta la cuenta de Google Ads"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Recomendaciones
-                </p>
-                <p className="text-2xl font-bold mt-1">{fmtNum(salud?.n_recommendations)}</p>
-                <p className="text-xs mt-1" style={{ opacity: 0.5 }}>
-                  cuentas con análisis vigente
-                </p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Hallazgos abiertos
-                </p>
-                <p className="text-2xl font-bold mt-1">{fmtNum(salud?.n_open_findings)}</p>
-                <p className="text-xs mt-1" style={{ opacity: 0.5 }}>
-                  alertas de seguridad sin resolver
-                </p>
-              </div>
+              <StatCard
+                label="Último análisis"
+                value={
+                  mins != null && Number.isFinite(mins) ? `hace ${fmtNum(mins)} min` : "—"
+                }
+                sub={fresh.label}
+                tone={fresh.tone}
+              />
+              <StatCard
+                label="Google Ads"
+                value={tokenOk ? "Conectado" : "Desconectado"}
+                sub={tokenOk ? "Token de acceso activo" : "Reconecta la cuenta de Google Ads"}
+                tone={tokenOk ? "ok" : "danger"}
+              />
+              <StatCard
+                label="Recomendaciones"
+                value={fmtNum(salud?.n_recommendations)}
+                sub="cuentas con análisis vigente"
+              />
+              <StatCard
+                label="Hallazgos abiertos"
+                value={fmtNum(salud?.n_open_findings)}
+                sub="alertas de seguridad sin resolver"
+              />
             </div>
 
             {/* Colectores */}
             {collectors.length === 0 ? (
-              <div className="text-center py-16" style={{ opacity: 0.4 }}>
-                <p className="text-lg">Todavía no hay corridas de colectores.</p>
-                <p className="text-sm mt-2">
-                  Cuando el optimizador ejecute su primer escaneo verás aquí el detalle.
-                </p>
-              </div>
+              <EmptyState
+                title="Todavía no hay corridas de colectores."
+                hint="Cuando el optimizador ejecute su primer escaneo verás aquí el detalle."
+              />
             ) : (
-              <div style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-                <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr
-                      className="text-xs uppercase tracking-wide"
-                      style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                    >
-                      <th className="text-left font-medium px-4 py-3">Colector</th>
-                      <th className="text-left font-medium px-4 py-3">Estado</th>
-                      <th className="text-right font-medium px-4 py-3">Última corrida</th>
-                      <th className="text-right font-medium px-4 py-3">Cuentas</th>
-                      <th className="text-right font-medium px-4 py-3">Items</th>
-                      <th className="text-left font-medium px-4 py-3">Error</th>
-                    </tr>
-                  </thead>
+              <Card style={{ padding: 0 }}>
+                <DataTable>
+                  <THead
+                    cols={[
+                      { label: "Colector" },
+                      { label: "Estado" },
+                      { label: "Última corrida", align: "right" },
+                      { label: "Cuentas", align: "right" },
+                      { label: "Items", align: "right" },
+                      { label: "Error" },
+                    ]}
+                  />
                   <tbody>
                     {collectors.map((c, i) => (
-                      <tr
-                        key={c.collector ?? i}
-                        style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}
-                      >
-                        <td className="px-4 py-3 font-medium">{c.collector ?? "—"}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className="text-xs font-semibold uppercase"
-                            style={{ color: statusColor(c.status) }}
-                          >
-                            {c.status ?? "—"}
-                          </span>
-                        </td>
-                        <td className="text-right px-4 py-3 whitespace-nowrap" style={{ opacity: 0.6 }}>
+                      <Row key={c.collector ?? i}>
+                        <Cell style={{ fontWeight: 500 }}>{c.collector ?? "—"}</Cell>
+                        <Cell>
+                          <Badge tone={statusTone(c.status)}>{c.status ?? "—"}</Badge>
+                        </Cell>
+                        <Cell
+                          align="right"
+                          style={{ color: UI.muted, whiteSpace: "nowrap" }}
+                        >
                           {fmtWhen(c.started_at)}
-                        </td>
-                        <td className="text-right px-4 py-3">{fmtNum(c.accounts_scanned)}</td>
-                        <td className="text-right px-4 py-3">{fmtNum(c.items)}</td>
-                        <td className="px-4 py-3" style={{ maxWidth: 320 }}>
+                        </Cell>
+                        <Cell align="right" mono>{fmtNum(c.accounts_scanned)}</Cell>
+                        <Cell align="right" mono>{fmtNum(c.items)}</Cell>
+                        <Cell style={{ maxWidth: 320 }}>
                           {c.error ? (
                             <span
-                              className="block truncate text-xs"
-                              style={{ color: RED }}
+                              className="block truncate"
+                              style={{ fontSize: 12, color: UI.danger }}
                               title={c.error}
                             >
                               {c.error}
                             </span>
                           ) : (
-                            <span style={{ opacity: 0.3 }}>—</span>
+                            <span style={{ color: UI.faint }}>—</span>
                           )}
-                        </td>
-                      </tr>
+                        </Cell>
+                      </Row>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                </DataTable>
+              </Card>
             )}
           </>
         )}

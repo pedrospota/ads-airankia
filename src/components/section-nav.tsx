@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./theme-provider";
+import { UI } from "./ui-kit";
 
 export interface SectionNavItem {
   href: string;
@@ -10,7 +11,7 @@ export interface SectionNavItem {
 }
 
 /**
- * Horizontal sub-navigation bar (pill links) used by section layouts
+ * Horizontal sub-navigation bar (quiet underline tabs) used by section layouts
  * (Performance, Seguridad). Active state via longest-prefix match so the
  * section root (e.g. /performance) doesn't stay highlighted on deeper
  * sub-pages, while account pages (/performance/[id]) still highlight it.
@@ -34,8 +35,13 @@ export function SectionNav({ items }: { items: SectionNavItem[] }) {
       style={{ borderBottom: `1px solid ${colors.border}`, background: colors.bg }}
     >
       <div
-        className="max-w-6xl mx-auto px-6 flex items-center gap-2 overflow-x-auto"
-        style={{ paddingTop: 10, paddingBottom: 10 }}
+        className="flex items-center overflow-x-auto"
+        style={{
+          maxWidth: UI.maxWidth,
+          margin: "0 auto",
+          padding: "0 32px",
+          gap: 20,
+        }}
       >
         {items.map((item) => {
           const active = item.href === activeHref;
@@ -48,14 +54,12 @@ export function SectionNav({ items }: { items: SectionNavItem[] }) {
               style={{
                 fontSize: 13,
                 fontWeight: 500,
-                padding: "5px 12px",
-                borderRadius: 999,
+                padding: "11px 2px 9px",
                 textDecoration: "none",
-                color: active ? "#10b981" : colors.textMuted,
-                background: active ? "rgba(16,185,129,0.12)" : "transparent",
-                border: active
-                  ? "1px solid rgba(16,185,129,0.3)"
-                  : "1px solid transparent",
+                color: active ? colors.text : colors.textMuted,
+                borderBottom: active
+                  ? `2px solid ${colors.accent}`
+                  : "2px solid transparent",
               }}
             >
               {item.label}

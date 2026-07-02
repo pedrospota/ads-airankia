@@ -3,6 +3,17 @@
 import { useState } from "react";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
+import {
+  Badge,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  EmptyState,
+  ErrorCard,
+  PrimaryButton,
+  SecondaryButton,
+} from "@/components/ui-kit";
 
 // ---------------------------------------------------------------------------
 // Types shared with the server page (all fields nullable — render defensively)
@@ -69,11 +80,31 @@ export function ConexionesClient({
   const [connections, setConnections] = useState<ConnectionRow[]>(initialConnections);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Engine-source bridge state (which connection is being sent to the engine).
+  const [engineSavingId, setEngineSavingId] = useState<string | null>(null);
+  const [engineError, setEngineError] = useState<string | null>(null);
+
+  // Theme-aware button overrides (primary = ink-on-paper, the quiet move).
+  const primaryStyle: React.CSSProperties = {
+    background: colors.text,
+    color: colors.bg,
+    border: `1px solid ${colors.text}`,
+  };
+  const secondaryStyle: React.CSSProperties = {
+    background: "transparent",
+    color: colors.text,
+    border: `1px solid ${colors.border}`,
+  };
 
   const cardStyle: React.CSSProperties = {
     background: colors.bgCard,
     border: `1px solid ${colors.border}`,
     borderRadius: 12,
+  };
+
+  const cellTheme: React.CSSProperties = {
+    color: colors.text,
+    borderBottom: `1px solid ${colors.border}`,
   };
 
   function patchAccount(accountId: string, patch: Partial<ConnectionAccountRow>) {
@@ -117,6 +148,48 @@ export function ConexionesClient({
     }
   }
 
+  // F4 bridge: hand this connection's token to the optimizer engine so it
+  // scans with it (read-only). Only one connection per workspace is the source.
+  async function makeEngineSource(conn: ConnectionRow) {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "El motor escaneará con esta conexión (solo lectura).\n\n" +
+          `¿Usar ${conn.google_email || "esta conexión"} como fuente del motor?`
+      )
+    ) {
+      return;
+    }
+    setEngineSavingId(conn.id);
+    setEngineError(null);
+    try {
+      const res = await fetch("/api/connections/engine-source", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_id: conn.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `Error ${res.status}`);
+      }
+      // Done state: this connection is the source; its siblings are not.
+      setConnections((prev) =>
+        prev.map((c) => ({ ...c, is_engine_source: c.id === conn.id }))
+      );
+    } catch (e) {
+      setEngineError(
+        e instanceof Error
+          ? e.message
+          : "No se pudo configurar la fuente del motor. Vuelve a intentarlo."
+      );
+    } finally {
+      setEngineSavingId(null);
+    }
+  }
+
   const totalAccounts = connections.reduce((n, c) => n + c.accounts.length, 0);
   const enabledAccounts = connections.reduce(
     (n, c) => n + c.accounts.filter((a) => a.enabled === true).length,
@@ -124,47 +197,65 @@ export function ConexionesClient({
   );
 
   return (
-    <div className="min-h-screen">
+    <div>
       <Header breadcrumbs={[{ label: "Conexiones" }]} />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* Hero */}
-        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">Conexiones</h1>
-            <p className="mt-2 max-w-2xl" style={{ color: colors.textMuted, lineHeight: 1.6 }}>
+      <main style={{ marginTop: 24 }}>
+        {/* Page header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+            marginBottom: 32,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <h1
+              style={{
+                fontSize: 26,
+                fontWeight: 600,
+                letterSpacing: "-0.02em",
+                lineHeight: 1.25,
+                color: colors.text,
+                margin: 0,
+              }}
+            >
+              Conexiones
+            </h1>
+            <p
+              style={{
+                fontSize: 13.5,
+                color: colors.textMuted,
+                margin: "6px 0 0",
+                lineHeight: 1.5,
+                maxWidth: 620,
+              }}
+            >
               Conecta Google Ads y activa las cuentas que quieres monitorear, una
               por una; mapea cada una a su marca. Solo las cuentas activadas
               alimentan Performance y Seguridad.
             </p>
           </div>
-          <a
-            href="/api/connections/start"
-            style={{
-              padding: "10px 18px",
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              background: colors.accent,
-              color: "#fff",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <PrimaryButton href="/api/connections/start" style={primaryStyle}>
             Conectar Google Ads
-          </a>
+          </PrimaryButton>
         </div>
 
         {/* Banners */}
         {connected && (
           <div
-            className="mb-4"
             style={{
-              padding: 14,
-              borderRadius: 8,
-              background: "rgba(16,185,129,0.1)",
-              border: "1px solid rgba(16,185,129,0.3)",
+              marginBottom: 16,
+              padding: "12px 16px",
+              borderRadius: 12,
+              background: "rgba(16,185,129,0.06)",
+              border: "1px solid rgba(16,185,129,0.35)",
               color: colors.accent,
-              fontSize: 14,
+              fontSize: 13.5,
+              lineHeight: 1.5,
             }}
           >
             Cuenta de Google conectada correctamente. Activa abajo las cuentas
@@ -173,68 +264,36 @@ export function ConexionesClient({
         )}
         {warn === "cuentas" && (
           <div
-            className="mb-4"
             style={{
-              padding: 14,
-              borderRadius: 8,
-              background: "rgba(251,191,36,0.1)",
-              border: "1px solid rgba(251,191,36,0.3)",
-              color: "#F59E0B",
-              fontSize: 14,
+              marginBottom: 16,
+              padding: "12px 16px",
+              borderRadius: 12,
+              background: "rgba(245,158,11,0.06)",
+              border: "1px solid rgba(245,158,11,0.35)",
+              color: colors.warn,
+              fontSize: 13.5,
+              lineHeight: 1.5,
             }}
           >
             La conexión se guardó, pero no pudimos listar tus cuentas de Google
             Ads en este momento. Vuelve a intentarlo más tarde.
           </div>
         )}
-        {errorParam && (
-          <div
-            className="mb-4"
-            style={{
-              padding: 14,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.3)",
-              color: "#F87171",
-              fontSize: 14,
-            }}
-          >
-            {errorParam}
-          </div>
-        )}
-        {loadError && (
-          <div
-            className="mb-4"
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.3)",
-              color: "#F87171",
-            }}
-          >
-            {loadError}
-          </div>
-        )}
-        {saveError && (
-          <div
-            className="mb-4"
-            style={{
-              padding: 14,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.3)",
-              color: "#F87171",
-              fontSize: 14,
-            }}
-          >
-            {saveError}
-          </div>
-        )}
+        {errorParam && <ErrorCard message={errorParam} style={{ marginBottom: 16 }} />}
+        {loadError && <ErrorCard message={loadError} style={{ marginBottom: 16 }} />}
+        {saveError && <ErrorCard message={saveError} style={{ marginBottom: 16 }} />}
+        {engineError && <ErrorCard message={engineError} style={{ marginBottom: 16 }} />}
 
         {/* Summary line */}
         {connections.length > 0 && (
-          <p className="mb-4 text-sm" style={{ color: colors.textMuted }}>
+          <p
+            style={{
+              marginBottom: 16,
+              fontSize: 13,
+              color: colors.textMuted,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
             {connections.length}{" "}
             {connections.length === 1 ? "conexión" : "conexiones"} ·{" "}
             {enabledAccounts} de {totalAccounts} cuentas activas
@@ -243,226 +302,187 @@ export function ConexionesClient({
 
         {/* Empty state */}
         {!loadError && connections.length === 0 && (
-          <div style={{ ...cardStyle, padding: 40 }} className="text-center">
-            <p className="text-lg font-semibold">
-              Aún no has conectado ninguna cuenta de Google Ads.
-            </p>
-            <p className="text-sm mt-2 mb-6" style={{ color: colors.textMuted }}>
-              Pulsa «Conectar Google Ads», autoriza el acceso con tu cuenta de
-              Google y aquí aparecerán todas las cuentas a las que tienes
-              acceso para que actives las que quieras monitorear.
-            </p>
-            <a
-              href="/api/connections/start"
-              style={{
-                display: "inline-block",
-                padding: "10px 18px",
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
-                background: "rgba(16,185,129,0.12)",
-                color: colors.accent,
-                border: "1px solid rgba(16,185,129,0.3)",
-              }}
-            >
-              Conectar Google Ads
-            </a>
+          <div style={cardStyle}>
+            <EmptyState
+              title="Aún no has conectado ninguna cuenta de Google Ads"
+              hint="Pulsa «Conectar Google Ads», autoriza el acceso con tu cuenta de Google y aquí aparecerán todas las cuentas a las que tienes acceso para que actives las que quieras monitorear."
+              action={
+                <SecondaryButton href="/api/connections/start" style={secondaryStyle}>
+                  Conectar Google Ads
+                </SecondaryButton>
+              }
+            />
           </div>
         )}
 
         {/* Connections */}
-        <div className="space-y-6">
-          {connections.map((conn) => (
-            <section key={conn.id} style={cardStyle}>
-              <div
-                className="flex flex-wrap items-center gap-3"
-                style={{ padding: "16px 20px", borderBottom: `1px solid ${colors.border}` }}
-              >
-                <span style={{ fontWeight: 600 }}>
-                  {conn.google_email || "Cuenta de Google"}
-                </span>
-                <span
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {connections.map((conn) => {
+            const engineSaving = engineSavingId === conn.id;
+            return (
+              <section key={conn.id} style={{ ...cardStyle, overflow: "hidden" }}>
+                <div
                   style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                    letterSpacing: "0.03em",
-                    ...(conn.status === "active" || conn.status == null
-                      ? {
-                          background: "rgba(16,185,129,0.12)",
-                          color: colors.accent,
-                          border: "1px solid rgba(16,185,129,0.3)",
-                        }
-                      : {
-                          background: "rgba(248,113,113,0.12)",
-                          color: "#F87171",
-                          border: "1px solid rgba(248,113,113,0.3)",
-                        }),
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "16px 20px",
+                    borderBottom: `1px solid ${colors.border}`,
                   }}
                 >
-                  {conn.status === "active" || conn.status == null ? "Activa" : conn.status}
-                </span>
-                {conn.is_engine_source === true && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                      borderRadius: 999,
-                      background: "rgba(128,128,128,0.12)",
-                      color: colors.textMuted,
-                      border: `1px solid ${colors.border}`,
-                    }}
-                  >
-                    Fuente del optimizador
+                  <span style={{ fontSize: 13.5, fontWeight: 550, color: colors.text }}>
+                    {conn.google_email || "Cuenta de Google"}
                   </span>
-                )}
-                {conn.created_at && (
-                  <span style={{ marginLeft: "auto", fontSize: 12, color: colors.textFaint }}>
-                    Conectada el {fmtDate(conn.created_at)}
-                  </span>
-                )}
-              </div>
+                  <Badge tone={conn.status === "active" || conn.status == null ? "ok" : "danger"}>
+                    {conn.status === "active" || conn.status == null ? "Activa" : conn.status}
+                  </Badge>
+                  {conn.is_engine_source === true ? (
+                    <>
+                      <Badge tone="accent">Fuente del motor</Badge>
+                      <span style={{ fontSize: 12, color: colors.textFaint }}>
+                        El motor escaneará con esta conexión (solo lectura).
+                      </span>
+                    </>
+                  ) : (
+                    <SecondaryButton
+                      onClick={() => makeEngineSource(conn)}
+                      disabled={engineSaving}
+                      title="El motor escaneará con esta conexión (solo lectura)."
+                      style={{ ...secondaryStyle, padding: "5px 10px", fontSize: 12.5 }}
+                    >
+                      {engineSaving ? "Configurando…" : "Usar como fuente del motor"}
+                    </SecondaryButton>
+                  )}
+                  {conn.created_at && (
+                    <span
+                      style={{ marginLeft: "auto", fontSize: 12, color: colors.textFaint }}
+                    >
+                      Conectada el {fmtDate(conn.created_at)}
+                    </span>
+                  )}
+                </div>
 
-              {conn.accounts.length === 0 ? (
-                <p style={{ padding: 20, fontSize: 14, color: colors.textMuted }}>
-                  No encontramos cuentas de Google Ads accesibles con este
-                  correo. Si te acaban de dar acceso, vuelve a conectar la
-                  cuenta para actualizar la lista.
-                </p>
-              ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                    <thead>
-                      <tr
-                        style={{
-                          textAlign: "left",
-                          fontSize: 12,
-                          color: colors.textMuted,
-                          borderBottom: `1px solid ${colors.border}`,
-                        }}
-                      >
-                        <th style={{ padding: "10px 20px", fontWeight: 500 }}>Cuenta</th>
-                        <th style={{ padding: "10px 12px", fontWeight: 500 }}>Nombre</th>
-                        <th style={{ padding: "10px 12px", fontWeight: 500 }}>Moneda</th>
-                        <th style={{ padding: "10px 12px", fontWeight: 500 }}>Monitorear</th>
-                        <th style={{ padding: "10px 20px", fontWeight: 500 }}>Marca</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {conn.accounts.map((account) => {
-                        const enabled = account.enabled === true;
-                        const saving = savingId === account.id;
-                        return (
-                          <tr
-                            key={account.id}
-                            style={{
-                              borderBottom: `1px solid ${colors.border}`,
-                              opacity: saving ? 0.6 : 1,
-                            }}
-                          >
-                            <td style={{ padding: "12px 20px", whiteSpace: "nowrap" }}>
-                              <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                {conn.accounts.length === 0 ? (
+                  <p style={{ padding: 20, fontSize: 13.5, color: colors.textMuted, margin: 0 }}>
+                    No encontramos cuentas de Google Ads accesibles con este
+                    correo. Si te acaban de dar acceso, vuelve a conectar la
+                    cuenta para actualizar la lista.
+                  </p>
+                ) : (
+                  <>
+                    {/* Theme-aware row hover (overrides the kit's dark default). */}
+                    <style>{`.uik-row:hover td{background:${colors.hover} !important;}`}</style>
+                    <DataTable>
+                      <THead
+                        cols={[
+                          { label: "Cuenta", width: 170 },
+                          { label: "Nombre" },
+                          { label: "Moneda", width: 90 },
+                          { label: "Monitorear", width: 110 },
+                          { label: "Marca", width: 200 },
+                        ]}
+                      />
+                      <tbody>
+                        {conn.accounts.map((account) => {
+                          const enabled = account.enabled === true;
+                          const saving = savingId === account.id;
+                          return (
+                            <Row
+                              key={account.id}
+                              style={{ opacity: saving ? 0.6 : 1 }}
+                            >
+                              <Cell mono style={{ ...cellTheme, whiteSpace: "nowrap" }}>
                                 {fmtCustomerId(account.customer_id)}
-                              </span>
-                              {account.is_manager === true && (
-                                <span
-                                  title="Cuenta administradora (MCC)"
+                                {account.is_manager === true && (
+                                  <Badge
+                                    tone="muted"
+                                    style={{ marginLeft: 8 }}
+                                  >
+                                    MCC
+                                  </Badge>
+                                )}
+                              </Cell>
+                              <Cell style={cellTheme}>
+                                {account.descriptive_name || (
+                                  <span style={{ color: colors.textFaint }}>Sin nombre</span>
+                                )}
+                              </Cell>
+                              <Cell style={{ ...cellTheme, whiteSpace: "nowrap" }}>
+                                {account.currency || "—"}
+                              </Cell>
+                              <Cell style={cellTheme}>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={enabled}
+                                  disabled={saving}
+                                  onClick={() => saveAccount(account, { enabled: !enabled })}
+                                  title={enabled ? "Dejar de monitorear" : "Activar monitoreo"}
                                   style={{
-                                    marginLeft: 8,
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    padding: "1px 6px",
-                                    borderRadius: 4,
-                                    background: "rgba(96,165,250,0.15)",
-                                    color: "#60A5FA",
-                                    border: "1px solid rgba(96,165,250,0.3)",
-                                    letterSpacing: "0.05em",
+                                    width: 40,
+                                    height: 22,
+                                    borderRadius: 999,
+                                    position: "relative",
+                                    cursor: saving ? "wait" : "pointer",
+                                    background: enabled ? colors.accent : colors.surface2,
+                                    border: `1px solid ${enabled ? colors.accent : colors.border}`,
+                                    transition: "background 0.15s ease",
+                                    flexShrink: 0,
+                                    padding: 0,
                                   }}
                                 >
-                                  MCC
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ padding: "12px 12px" }}>
-                              {account.descriptive_name || (
-                                <span style={{ color: colors.textFaint }}>Sin nombre</span>
-                              )}
-                            </td>
-                            <td style={{ padding: "12px 12px", whiteSpace: "nowrap" }}>
-                              {account.currency || "—"}
-                            </td>
-                            <td style={{ padding: "12px 12px" }}>
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={enabled}
-                                disabled={saving}
-                                onClick={() => saveAccount(account, { enabled: !enabled })}
-                                title={enabled ? "Dejar de monitorear" : "Activar monitoreo"}
-                                style={{
-                                  width: 40,
-                                  height: 22,
-                                  borderRadius: 999,
-                                  position: "relative",
-                                  cursor: saving ? "wait" : "pointer",
-                                  background: enabled ? colors.accent : "rgba(128,128,128,0.35)",
-                                  border: "none",
-                                  transition: "background 0.15s ease",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                <span
+                                  <span
+                                    style={{
+                                      position: "absolute",
+                                      top: 2,
+                                      left: enabled ? 20 : 2,
+                                      width: 16,
+                                      height: 16,
+                                      borderRadius: "50%",
+                                      background: "#fff",
+                                      transition: "left 0.15s ease",
+                                    }}
+                                  />
+                                </button>
+                              </Cell>
+                              <Cell style={cellTheme}>
+                                <select
+                                  value={account.brand_id ?? ""}
+                                  disabled={saving}
+                                  onChange={(e) =>
+                                    saveAccount(account, {
+                                      brand_id: e.target.value || null,
+                                    })
+                                  }
                                   style={{
-                                    position: "absolute",
-                                    top: 3,
-                                    left: enabled ? 21 : 3,
-                                    width: 16,
-                                    height: 16,
-                                    borderRadius: "50%",
-                                    background: "#fff",
-                                    transition: "left 0.15s ease",
+                                    padding: "6px 10px",
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    minWidth: 160,
+                                    background: colors.bgInput,
+                                    color: colors.text,
+                                    border: `1px solid ${colors.border}`,
                                   }}
-                                />
-                              </button>
-                            </td>
-                            <td style={{ padding: "12px 20px" }}>
-                              <select
-                                value={account.brand_id ?? ""}
-                                disabled={saving}
-                                onChange={(e) =>
-                                  saveAccount(account, {
-                                    brand_id: e.target.value || null,
-                                  })
-                                }
-                                style={{
-                                  padding: "6px 10px",
-                                  borderRadius: 6,
-                                  fontSize: 13,
-                                  minWidth: 160,
-                                  background: colors.bgInput,
-                                  color: colors.text,
-                                  border: `1px solid ${colors.border}`,
-                                }}
-                              >
-                                <option value="">Sin marca</option>
-                                {brands.map((b) => (
-                                  <option key={b.id} value={b.id}>
-                                    {b.name || b.id}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          ))}
+                                >
+                                  <option value="">Sin marca</option>
+                                  {brands.map((b) => (
+                                    <option key={b.id} value={b.id}>
+                                      {b.name || b.id}
+                                    </option>
+                                  ))}
+                                </select>
+                              </Cell>
+                            </Row>
+                          );
+                        })}
+                      </tbody>
+                    </DataTable>
+                  </>
+                )}
+              </section>
+            );
+          })}
         </div>
       </main>
     </div>

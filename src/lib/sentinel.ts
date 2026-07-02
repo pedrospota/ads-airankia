@@ -352,3 +352,48 @@ export interface EngineConfig {
 export function fetchConfig(): Promise<EngineConfig> {
   return sentinelFetch("/api/v1/config");
 }
+
+// ---------------------------------------------------------------------------
+// Engine-source bridge (F4): hand the engine a refresh token to scan with.
+// ⚠️ SERVER-ONLY (like the rest of this module): reads SENTINEL_API_KEY and
+// sends a plaintext refresh token server-to-server. Never call from a client.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST the (decrypted) Google Ads refresh token to the engine's
+ * /admin/set-token endpoint so it becomes the connection the engine scans
+ * with (read-only). Throws on any non-OK response.
+ */
+export async function postEngineSetToken(
+  email: string | null | undefined,
+  refreshToken: string
+): Promise<void> {
+  const baseUrl = process.env.SENTINEL_API_URL;
+  const setupKey = process.env.SENTINEL_API_KEY;
+  if (!baseUrl || !setupKey) {
+    throw new Error(
+      "El motor no está configurado (faltan SENTINEL_API_URL / SENTINEL_API_KEY en el servidor)."
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl.replace(/\/+$/, "")}/admin/set-token`, {
+      method: "POST",
+      headers: {
+        "x-setup-key": setupKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email: email ?? null, refresh_token: refreshToken }),
+      cache: "no-store",
+    });
+  } catch (e) {
+    throw new Error(
+      `No se pudo conectar con el motor (/admin/set-token): ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+
+  if (!res.ok) {
+    throw new Error(`El motor respondió ${res.status} ${res.statusText} en /admin/set-token.`);
+  }
+}

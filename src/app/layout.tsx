@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ModeProvider } from "@/components/mode-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,17 +33,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
-      <body className="h-full antialiased" style={{ background: '#0A0A0E', color: '#FAFAFA' }}>
+      <body className="h-full antialiased" style={{ background: '#0A0A0B', color: '#F7F8F8' }}>
         {/* Anti-FOUC: runs as the first body child so document.body exists (a
             <head> script would see document.body === null and throw). Body
             already defaults to dark inline; this only re-paints for light mode. */}
         <script
           suppressHydrationWarning
-          dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('ads-theme')||'dark';document.body.style.background=t==='dark'?'#0A0A0E':'#FFFFFF';document.body.style.color=t==='dark'?'#FAFAFA':'#111827';}catch(e){}})()` }}
+          dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('ads-theme')||'dark';document.body.style.background=t==='dark'?'#0A0A0B':'#FFFFFF';document.body.style.color=t==='dark'?'#F7F8F8':'#101012';}catch(e){}})()` }}
         />
-        <ThemeProvider>
-          <ModeProvider>{children}</ModeProvider>
-        </ThemeProvider>
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

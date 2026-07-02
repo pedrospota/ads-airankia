@@ -1,10 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/header";
 import { useTheme } from "@/components/theme-provider";
+import {
+  Card,
+  Badge,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  EmptyState,
+  PrimaryButton,
+  SecondaryButton,
+  GhostDangerButton,
+} from "@/components/ui-kit";
 
 // One row in the Search campaigns list. Built server-side in page.tsx.
 export interface CampaignListItem {
@@ -31,8 +42,7 @@ const CURRENCY = "€";
 
 interface StatusInfo {
   label: string;
-  color: string;
-  bg: string;
+  tone: "ok" | "warn" | "danger" | "muted";
   /** What the main button says for this state. */
   action: string;
 }
@@ -41,54 +51,24 @@ interface StatusInfo {
 function statusFor(item: CampaignListItem): StatusInfo {
   const inGoogle = item.googleCampaignId != null;
   if (inGoogle && item.campaignStatus === "active") {
-    return {
-      label: "Active",
-      color: "#10B981",
-      bg: "rgba(16,185,129,0.12)",
-      action: "View details",
-    };
+    return { label: "Active", tone: "ok", action: "View details" };
   }
   if (inGoogle) {
     // Created in Google but not enabled (paused / draft row).
-    return {
-      label: "Created · paused",
-      color: "#FBBF24",
-      bg: "rgba(251,191,36,0.12)",
-      action: "View and turn on",
-    };
+    return { label: "Created · paused", tone: "warn", action: "View and turn on" };
   }
   // Not in Google yet → still being built or unfinished.
   if (item.runStatus === "running" || item.runStatus === "queued") {
-    return {
-      label: "Being created…",
-      color: "#3B82F6",
-      bg: "rgba(59,130,246,0.12)",
-      action: "Continue",
-    };
+    return { label: "Being created…", tone: "muted", action: "Continue" };
   }
   if (item.runStatus === "awaiting_approval") {
-    return {
-      label: "Waiting for your review",
-      color: "#3B82F6",
-      bg: "rgba(59,130,246,0.12)",
-      action: "Review",
-    };
+    return { label: "Waiting for your review", tone: "muted", action: "Review" };
   }
   if (item.runStatus === "failed" || item.runStatus === "aborted") {
-    return {
-      label: "Unfinished",
-      color: "#F87171",
-      bg: "rgba(248,113,113,0.12)",
-      action: "Resume",
-    };
+    return { label: "Unfinished", tone: "danger", action: "Resume" };
   }
   // Completed-but-not-activated, or a fresh draft.
-  return {
-    label: "Ready to turn on",
-    color: "#FBBF24",
-    bg: "rgba(251,191,36,0.12)",
-    action: "Review and turn on",
-  };
+  return { label: "Ready to turn on", tone: "warn", action: "Review and turn on" };
 }
 
 function formatDate(iso: string | null): string {
@@ -109,23 +89,38 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
   const router = useRouter();
   const newHref = `/brands/${brandId}/campaigns/new/search`;
 
+  // Theme-aware button overrides: primary is "ink on paper" (white in dark,
+  // near-black in light — the quiet, premium move); secondary follows the
+  // theme border/text so both themes stay coherent.
+  const primaryStyle: React.CSSProperties = {
+    background: colors.text,
+    color: colors.bg,
+    border: `1px solid ${colors.text}`,
+  };
+  const secondaryStyle: React.CSSProperties = {
+    background: "transparent",
+    color: colors.text,
+    border: `1px solid ${colors.border}`,
+  };
+  const smallBtn: React.CSSProperties = { padding: "5px 10px", fontSize: 12.5 };
+  const cardTheme: React.CSSProperties = {
+    background: colors.bgCard,
+    border: `1px solid ${colors.border}`,
+  };
+
   // The two ways to create a campaign, shown as prominent cards at the top of
   // the hub. Search is the flagship (most autonomous) so it goes first.
   const createOptions = [
     {
       href: newHref,
-      emoji: "🔎",
       title: "Search campaign",
       desc: "Your ad shows up when someone searches Google for what you offer. The AI builds it; you just review and turn it on.",
-      cta: "Create with AI",
       recommended: true,
     },
     {
       href: `/brands/${brandId}/campaigns/new/display`,
-      emoji: "🖼️",
       title: "Display campaign (image ads)",
       desc: "We create banners with your brand and images so you show up on websites, blogs, and apps your audience visits.",
-      cta: "Create banners",
       recommended: false,
     },
   ];
@@ -275,8 +270,17 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
     }
   }
 
+  const baseCols = [
+    { label: "Campaign" },
+    { label: "Status", width: 170 },
+    { label: "Budget/day", align: "right" as const, width: 110 },
+    { label: "Created", width: 130 },
+    { label: "", align: "right" as const },
+  ];
+  const cols = selectMode ? [{ label: "", width: 44 }, ...baseCols] : baseCols;
+
   return (
-    <div className="min-h-screen">
+    <div>
       <Header
         breadcrumbs={[
           { label: "Brands", href: "/brands" },
@@ -284,148 +288,119 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
           { label: "Campaigns" },
         ]}
         action={
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {selectable.length > 0 &&
               (selectMode ? (
-                <button
+                <SecondaryButton
                   onClick={exitSelectMode}
                   disabled={bulkDeleting}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: 10,
-                    background: "transparent",
-                    border: `1px solid ${colors.border}`,
-                    color: colors.text,
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: bulkDeleting ? "not-allowed" : "pointer",
-                  }}
+                  style={secondaryStyle}
                 >
                   Done
-                </button>
+                </SecondaryButton>
               ) : (
-                <button
+                <SecondaryButton
                   onClick={() => setSelectMode(true)}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: 10,
-                    background: "transparent",
-                    border: `1px solid ${colors.border}`,
-                    color: colors.textMuted,
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: "pointer",
-                  }}
+                  style={{ ...secondaryStyle, color: colors.textMuted }}
                 >
                   Select to clean up
-                </button>
+                </SecondaryButton>
               ))}
-            <Link
+            <SecondaryButton
               href={`/brands/${brandId}/benchmark`}
-              style={{
-                padding: "8px 14px",
-                borderRadius: 10,
-                background: "transparent",
-                border: `1px solid ${colors.border}`,
-                color: colors.text,
-                fontWeight: 600,
-                fontSize: 13,
-                textDecoration: "none",
-              }}
+              style={secondaryStyle}
             >
-              🔍 Spy on competitors
-            </Link>
-            <Link
-              href={newHref}
-              style={{
-                padding: "8px 16px",
-                borderRadius: 10,
-                background: colors.accent,
-                color: "#000",
-                fontWeight: 700,
-                fontSize: 13,
-                textDecoration: "none",
-              }}
-            >
-              + New campaign
-            </Link>
+              Spy on competitors
+            </SecondaryButton>
+            <PrimaryButton href={newHref} style={primaryStyle}>
+              New campaign
+            </PrimaryButton>
           </div>
         }
       />
 
-      <main className="max-w-3xl mx-auto px-6 py-8">
+      <main style={{ marginTop: 24 }}>
         {/* Create-a-campaign hub: the two creators (Search and Display) as
             clear siblings. This replaces the old /campaigns/new/choose
             pre-screen — same two options, now always visible. */}
         <section style={{ marginBottom: 32 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+          <h1
+            style={{
+              fontSize: 26,
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+              lineHeight: 1.25,
+              color: colors.text,
+              margin: 0,
+            }}
+          >
             Create a campaign
           </h1>
-          <p style={{ fontSize: 14, color: colors.textMuted, marginBottom: 16 }}>
-            Choose how you want to advertise <strong>{brandName}</strong>.
+          <p style={{ fontSize: 13.5, color: colors.textMuted, margin: "6px 0 20px" }}>
+            Choose how you want to advertise {brandName}.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: 16,
+            }}
+          >
             {createOptions.map((o) => (
-              <Link
-                key={o.href}
-                href={o.href}
-                style={{
-                  display: "block",
-                  position: "relative",
-                  textDecoration: "none",
-                  background: colors.bgCard,
-                  border: `1px solid ${o.recommended ? colors.accent : colors.border}`,
-                  borderRadius: 16,
-                  padding: "20px 22px",
-                }}
-              >
-                {o.recommended && (
-                  <span
+              <Card key={o.href} style={cardTheme}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <h2
                     style={{
-                      position: "absolute",
-                      top: 14,
-                      right: 14,
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      letterSpacing: "0.04em",
-                      color: "#000",
-                      background: colors.accent,
-                      borderRadius: 999,
-                      padding: "3px 9px",
+                      fontSize: 15,
+                      fontWeight: 550,
+                      color: colors.text,
+                      margin: 0,
                     }}
                   >
-                    RECOMMENDED
-                  </span>
-                )}
-                <div style={{ fontSize: 28, lineHeight: 1, marginBottom: 10 }} aria-hidden="true">
-                  {o.emoji}
+                    {o.title}
+                  </h2>
+                  {o.recommended && <Badge tone="accent">Recomendada</Badge>}
                 </div>
-                <h2 style={{ fontSize: 16.5, fontWeight: 700, color: colors.text }}>
-                  {o.title}
-                </h2>
-                <p style={{ fontSize: 13, color: colors.textMuted, marginTop: 6, lineHeight: 1.5 }}>
-                  {o.desc}
-                </p>
                 <p
                   style={{
-                    fontSize: 12.5,
-                    color: o.recommended ? colors.accent : colors.textFaint,
-                    marginTop: 10,
-                    fontWeight: 600,
+                    fontSize: 13,
+                    color: colors.textMuted,
+                    margin: "8px 0 0",
+                    lineHeight: 1.55,
                   }}
                 >
-                  {o.cta} →
+                  {o.desc}
                 </p>
-              </Link>
+                <div style={{ marginTop: 16 }}>
+                  {o.recommended ? (
+                    <PrimaryButton href={o.href} style={primaryStyle}>
+                      Crear
+                    </PrimaryButton>
+                  ) : (
+                    <SecondaryButton href={o.href} style={secondaryStyle}>
+                      Crear
+                    </SecondaryButton>
+                  )}
+                </div>
+              </Card>
             ))}
           </div>
         </section>
 
-        <div style={{ marginBottom: 20 }}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+        <div style={{ marginBottom: 16 }}>
+          <h2
+            style={{
+              fontSize: 11,
+              fontWeight: 500,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: colors.textMuted,
+              margin: 0,
+            }}
+          >
             Your Search campaigns
           </h2>
-          <p style={{ fontSize: 14, color: colors.textMuted }}>
+          <p style={{ fontSize: 13, color: colors.textMuted, margin: "8px 0 0", maxWidth: 620 }}>
             Here you can see all your campaigns and where each one stands. You
             can come back anytime to review them, turn them on, or pick up one
             you left halfway.
@@ -433,48 +408,17 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
         </div>
 
         {items.length === 0 ? (
-          <div
-            style={{
-              background: colors.bgCard,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 14,
-              padding: 40,
-              textAlign: "center",
-            }}
-          >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🚀</div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
-              You don't have any campaigns yet
-            </h2>
-            <p
-              style={{
-                fontSize: 14,
-                color: colors.textMuted,
-                marginBottom: 20,
-                maxWidth: 380,
-                marginLeft: "auto",
-                marginRight: "auto",
-              }}
-            >
-              Create your first campaign in just a few minutes. We take care of
-              everything and leave it paused so you decide when to start.
-            </p>
-            <Link
-              href={newHref}
-              style={{
-                display: "inline-block",
-                padding: "11px 22px",
-                borderRadius: 10,
-                background: colors.accent,
-                color: "#000",
-                fontWeight: 700,
-                fontSize: 14,
-                textDecoration: "none",
-              }}
-            >
-              Create my first campaign
-            </Link>
-          </div>
+          <Card style={{ ...cardTheme, padding: 0 }}>
+            <EmptyState
+              title="You don't have any campaigns yet"
+              hint="Create your first campaign in just a few minutes. We take care of everything and leave it paused so you decide when to start."
+              action={
+                <PrimaryButton href={newHref} style={primaryStyle}>
+                  Create my first campaign
+                </PrimaryButton>
+              }
+            />
+          </Card>
         ) : (
           <>
             {selectMode && (
@@ -487,245 +431,188 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                   marginBottom: 12,
                   padding: "10px 14px",
                   borderRadius: 12,
-                  background: colors.bgCard,
-                  border: `1px solid ${colors.border}`,
+                  ...cardTheme,
                 }}
               >
                 <span style={{ fontSize: 13, color: colors.textMuted }}>
                   Pick the test campaigns you want to delete for good.
                 </span>
-                <button
+                <SecondaryButton
                   onClick={toggleSelectAll}
                   disabled={bulkDeleting}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    background: "transparent",
-                    border: `1px solid ${colors.border}`,
-                    color: colors.text,
-                    fontWeight: 600,
-                    fontSize: 12.5,
-                    whiteSpace: "nowrap",
-                    cursor: bulkDeleting ? "not-allowed" : "pointer",
-                  }}
+                  style={{ ...secondaryStyle, ...smallBtn }}
                 >
                   {selectedRunIds.size === selectable.length
                     ? "Clear all"
                     : "Select all"}
-                </button>
+                </SecondaryButton>
               </div>
             )}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-                paddingBottom: selectMode ? 88 : 0,
-              }}
-            >
-              {items.map((item) => {
-                const s = statusFor(item);
-                const resumeHref = item.runId
-                  ? `${newHref}?run=${item.runId}`
-                  : newHref;
-                const canSelect = Boolean(item.runId);
-                const isSelected = canSelect
-                  ? selectedRunIds.has(item.runId as string)
-                  : false;
-                return (
-                  <div
-                    key={item.campaignId}
-                    onClick={
-                      selectMode && canSelect
-                        ? () => toggleSelected(item.runId as string)
-                        : undefined
-                    }
-                    style={{
-                      background: isSelected
-                        ? "rgba(248,113,113,0.08)"
-                        : colors.bgCard,
-                      border: `1px solid ${
-                        isSelected ? "rgba(248,113,113,0.5)" : colors.border
-                      }`,
-                      borderRadius: 14,
-                      padding: 18,
-                      cursor:
-                        selectMode && canSelect ? "pointer" : "default",
-                      opacity: selectMode && !canSelect ? 0.5 : 1,
-                    }}
-                  >
-                    {selectMode && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 12,
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: canSelect
-                            ? isSelected
-                              ? "#F87171"
-                              : colors.textMuted
-                            : colors.textFaint,
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: 18,
-                            height: 18,
-                            borderRadius: 5,
-                            border: `1.5px solid ${
-                              isSelected ? "#F87171" : colors.border
-                            }`,
-                            background: isSelected ? "#F87171" : "transparent",
-                            color: "#000",
-                            fontSize: 12,
-                            lineHeight: 1,
-                          }}
-                        >
-                          {isSelected ? "✓" : ""}
-                        </span>
-                        {canSelect
-                          ? isSelected
-                            ? "Selected to delete"
-                            : "Tap to select"
-                          : "Can't be deleted here"}
-                      </div>
-                    )}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      marginBottom: 10,
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <h3
-                        style={{
-                          fontSize: 16,
-                          fontWeight: 700,
-                          marginBottom: 4,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {item.displayName}
-                      </h3>
-                      <p style={{ fontSize: 12.5, color: colors.textFaint }}>
-                        {formatDate(item.createdAt)}
-                        {item.dailyBudgetCents != null
-                          ? ` · ${CURRENCY}${(item.dailyBudgetCents / 100).toFixed(
-                              2
-                            )}/day`
-                          : ""}
-                      </p>
-                    </div>
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        padding: "4px 10px",
-                        borderRadius: 999,
-                        color: s.color,
-                        background: s.bg,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {s.label}
-                    </span>
-                  </div>
 
-                  {item.landingPageUrl && (
-                    <p
-                      style={{
-                        fontSize: 12.5,
-                        color: colors.textMuted,
-                        marginBottom: 14,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      🔗 {item.landingPageUrl}
-                    </p>
-                  )}
-
-                  {!selectMode && (
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <Link
-                      href={resumeHref}
-                      style={{
-                        padding: "8px 16px",
-                        borderRadius: 9,
-                        background: "transparent",
-                        border: `1px solid ${colors.accent}`,
-                        color: colors.accent,
-                        fontWeight: 600,
-                        fontSize: 13,
-                        textDecoration: "none",
-                      }}
-                    >
-                      {s.action}
-                    </Link>
-                    {item.deepLink && (
-                      <a
-                        href={item.deepLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          padding: "8px 16px",
-                          borderRadius: 9,
-                          background: "transparent",
-                          border: `1px solid ${colors.border}`,
-                          color: colors.text,
-                          fontWeight: 600,
-                          fontSize: 13,
-                          textDecoration: "none",
-                        }}
-                      >
-                        View in Google Ads ↗
-                      </a>
-                    )}
-                    {item.runId && item.campaignStatus !== "active" && (
-                      <button
-                        onClick={() => discard(item.runId!)}
-                        disabled={discardingId === item.runId}
-                        style={{
-                          marginLeft: "auto",
-                          padding: "8px 12px",
-                          borderRadius: 9,
-                          background: "transparent",
-                          border: "none",
-                          color: colors.textFaint,
-                          fontWeight: 600,
-                          fontSize: 12.5,
-                          textDecoration: "underline",
-                          cursor:
-                            discardingId === item.runId
-                              ? "not-allowed"
-                              : "pointer",
-                        }}
-                      >
-                        {discardingId === item.runId
-                          ? "Discarding…"
-                          : "Discard"}
-                      </button>
-                    )}
-                  </div>
-                  )}
-                  </div>
-                );
-              })}
+            <div style={{ paddingBottom: selectMode ? 88 : 0 }}>
+              <Card style={{ ...cardTheme, padding: 0 }}>
+                {/* Theme-aware row hover (overrides the kit's dark default). */}
+                <style>{`.uik-row:hover td{background:${colors.hover} !important;}`}</style>
+                <DataTable>
+                  <THead cols={cols} />
+                  <tbody>
+                    {items.map((item) => {
+                      const s = statusFor(item);
+                      const resumeHref = item.runId
+                        ? `${newHref}?run=${item.runId}`
+                        : newHref;
+                      const canSelect = Boolean(item.runId);
+                      const isSelected = canSelect
+                        ? selectedRunIds.has(item.runId as string)
+                        : false;
+                      const cellTheme: React.CSSProperties = {
+                        color: colors.text,
+                        borderBottom: `1px solid ${colors.border}`,
+                      };
+                      return (
+                        <Row key={item.campaignId}>
+                          {selectMode && (
+                            <Cell style={cellTheme}>
+                              <button
+                                type="button"
+                                aria-label={
+                                  canSelect
+                                    ? isSelected
+                                      ? "Selected to delete"
+                                      : "Select to delete"
+                                    : "Can't be deleted here"
+                                }
+                                aria-pressed={isSelected}
+                                disabled={!canSelect || bulkDeleting}
+                                onClick={() =>
+                                  canSelect && toggleSelected(item.runId as string)
+                                }
+                                title={
+                                  canSelect
+                                    ? isSelected
+                                      ? "Selected to delete"
+                                      : "Select to delete"
+                                    : "Can't be deleted here"
+                                }
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  width: 18,
+                                  height: 18,
+                                  borderRadius: 5,
+                                  border: `1.5px solid ${
+                                    isSelected ? colors.danger : colors.border
+                                  }`,
+                                  background: isSelected
+                                    ? colors.danger
+                                    : "transparent",
+                                  color: "#FFFFFF",
+                                  fontSize: 12,
+                                  lineHeight: 1,
+                                  cursor: canSelect ? "pointer" : "not-allowed",
+                                  opacity: canSelect ? 1 : 0.4,
+                                  padding: 0,
+                                }}
+                              >
+                                {isSelected ? "✓" : ""}
+                              </button>
+                            </Cell>
+                          )}
+                          <Cell style={cellTheme}>
+                            <div
+                              style={{
+                                fontWeight: 500,
+                                maxWidth: 320,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {item.displayName}
+                            </div>
+                            {item.landingPageUrl && (
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  color: colors.textFaint,
+                                  marginTop: 2,
+                                  maxWidth: 320,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {item.landingPageUrl}
+                              </div>
+                            )}
+                          </Cell>
+                          <Cell style={cellTheme}>
+                            <Badge tone={s.tone}>{s.label}</Badge>
+                          </Cell>
+                          <Cell align="right" mono style={cellTheme}>
+                            {item.dailyBudgetCents != null
+                              ? `${CURRENCY}${(item.dailyBudgetCents / 100).toFixed(2)}`
+                              : "—"}
+                          </Cell>
+                          <Cell
+                            style={{
+                              ...cellTheme,
+                              color: colors.textMuted,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {formatDate(item.createdAt) || "—"}
+                          </Cell>
+                          <Cell align="right" style={cellTheme}>
+                            {!selectMode && (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "flex-end",
+                                  gap: 8,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {item.runId && item.campaignStatus !== "active" && (
+                                  <GhostDangerButton
+                                    onClick={() => discard(item.runId!)}
+                                    disabled={discardingId === item.runId}
+                                    style={{ ...smallBtn, color: colors.danger }}
+                                  >
+                                    {discardingId === item.runId
+                                      ? "Discarding…"
+                                      : "Discard"}
+                                  </GhostDangerButton>
+                                )}
+                                {item.deepLink && (
+                                  <SecondaryButton
+                                    href={item.deepLink}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ ...secondaryStyle, ...smallBtn }}
+                                  >
+                                    Google Ads ↗
+                                  </SecondaryButton>
+                                )}
+                                <SecondaryButton
+                                  href={resumeHref}
+                                  style={{ ...secondaryStyle, ...smallBtn }}
+                                >
+                                  {s.action}
+                                </SecondaryButton>
+                              </div>
+                            )}
+                          </Cell>
+                        </Row>
+                      );
+                    })}
+                  </tbody>
+                </DataTable>
+              </Card>
             </div>
+
             {selectMode && (
               <div
                 style={{
@@ -744,35 +631,38 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
                 <div
                   style={{
                     width: "100%",
-                    maxWidth: 768,
+                    maxWidth: 1150,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 12,
                   }}
                 >
-                  <span style={{ fontSize: 13.5, color: colors.textMuted }}>
+                  <span
+                    style={{
+                      fontSize: 13.5,
+                      color: colors.textMuted,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
                     {selectedRunIds.size === 0
                       ? "Nothing selected"
                       : `${selectedRunIds.size} selected`}
                   </span>
                   <button
+                    type="button"
                     onClick={bulkDelete}
                     disabled={bulkDeleting || selectedRunIds.size === 0}
                     style={{
-                      padding: "10px 18px",
-                      borderRadius: 10,
-                      background:
-                        bulkDeleting || selectedRunIds.size === 0
-                          ? "rgba(248,113,113,0.25)"
-                          : "#F87171",
-                      border: "none",
-                      color:
-                        bulkDeleting || selectedRunIds.size === 0
-                          ? colors.textFaint
-                          : "#000",
-                      fontWeight: 700,
-                      fontSize: 13.5,
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      background: colors.danger,
+                      border: `1px solid ${colors.danger}`,
+                      color: "#FFFFFF",
+                      fontWeight: 550,
+                      fontSize: 13,
+                      lineHeight: "16px",
+                      opacity: bulkDeleting || selectedRunIds.size === 0 ? 0.5 : 1,
                       cursor:
                         bulkDeleting || selectedRunIds.size === 0
                           ? "not-allowed"

@@ -12,6 +12,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
 import { fetchAccountFull, fmtWhen, type AccountFull } from "@/lib/sentinel";
+import { PageHeader, ErrorCard, UI } from "@/components/ui-kit";
 import { AccountTabs } from "./account-tabs";
 
 // Per-request data (cache: "no-store") + runtime env vars — never prerender.
@@ -45,28 +46,26 @@ export default async function PerformanceAccountPage({
         breadcrumbs={[{ label: "Performance", href: "/performance" }, { label: name }]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">{name}</h1>
-          <p className="mt-2 text-sm" style={{ opacity: 0.4 }}>
-            Optimizador de Google Ads — modo propuesta, nada se ejecuta
-            {data?.analyzed_at ? <> · analizado {fmtWhen(data.analyzed_at)}</> : null}
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title={name}
+          subtitle={
+            <>
+              Optimizador de Google Ads — modo propuesta, nada se ejecuta
+              {data?.analyzed_at ? <> · analizado {fmtWhen(data.analyzed_at)}</> : null}
+            </>
+          }
+        />
 
         {error || !data ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar los datos de esta cuenta.{" "}
-            {error ?? "Inténtalo de nuevo en unos minutos."}
-          </div>
+          <ErrorCard
+            message={
+              <>
+                No pudimos cargar los datos de esta cuenta.{" "}
+                {error ?? "Inténtalo de nuevo en unos minutos."}
+              </>
+            }
+          />
         ) : (
           <AccountTabs data={data} accountId={id} userEmail={user.email ?? ""} />
         )}

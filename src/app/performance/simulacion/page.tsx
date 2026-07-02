@@ -1,46 +1,29 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
+import {
+  PageHeader,
+  StatCard,
+  Card,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  Badge,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
 import { fetchSimulacion, fmtMoney, fmtNum, type SimBet } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
 export const dynamic = "force-dynamic";
 
-const ACCENT = "#10b981";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
-
-function KpiCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div style={CARD_STYLE}>
-      <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-        {label}
-      </p>
-      <p className="text-2xl font-bold mt-2" style={accent ? { color: ACCENT } : undefined}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
-/** Chip para el tipo de apuesta: ahorro (ámbar) vs crecimiento (azul). */
-function KindChip({ kind }: { kind: string | null | undefined }) {
+/** Badge para el tipo de apuesta: ahorro (warn) vs crecimiento (muted). */
+function KindBadge({ kind }: { kind: string | null | undefined }) {
   const k = (kind ?? "").toLowerCase();
   const isAhorro = k === "ahorro";
-  const color = isAhorro ? "#f59e0b" : "#3b82f6";
-  const bg = isAhorro ? "rgba(245,158,11,0.12)" : "rgba(59,130,246,0.12)";
-  return (
-    <span
-      className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
-      style={{ color, background: bg, border: `1px solid ${bg}` }}
-    >
-      {k || "—"}
-    </span>
-  );
+  return <Badge tone={isAhorro ? "warn" : "muted"}>{k || "—"}</Badge>;
 }
 
 /** Días transcurridos desde opened_at hasta resolved_at (o ahora si sigue abierta). */
@@ -87,116 +70,94 @@ export default async function SimulacionPage() {
         ]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Simulación</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Paper trading: cada recomendación se simula sin aplicarse — esto habría
-            pasado si le hacías caso.
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title="Simulación"
+          subtitle="Paper trading: cada recomendación se simula sin aplicarse — esto habría pasado si le hacías caso."
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar la simulación. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar la simulación. ${error}`} />
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              <KpiCard label="Apuestas abiertas" value={fmtNum(nAbiertas)} />
-              <KpiCard label="Resueltas" value={fmtNum(nResueltas)} />
-              <KpiCard label="Ahorro perdido total" value={fmtMoney(totalMissed)} accent />
+            <div
+              className="grid grid-cols-1 md:grid-cols-3"
+              style={{ gap: 16, marginBottom: 32 }}
+            >
+              <StatCard label="Apuestas abiertas" value={fmtNum(nAbiertas)} />
+              <StatCard label="Resueltas" value={fmtNum(nResueltas)} />
+              <StatCard label="Ahorro perdido total" value={fmtMoney(totalMissed)} />
             </div>
 
             {sorted.length === 0 ? (
-              <div className="text-center py-16" style={{ opacity: 0.4 }}>
-                <p className="text-lg">Todavía no hay apuestas simuladas.</p>
-                <p className="text-sm mt-2">
-                  Cada recomendación nueva abre una apuesta que se mide sola con el tiempo.
-                </p>
-              </div>
+              <EmptyState
+                title="Todavía no hay apuestas simuladas."
+                hint="Cada recomendación nueva abre una apuesta que se mide sola con el tiempo."
+              />
             ) : (
-              <div style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-                <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr
-                      className="text-xs uppercase tracking-wide"
-                      style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                    >
-                      <th className="text-left font-medium px-4 py-3">Cuenta</th>
-                      <th className="text-left font-medium px-4 py-3">Familia</th>
-                      <th className="text-left font-medium px-4 py-3">Target</th>
-                      <th className="text-left font-medium px-4 py-3">Tipo</th>
-                      <th className="text-right font-medium px-4 py-3">$ en juego</th>
-                      <th className="text-right font-medium px-4 py-3">Ahorro perdido</th>
-                      <th className="text-right font-medium px-4 py-3">Días abierta</th>
-                      <th className="text-left font-medium px-4 py-3">Estado</th>
-                    </tr>
-                  </thead>
+              <Card style={{ padding: 0 }}>
+                <DataTable>
+                  <THead
+                    cols={[
+                      { label: "Cuenta" },
+                      { label: "Familia" },
+                      { label: "Target" },
+                      { label: "Tipo" },
+                      { label: "$ en juego", align: "right" },
+                      { label: "Ahorro perdido", align: "right" },
+                      { label: "Días abierta", align: "right" },
+                      { label: "Estado" },
+                    ]}
+                  />
                   <tbody>
                     {sorted.map((b, i) => {
                       const days = daysOpen(b);
                       const open = isOpen(b);
                       return (
-                        <tr
-                          key={b.rec_id ?? i}
-                          style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}
-                        >
-                          <td className="px-4 py-3 font-medium whitespace-nowrap">
+                        <Row key={b.rec_id ?? i}>
+                          <Cell style={{ fontWeight: 500, whiteSpace: "nowrap" }}>
                             {b.account_name || b.account_id || "—"}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap" style={{ opacity: 0.7 }}>
+                          </Cell>
+                          <Cell style={{ color: UI.muted, whiteSpace: "nowrap" }}>
                             {b.action_family ?? "—"}
-                          </td>
-                          <td className="px-4 py-3" style={{ maxWidth: 240 }}>
+                          </Cell>
+                          <Cell style={{ maxWidth: 240 }}>
                             <span
                               className="block truncate"
-                              style={{ opacity: 0.7 }}
+                              style={{ color: UI.muted }}
                               title={b.target ?? undefined}
                             >
                               {b.target ?? "—"}
                             </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <KindChip kind={b.kind} />
-                          </td>
-                          <td className="text-right px-4 py-3">
+                          </Cell>
+                          <Cell>
+                            <KindBadge kind={b.kind} />
+                          </Cell>
+                          <Cell align="right" mono>
                             {fmtMoney(b.dollars_at_stake)}
-                          </td>
-                          <td
-                            className="text-right px-4 py-3 font-semibold"
+                          </Cell>
+                          <Cell
+                            align="right"
+                            mono
                             style={{
-                              color:
-                                (b.missed_usd ?? 0) > 0 ? "#f59e0b" : "rgba(128,128,128,0.6)",
+                              fontWeight: 600,
+                              color: (b.missed_usd ?? 0) > 0 ? UI.warn : UI.muted,
                             }}
                           >
                             {fmtMoney(b.missed_usd)}
-                          </td>
-                          <td className="text-right px-4 py-3" style={{ opacity: 0.7 }}>
+                          </Cell>
+                          <Cell align="right" mono style={{ color: UI.muted }}>
                             {days != null ? fmtNum(days) : "—"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className="text-xs font-medium"
-                              style={{ color: open ? ACCENT : "rgba(128,128,128,0.6)" }}
-                            >
-                              {b.status ?? "—"}
-                            </span>
-                          </td>
-                        </tr>
+                          </Cell>
+                          <Cell>
+                            <Badge tone={open ? "ok" : "muted"}>{b.status ?? "—"}</Badge>
+                          </Cell>
+                        </Row>
                       );
                     })}
                   </tbody>
-                </table>
-              </div>
+                </DataTable>
+              </Card>
             )}
           </>
         )}

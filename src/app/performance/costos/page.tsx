@@ -1,18 +1,22 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
+import {
+  PageHeader,
+  StatCard,
+  Card,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
 import { fetchCosts, fmtMoney, fmtNum } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
 export const dynamic = "force-dynamic";
-
-const ACCENT = "#10b981";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
 
 interface CostRow {
   day?: string;
@@ -78,110 +82,119 @@ export default async function CostosPage() {
         ]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Costos</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Cuánto cuesta operar el optimizador — consumo de IA de los últimos 30 días
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title="Costos"
+          subtitle="Cuánto cuesta operar el optimizador — consumo de IA de los últimos 30 días"
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar los costos. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar los costos. ${error}`} />
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              <div style={CARD_STYLE}>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Costo total (30 días)
-                </p>
-                <p className="text-2xl font-bold mt-2" style={{ color: ACCENT }}>
-                  {fmtMoney(totalCost, 2)}
-                </p>
-              </div>
-              <div style={CARD_STYLE}>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Llamadas
-                </p>
-                <p className="text-2xl font-bold mt-2">{fmtNum(totalCalls)}</p>
-              </div>
-              <div style={CARD_STYLE}>
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-                  Tipos de uso
-                </p>
-                <p className="text-2xl font-bold mt-2">{fmtNum(kinds.length)}</p>
-              </div>
+            <div
+              className="grid grid-cols-1 md:grid-cols-3"
+              style={{ gap: 16, marginBottom: 32 }}
+            >
+              <StatCard label="Costo total (30 días)" value={fmtMoney(totalCost, 2)} />
+              <StatCard label="Llamadas" value={fmtNum(totalCalls)} />
+              <StatCard label="Tipos de uso" value={fmtNum(kinds.length)} />
             </div>
 
             {rows.length === 0 ? (
-              <div className="text-center py-16" style={{ opacity: 0.4 }}>
-                <p className="text-lg">Sin consumo registrado en los últimos 30 días.</p>
-                <p className="text-sm mt-2">
-                  Los costos aparecerán aquí conforme el optimizador use modelos de IA.
-                </p>
-              </div>
+              <EmptyState
+                title="Sin consumo registrado en los últimos 30 días."
+                hint="Los costos aparecerán aquí conforme el optimizador use modelos de IA."
+              />
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2" style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-                  <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr
-                        className="text-xs uppercase tracking-wide"
-                        style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                      >
-                        <th className="text-left font-medium px-4 py-3">Tipo de uso</th>
-                        <th className="text-right font-medium px-4 py-3">Llamadas</th>
-                        <th className="text-right font-medium px-4 py-3">Tokens</th>
-                        <th className="text-right font-medium px-4 py-3">Costo USD</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {kinds.map((k) => (
-                        <tr key={k.kind} style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}>
-                          <td className="px-4 py-3 font-medium">{k.kind}</td>
-                          <td className="text-right px-4 py-3">{fmtNum(k.calls)}</td>
-                          <td className="text-right px-4 py-3" style={{ opacity: 0.7 }}>
-                            {fmtNum(k.tokens)}
-                          </td>
-                          <td className="text-right px-4 py-3 font-semibold" style={{ color: ACCENT }}>
-                            {fmtMoney(k.cost, 2)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 24 }}>
+                <div className="lg:col-span-2">
+                  <Card style={{ padding: 0 }}>
+                    <DataTable>
+                      <THead
+                        cols={[
+                          { label: "Tipo de uso" },
+                          { label: "Llamadas", align: "right" },
+                          { label: "Tokens", align: "right" },
+                          { label: "Costo USD", align: "right" },
+                        ]}
+                      />
+                      <tbody>
+                        {kinds.map((k) => (
+                          <Row key={k.kind}>
+                            <Cell style={{ fontWeight: 500 }}>{k.kind}</Cell>
+                            <Cell align="right" mono>{fmtNum(k.calls)}</Cell>
+                            <Cell align="right" mono style={{ color: UI.muted }}>
+                              {fmtNum(k.tokens)}
+                            </Cell>
+                            <Cell align="right" mono style={{ fontWeight: 600 }}>
+                              {fmtMoney(k.cost, 2)}
+                            </Cell>
+                          </Row>
+                        ))}
+                      </tbody>
+                    </DataTable>
+                  </Card>
                 </div>
 
-                <div style={{ ...CARD_STYLE, padding: 0 }}>
-                  <p
-                    className="text-xs uppercase tracking-wide px-4 py-3"
-                    style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
+                <Card style={{ padding: 0, alignSelf: "start" }}>
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      borderBottom: `1px solid ${UI.border}`,
+                      fontSize: 11,
+                      fontWeight: 500,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: UI.muted,
+                    }}
                   >
                     Por día
-                  </p>
-                  <ul className="text-sm" style={{ maxHeight: 420, overflowY: "auto" }}>
+                  </div>
+                  <ul
+                    style={{
+                      margin: 0,
+                      padding: 0,
+                      listStyle: "none",
+                      fontSize: 13.5,
+                      maxHeight: 420,
+                      overflowY: "auto",
+                    }}
+                  >
                     {days.map(([day, cost]) => (
                       <li
                         key={day}
-                        className="flex justify-between px-4 py-2"
-                        style={{ borderBottom: "1px solid rgba(128,128,128,0.08)" }}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 16px",
+                          borderBottom: `1px solid ${UI.border}`,
+                        }}
                       >
-                        <span style={{ opacity: 0.7 }}>{day}</span>
-                        <span className="font-medium">{fmtMoney(cost, 2)}</span>
+                        <span
+                          style={{
+                            color: UI.muted,
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {day}
+                        </span>
+                        <span
+                          style={{
+                            fontWeight: 500,
+                            fontFamily: UI.fontMono,
+                            fontSize: 13,
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {fmtMoney(cost, 2)}
+                        </span>
                       </li>
                     ))}
                   </ul>
-                </div>
+                </Card>
               </div>
             )}
           </>

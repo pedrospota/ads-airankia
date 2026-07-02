@@ -16,29 +16,44 @@ interface ThemeContextType {
     textMuted: string;
     textFaint: string;
     accent: string;
+    /** Second-level surface: active nav items, inset wells. */
+    surface2: string;
+    /** Table-row / list hover background. */
+    hover: string;
+    danger: string;
+    warn: string;
   };
 }
 
+// Premium dark-first palette (mirrors src/components/ui-kit.tsx UI tokens).
 const DARK = {
-  bg: '#0A0A0E',
-  bgCard: '#1C1C23',
-  bgInput: '#0A0A0E',
-  border: '#38383F',
-  text: '#FAFAFA',
-  textMuted: 'rgba(255,255,255,0.4)',
-  textFaint: 'rgba(255,255,255,0.25)',
+  bg: '#0A0A0B',
+  bgCard: '#101012',
+  bgInput: '#0A0A0B',
+  border: '#1F1F23',
+  text: '#F7F8F8',
+  textMuted: '#8A8F98',
+  textFaint: '#55575D',
   accent: '#10B981',
+  surface2: '#151518',
+  hover: '#121214',
+  danger: '#EF4444',
+  warn: '#F59E0B',
 };
 
 const LIGHT = {
   bg: '#FFFFFF',
-  bgCard: '#F9FAFB',
+  bgCard: '#FAFAFA',
   bgInput: '#FFFFFF',
-  border: '#E5E7EB',
-  text: '#111827',
-  textMuted: '#6B7280',
-  textFaint: '#9CA3AF',
+  border: '#E7E7EA',
+  text: '#101012',
+  textMuted: '#6B7076',
+  textFaint: '#A5A7AD',
   accent: '#059669',
+  surface2: '#F1F1F3',
+  hover: '#F6F6F7',
+  danger: '#DC2626',
+  warn: '#D97706',
 };
 
 const ThemeContext = createContext<ThemeContextType>({

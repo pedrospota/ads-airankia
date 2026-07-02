@@ -2,50 +2,36 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
+import {
+  PageHeader,
+  Card,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  Badge,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
 import { fetchTriage, fmtNum, type TriageRow } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
 export const dynamic = "force-dynamic";
 
-const ACCENT = "#10b981";
-const AMBER = "#f59e0b";
-const RED = "#ef4444";
-const GRAY = "rgba(128,128,128,0.6)";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
-
 const GRADES = ["A", "B", "C", "D", "F"] as const;
 
-/** A/B verde, C ámbar, D/F rojo, desconocido gris. */
-function gradeColor(grade: string | null | undefined): string {
+/** A/B ok, C warn, D/F danger, desconocido muted. */
+function gradeTone(grade: string | null | undefined): "ok" | "warn" | "danger" | "muted" {
   const g = (grade ?? "").toUpperCase();
-  if (g === "A" || g === "B") return ACCENT;
-  if (g === "C") return AMBER;
-  if (g === "D" || g === "F") return RED;
-  return GRAY;
+  if (g === "A" || g === "B") return "ok";
+  if (g === "C") return "warn";
+  if (g === "D" || g === "F") return "danger";
+  return "muted";
 }
 
 function GradeBadge({ grade }: { grade: string | null | undefined }) {
-  const color = gradeColor(grade);
-  return (
-    <span
-      className="inline-flex items-center justify-center text-sm font-bold"
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: 8,
-        color,
-        background: `${color}1f`,
-        border: `1px solid ${color}55`,
-      }}
-    >
-      {(grade ?? "—").toUpperCase()}
-    </span>
-  );
+  return <Badge tone={gradeTone(grade)}>{(grade ?? "—").toUpperCase()}</Badge>;
 }
 
 export default async function AuditoriaPage() {
@@ -83,56 +69,51 @@ export default async function AuditoriaPage() {
         ]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Auditoría MCC</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Auditoría estructural de todas las cuentas, con reglas de negocio aplicadas — las peores primero
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title="Auditoría MCC"
+          subtitle="Auditoría estructural de todas las cuentas, con reglas de negocio aplicadas — las peores primero"
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar la auditoría. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar la auditoría. ${error}`} />
         ) : rows.length === 0 ? (
-          <div className="text-center py-16" style={{ opacity: 0.4 }}>
-            <p className="text-lg">Todavía no hay cuentas auditadas.</p>
-            <p className="text-sm mt-2">
-              Cuando el optimizador complete su primer análisis verás aquí la calificación de cada cuenta.
-            </p>
-          </div>
+          <EmptyState
+            title="Todavía no hay cuentas auditadas."
+            hint="Cuando el optimizador complete su primer análisis verás aquí la calificación de cada cuenta."
+          />
         ) : (
           <>
             {/* Distribución de calificaciones */}
-            <div className="flex flex-wrap gap-3 mb-8">
+            <div className="flex flex-wrap" style={{ gap: 12, marginBottom: 32 }}>
               {GRADES.map((g) => {
                 const count = dist.get(g) ?? 0;
-                const color = gradeColor(g);
                 return (
                   <div
                     key={g}
-                    className="flex items-center gap-2 px-4 py-2"
                     style={{
-                      borderRadius: 10,
-                      background: count > 0 ? `${color}14` : "rgba(128,128,128,0.06)",
-                      border: `1px solid ${count > 0 ? `${color}44` : "rgba(128,128,128,0.2)"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      background: UI.surface,
+                      border: `1px solid ${UI.border}`,
+                      borderRadius: UI.radiusSm,
+                      padding: "8px 14px",
                       opacity: count > 0 ? 1 : 0.5,
                     }}
                   >
-                    <span className="text-sm font-bold" style={{ color }}>
-                      {g}
+                    <Badge tone={gradeTone(g)}>{g}</Badge>
+                    <span
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: 600,
+                        color: UI.text,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {fmtNum(count)}
                     </span>
-                    <span className="text-sm font-semibold">{fmtNum(count)}</span>
-                    <span className="text-xs" style={{ opacity: 0.5 }}>
+                    <span style={{ fontSize: 12, color: UI.muted }}>
                       {count === 1 ? "cuenta" : "cuentas"}
                     </span>
                   </div>
@@ -141,97 +122,100 @@ export default async function AuditoriaPage() {
             </div>
 
             {/* Tabla peor-primero */}
-            <div style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-              <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                <thead>
-                  <tr
-                    className="text-xs uppercase tracking-wide"
-                    style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                  >
-                    <th className="text-left font-medium px-4 py-3">Cuenta</th>
-                    <th className="text-left font-medium px-4 py-3">Nota</th>
-                    <th className="text-right font-medium px-4 py-3">Score</th>
-                    <th className="text-right font-medium px-4 py-3">Fallos</th>
-                    <th className="text-right font-medium px-4 py-3">Avisos</th>
-                    <th className="text-left font-medium px-4 py-3">Peores categorías</th>
-                  </tr>
-                </thead>
+            <Card style={{ padding: 0 }}>
+              <DataTable>
+                <THead
+                  cols={[
+                    { label: "Cuenta" },
+                    { label: "Nota" },
+                    { label: "Score", align: "right" },
+                    { label: "Fallos", align: "right" },
+                    { label: "Avisos", align: "right" },
+                    { label: "Peores categorías" },
+                  ]}
+                />
                 <tbody>
                   {sorted.map((r, i) => (
-                    <tr
-                      key={r.account_id ?? i}
-                      style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}
-                    >
-                      <td className="px-4 py-3">
+                    <Row key={r.account_id ?? i}>
+                      <Cell>
                         {r.account_id ? (
                           <Link
                             href={`/performance/${encodeURIComponent(r.account_id)}`}
-                            className="font-medium hover:underline"
-                            style={{ color: ACCENT }}
+                            className="hover:underline"
+                            style={{
+                              color: UI.text,
+                              fontWeight: 500,
+                              textDecoration: "none",
+                            }}
                           >
                             {r.name ?? r.account_id}
                           </Link>
                         ) : (
-                          <span className="font-medium">{r.name ?? "—"}</span>
+                          <span style={{ fontWeight: 500 }}>{r.name ?? "—"}</span>
                         )}
                         {(r.n_suppressed ?? 0) > 0 && (
                           <span
-                            className="ml-2 text-xs"
-                            style={{ opacity: 0.5 }}
+                            style={{ marginLeft: 8, fontSize: 12, color: UI.faint }}
                             title="Checks suprimidos por reglas de negocio de la cuenta"
                           >
                             {fmtNum(r.n_suppressed)} por regla
                           </span>
                         )}
-                      </td>
-                      <td className="px-4 py-3">
+                      </Cell>
+                      <Cell>
                         <GradeBadge grade={r.grade} />
-                      </td>
-                      <td className="text-right px-4 py-3 font-semibold whitespace-nowrap">
+                      </Cell>
+                      <Cell
+                        align="right"
+                        mono
+                        style={{ fontWeight: 600, whiteSpace: "nowrap" }}
+                      >
                         {r.score != null && Number.isFinite(r.score) ? (
                           <>
                             {fmtNum(r.score)}
-                            <span style={{ opacity: 0.4 }}>/100</span>
+                            <span style={{ color: UI.faint, fontWeight: 400 }}>/100</span>
                           </>
                         ) : (
                           "—"
                         )}
-                      </td>
-                      <td className="text-right px-4 py-3" style={{ color: (r.n_fail ?? 0) > 0 ? RED : undefined }}>
+                      </Cell>
+                      <Cell
+                        align="right"
+                        mono
+                        style={(r.n_fail ?? 0) > 0 ? { color: UI.danger } : undefined}
+                      >
                         {fmtNum(r.n_fail)}
-                      </td>
-                      <td className="text-right px-4 py-3" style={{ color: (r.n_warn ?? 0) > 0 ? AMBER : undefined }}>
+                      </Cell>
+                      <Cell
+                        align="right"
+                        mono
+                        style={(r.n_warn ?? 0) > 0 ? { color: UI.warn } : undefined}
+                      >
                         {fmtNum(r.n_warn)}
-                      </td>
-                      <td className="px-4 py-3">
+                      </Cell>
+                      <Cell>
                         {(r.worst ?? []).length === 0 ? (
-                          <span style={{ opacity: 0.3 }}>—</span>
+                          <span style={{ color: UI.faint }}>—</span>
                         ) : (
-                          <span className="flex flex-wrap gap-1.5">
+                          <span className="flex flex-wrap" style={{ gap: 6 }}>
                             {(r.worst ?? []).slice(0, 3).map((w, j) => (
-                              <span
-                                key={j}
-                                className="text-xs px-2 py-0.5"
-                                style={{
-                                  borderRadius: 999,
-                                  background: "rgba(128,128,128,0.1)",
-                                  border: "1px solid rgba(128,128,128,0.2)",
-                                }}
-                              >
+                              <Badge key={j} tone="muted">
                                 {w?.label ?? "—"}
                                 {w?.score != null && Number.isFinite(w.score) && (
-                                  <span style={{ opacity: 0.5 }}> · {fmtNum(w.score)}</span>
+                                  <span style={{ color: UI.faint }}>
+                                    {" "}· {fmtNum(w.score)}
+                                  </span>
                                 )}
-                              </span>
+                              </Badge>
                             ))}
                           </span>
                         )}
-                      </td>
-                    </tr>
+                      </Cell>
+                    </Row>
                   ))}
                 </tbody>
-              </table>
-            </div>
+              </DataTable>
+            </Card>
           </>
         )}
       </main>

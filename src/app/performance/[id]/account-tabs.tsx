@@ -12,50 +12,35 @@
 // and there stay in sync.
 //
 // Every field can be null — everything renders defensively with friendly
-// Spanish empty states.
+// Spanish empty states. Styling: @/components/ui-kit (dark, quiet, premium).
 // ============================================================================
 
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { AccountFull } from "@/lib/sentinel";
+import {
+  UI,
+  Card,
+  StatCard,
+  SectionLabel,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  Badge,
+  EmptyState,
+  ErrorCard,
+  PrimaryButton,
+  GhostDangerButton,
+} from "@/components/ui-kit";
 
 type Dict = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
-// Palette + shared styles (same look as /performance)
+// Shared layout atoms (4px grid, 16px card gaps)
 // ---------------------------------------------------------------------------
 
-const ACCENT = "#10b981";
-const RED = "#ef4444";
-const AMBER = "#f59e0b";
-const BLUE = "#60a5fa";
-const PURPLE = "#a78bfa";
-const MUTED = "rgba(128,128,128,0.7)";
-
-const CARD: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-  marginBottom: 16,
-};
-
-const TH: React.CSSProperties = {
-  textAlign: "left",
-  fontWeight: 500,
-  padding: "8px 10px",
-  fontSize: 11,
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-  opacity: 0.5,
-  borderBottom: "1px solid rgba(128,128,128,0.2)",
-};
-
-const TD: React.CSSProperties = {
-  padding: "8px 10px",
-  fontSize: 13,
-  borderBottom: "1px solid rgba(128,128,128,0.1)",
-  verticalAlign: "top",
-};
+const STACK: CSSProperties = { display: "grid", gap: 16 };
 
 // ---------------------------------------------------------------------------
 // Defensive accessors + formatters (client-local: src/lib/sentinel.ts is
@@ -94,11 +79,11 @@ function fmtDate(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
 }
-function signedPct(v: number | null | undefined): React.ReactNode {
-  if (v == null || !Number.isFinite(v)) return <span style={{ color: MUTED }}>—</span>;
-  const color = v > 0 ? "#34D399" : v < 0 ? "#FF5B66" : MUTED;
+function signedPct(v: number | null | undefined): ReactNode {
+  if (v == null || !Number.isFinite(v)) return <span style={{ color: UI.faint }}>—</span>;
+  const color = v > 0 ? UI.accent : v < 0 ? UI.danger : UI.muted;
   return (
-    <span style={{ color, fontWeight: 600 }}>
+    <span style={{ color, fontWeight: 550, fontVariantNumeric: "tabular-nums" }}>
       {v > 0 ? "+" : ""}
       {v.toLocaleString("en-US", { maximumFractionDigits: 1 })}%
     </span>
@@ -151,21 +136,26 @@ const TIPO_LABEL: Record<string, string> = {
   assets: "Agregar extensiones (sitelinks / callouts)",
 };
 
-/** Honest $ framing per action type: saves vs deploys vs efficiency. */
+/** Honest $ framing per action type: saves vs deploys vs efficiency.
+ *  Accent is reserved for savings/positive money; the rest stays neutral. */
 function valueLabel(
   tipo: string | null,
   imp: number | null
 ): { label: string; color: string } | null {
   if (imp == null) return null;
   const t = (tipo || "").toLowerCase();
-  if (t === "negativas") return { label: "Ahorra", color: "#34D399" };
+  if (t === "negativas") return { label: "Ahorra", color: UI.accent };
   if (t === "budget")
     return imp >= 0
-      ? { label: "Desplegar", color: BLUE }
-      : { label: "Recorta", color: "#34D399" };
+      ? { label: "Desplegar", color: UI.text }
+      : { label: "Recorta", color: UI.accent };
   if (["copy_rsa", "calidad_kw", "landing"].includes(t))
-    return { label: "Calidad", color: PURPLE };
-  return { label: "Eficiencia", color: AMBER };
+    return { label: "Calidad", color: UI.text };
+  return { label: "Eficiencia", color: UI.text };
+}
+
+function confTone(conf: number): "ok" | "warn" | "muted" {
+  return conf >= 70 ? "ok" : conf >= 45 ? "warn" : "muted";
 }
 
 const QS_PROBLEM: Record<string, [string, string]> = {
@@ -187,18 +177,18 @@ function segVerdict(
   lowVol: boolean
 ): { label: string; color: string; mod: number | null } {
   if (lowVol || cvr == null || !acctCvr) {
-    return { label: "pocos datos", color: MUTED, mod: null };
+    return { label: "pocos datos", color: UI.faint, mod: null };
   }
   const ratio = cvr / acctCvr;
   if (ratio >= 1.25) {
     const m = Math.min(50, Math.round((ratio - 1) * 100));
-    return { label: `↑ subir puja +${m}%`, color: "#34D399", mod: m };
+    return { label: `subir puja +${m}%`, color: UI.accent, mod: m };
   }
   if (ratio <= 0.6) {
     const m = Math.max(-50, Math.round((ratio - 1) * 100));
-    return { label: `↓ bajar puja ${m}%`, color: AMBER, mod: m };
+    return { label: `bajar puja ${m}%`, color: UI.warn, mod: m };
   }
-  return { label: "≈ a tono", color: MUTED, mod: 0 };
+  return { label: "a tono", color: UI.muted, mod: 0 };
 }
 
 const OBJETIVOS: [string, string][] = [
@@ -309,68 +299,36 @@ function ApproveControl({
   detail?: Dict;
   compact?: boolean;
 }) {
-  const pad = compact ? "4px 12px" : "7px 14px";
   if (!recKey) {
-    return (
-      <span style={{ fontSize: 12, color: MUTED }}>preparando…</span>
-    );
+    return <span style={{ fontSize: 12, color: UI.faint }}>preparando…</span>;
   }
   const busy = ctx.busyKey === recKey;
   if (ctx.approved.has(recKey)) {
     const meta = ctx.approvedMeta[recKey];
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span
-          style={{
-            padding: pad,
-            borderRadius: 999,
-            fontSize: 12,
-            fontWeight: 600,
-            color: "#34D399",
-            background: "rgba(16,185,129,0.12)",
-            border: "1px solid rgba(16,185,129,0.35)",
-          }}
-        >
-          Aprobada ✓{meta?.by ? ` · ${meta.by}` : ""}
-        </span>
-        <button
+        <Badge tone="ok">Aprobada{meta?.by ? ` · ${meta.by}` : ""}</Badge>
+        <GhostDangerButton
           onClick={() => ctx.revert(recKey)}
           disabled={busy}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: MUTED,
-            fontSize: 12,
-            cursor: busy ? "wait" : "pointer",
-            textDecoration: "underline",
-            padding: 0,
-          }}
+          style={{ padding: "4px 8px", fontSize: 12 }}
         >
           {busy ? "deshaciendo…" : "deshacer"}
-        </button>
+        </GhostDangerButton>
       </span>
     );
   }
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <button
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <PrimaryButton
         onClick={() => ctx.approve(recKey, title, detail)}
         disabled={busy}
-        style={{
-          padding: pad,
-          borderRadius: 8,
-          fontSize: 12,
-          fontWeight: 700,
-          color: "#052e22",
-          background: busy ? "rgba(16,185,129,0.5)" : ACCENT,
-          border: "none",
-          cursor: busy ? "wait" : "pointer",
-        }}
+        style={compact ? { padding: "5px 10px", fontSize: 12 } : undefined}
       >
-        {busy ? "Registrando…" : "✓ Aprobar"}
-      </button>
+        {busy ? "Registrando…" : "Aprobar"}
+      </PrimaryButton>
       {!compact && (
-        <span style={{ fontSize: 11, color: MUTED }}>no ejecuta aún</span>
+        <span style={{ fontSize: 11, color: UI.faint }}>no ejecuta aún</span>
       )}
     </span>
   );
@@ -380,47 +338,29 @@ function ApproveControl({
 // Small shared atoms
 // ---------------------------------------------------------------------------
 
-function Empty({ children }: { children: React.ReactNode }) {
+function Empty({ title, hint }: { title: ReactNode; hint?: ReactNode }) {
   return (
-    <div style={{ ...CARD, color: MUTED, fontSize: 14 }}>{children}</div>
+    <Card style={{ padding: 0 }}>
+      <EmptyState title={title} hint={hint} />
+    </Card>
   );
 }
 
-function H2({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-base font-semibold mb-3">{children}</h2>;
-}
-
-function Chip({
-  children,
-  color,
-}: {
-  children: React.ReactNode;
-  color: string;
-}) {
+/** Quiet inline note card (info banners). */
+function NoteCard({ children }: { children: ReactNode }) {
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 9px",
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 600,
-        color,
-        background: `${color}1f`,
-        border: `1px solid ${color}55`,
-      }}
-    >
+    <Card style={{ padding: "12px 16px", background: UI.surface2, fontSize: 13, color: UI.muted, lineHeight: 1.5 }}>
       {children}
-    </span>
+    </Card>
   );
 }
 
 function gradeColor(grade: string | null | undefined): string {
   const g = (grade || "").trim().charAt(0).toUpperCase();
-  if (g === "A" || g === "B") return ACCENT;
-  if (g === "C") return AMBER;
-  if (g === "D" || g === "F") return RED;
-  return MUTED;
+  if (g === "A" || g === "B") return UI.accent;
+  if (g === "C") return UI.warn;
+  if (g === "D" || g === "F") return UI.danger;
+  return UI.muted;
 }
 
 // ===========================================================================
@@ -595,49 +535,40 @@ export function AccountTabs({
       <div
         style={{
           display: "flex",
-          gap: 6,
+          gap: 4,
           flexWrap: "wrap",
-          borderBottom: "1px solid rgba(128,128,128,0.2)",
-          marginBottom: 20,
+          borderBottom: `1px solid ${UI.border}`,
+          marginBottom: 24,
         }}
       >
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: "8px 14px",
-              fontSize: 13,
-              fontWeight: tab === t.id ? 700 : 500,
-              color: tab === t.id ? ACCENT : "inherit",
-              opacity: tab === t.id ? 1 : 0.6,
-              background: "transparent",
-              border: "none",
-              borderBottom:
-                tab === t.id ? `2px solid ${ACCENT}` : "2px solid transparent",
-              cursor: "pointer",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
+        {tabs.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 13,
+                fontWeight: active ? 550 : 450,
+                color: active ? UI.text : UI.muted,
+                background: "transparent",
+                border: "none",
+                borderBottom: active
+                  ? `2px solid ${UI.accent}`
+                  : "2px solid transparent",
+                marginBottom: -1,
+                cursor: "pointer",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
-      {actionError && (
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            marginBottom: 16,
-            fontSize: 13,
-            background: "rgba(248,113,113,0.1)",
-            border: "1px solid rgba(248,113,113,0.2)",
-            color: "#F87171",
-          }}
-        >
-          {actionError}
-        </div>
-      )}
+      {actionError && <ErrorCard message={actionError} style={{ marginBottom: 16 }} />}
 
       {tab === "resumen" && (
         <ResumenTab biz={biz} signals={signals} diag={diag} opts={opts} />
@@ -716,101 +647,123 @@ function ResumenTab({
     gasto != null || opts.length > 0 || str_(biz.que_vende) || trends.length > 0;
 
   return (
-    <div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        {[
-          { label: "Gasto Search/mes", value: fmtMoney(gasto), color: undefined },
-          { label: "Ahorro disponible", value: fmtMoney(ahorro), color: ACCENT },
-          { label: "Oportunidad/mes", value: fmtMoney(oport), color: BLUE },
-          { label: "Propuestas", value: fmtNum(opts.length), color: undefined },
-        ].map((k) => (
-          <div key={k.label} style={{ ...CARD, marginBottom: 0 }}>
-            <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-              {k.label}
-            </p>
-            <p className="text-2xl font-bold mt-2" style={k.color ? { color: k.color } : undefined}>
-              {k.value}
-            </p>
-          </div>
-        ))}
+    <div style={STACK}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 16,
+        }}
+      >
+        <StatCard label="Gasto Search/mes" value={fmtMoney(gasto)} />
+        <StatCard
+          label="Ahorro disponible"
+          value={fmtMoney(ahorro)}
+          sub={ahorro > 0 ? "/mes recuperable" : undefined}
+          tone="ok"
+        />
+        <StatCard
+          label="Oportunidad/mes"
+          value={fmtMoney(oport)}
+          sub={oport > 0 ? "/mes por capturar" : undefined}
+          tone="muted"
+        />
+        <StatCard label="Propuestas" value={fmtNum(opts.length)} />
       </div>
 
       {ghStatus && (
-        <div style={{ marginBottom: 16 }}>
-          <Chip color={ghStatus === "ok" ? ACCENT : ghStatus === "contaminada" ? AMBER : MUTED}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Badge
+            tone={ghStatus === "ok" ? "ok" : ghStatus === "contaminada" ? "warn" : "muted"}
+          >
             GA4 {ghStatus}
-          </Chip>
+          </Badge>
           {str_(gh.nota) && (
-            <span style={{ fontSize: 12, color: MUTED, marginLeft: 8 }}>{str_(gh.nota)}</span>
+            <span style={{ fontSize: 12, color: UI.muted }}>{str_(gh.nota)}</span>
           )}
         </div>
       )}
 
       {str_(biz.que_vende) && (
-        <div style={CARD}>
-          <H2>Negocio (IA)</H2>
-          <p style={{ fontSize: 14 }}>
-            <b>{str_(biz.que_vende)}</b>
+        <Card>
+          <SectionLabel>Negocio (IA)</SectionLabel>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, color: UI.text, margin: 0 }}>
+            <b style={{ fontWeight: 550 }}>{str_(biz.que_vende)}</b>
             {str_(biz.cliente) ? <> · {str_(biz.cliente)}</> : null}
             {str_(biz.objetivo_real) ? (
               <>
                 {" "}
-                · objetivo: <span style={{ color: ACCENT }}>{str_(biz.objetivo_real)}</span>
+                · objetivo:{" "}
+                <span style={{ fontWeight: 550 }}>{str_(biz.objetivo_real)}</span>
               </>
             ) : null}
           </p>
           {str_(biz.momento) && (
-            <p style={{ fontSize: 13, marginTop: 6, opacity: 0.7 }}>
+            <p style={{ fontSize: 13, marginTop: 8, color: UI.muted }}>
               Momento: {str_(biz.momento)}
             </p>
           )}
           {competidores.length > 0 && (
-            <p style={{ fontSize: 13, marginTop: 6, color: "#FF8A93" }}>
-              competidores: {competidores.join(", ")}
-            </p>
+            <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: UI.faint }}>competidores</span>
+              {competidores.map((c, i) => (
+                <Badge key={i} tone="muted">
+                  {c}
+                </Badge>
+              ))}
+            </div>
           )}
-        </div>
+        </Card>
       )}
 
       {trends.length > 0 && (
-        <div style={CARD}>
-          <H2>Momentum</H2>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 13 }}>
+        <Card>
+          <SectionLabel>Momentum</SectionLabel>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
             {trends.map((t, i) => (
-              <span key={i}>
-                <span style={{ color: MUTED }}>{str_(t.campana) ?? "campaña"}</span>{" "}
+              <span key={i} style={{ whiteSpace: "nowrap" }}>
+                <span style={{ color: UI.muted }}>{str_(t.campana) ?? "campaña"}</span>{" "}
                 {signedPct(num_(t.mejora_pct))}
               </span>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {top3.length > 0 && (
-        <div style={{ ...CARD, borderLeft: `3px solid ${ACCENT}` }}>
-          <H2>Empieza por estas (mayor impacto)</H2>
-          <ol style={{ paddingLeft: 20, fontSize: 14, lineHeight: 1.9 }}>
+        <Card>
+          <SectionLabel>Empieza por estas (mayor impacto)</SectionLabel>
+          <ol
+            style={{
+              paddingLeft: 20,
+              fontSize: 13.5,
+              lineHeight: 2,
+              color: UI.text,
+              margin: 0,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
             {top3.map((o, i) => (
               <li key={i}>
                 {TIPO_LABEL[str_(o.tipo) ?? ""] ?? str_(o.tipo) ?? "Movida"}{" "}
-                <span style={{ color: MUTED }}>
+                <span style={{ color: UI.muted }}>
                   {str_(o.target) ? `· ${str_(o.target)}` : ""} ·{" "}
                   {fmtMoney(Math.abs(optImp(o)))}/mes
                 </span>
               </li>
             ))}
           </ol>
-          <p style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
-            El detalle y el botón de aprobar viven en la pestaña <b>Acciones</b>.
+          <p style={{ fontSize: 12, color: UI.faint, marginTop: 10 }}>
+            El detalle y el botón de aprobar viven en la pestaña Acciones.
           </p>
-        </div>
+        </Card>
       )}
 
       {!hasAnything && (
-        <Empty>
-          Todavía no hay análisis para esta cuenta. Los resultados aparecerán aquí
-          después del próximo análisis del optimizador.
-        </Empty>
+        <Empty
+          title="Todavía no hay análisis para esta cuenta."
+          hint="Los resultados aparecerán aquí después del próximo análisis del optimizador."
+        />
       )}
     </div>
   );
@@ -835,10 +788,10 @@ function AccionesTab({
 }) {
   if (opts.length === 0 && recs.length === 0) {
     return (
-      <Empty>
-        No hay acciones propuestas por ahora. Cuando el optimizador detecte
-        desperdicio u oportunidad, aparecerán aquí para tu aprobación.
-      </Empty>
+      <Empty
+        title="No hay acciones propuestas por ahora."
+        hint="Cuando el optimizador detecte desperdicio u oportunidad, aparecerán aquí para tu aprobación."
+      />
     );
   }
 
@@ -853,61 +806,61 @@ function AccionesTab({
   const detTable = !cardsFromDet ? recs.slice(0, 15) : [];
 
   return (
-    <div>
-      <div
-        style={{
-          padding: "10px 14px",
-          borderRadius: 8,
-          marginBottom: 16,
-          fontSize: 13,
-          background: "rgba(96,165,250,0.08)",
-          border: "1px solid rgba(96,165,250,0.25)",
-        }}
-      >
-        Modo propuesta: <b>aprobar registra la decisión — nada se ejecuta en Google
-        Ads</b>. Tú (o tu equipo) aplican los cambios cuando quieran.
-      </div>
+    <div style={STACK}>
+      <NoteCard>
+        Modo propuesta:{" "}
+        <b style={{ color: UI.text, fontWeight: 550 }}>
+          aprobar registra la decisión — nada se ejecuta en Google Ads
+        </b>
+        . Tú (o tu equipo) aplican los cambios cuando quieran.
+      </NoteCard>
 
       {cardsFromDet && opts.length > 0 && (
-        <div
+        <Card
           style={{
-            padding: "10px 14px",
-            borderRadius: 8,
-            marginBottom: 16,
+            padding: "12px 16px",
+            background: "rgba(245,158,11,0.06)",
+            border: "1px solid rgba(245,158,11,0.35)",
             fontSize: 13,
-            background: "rgba(251,191,36,0.08)",
-            border: "1px solid rgba(251,191,36,0.25)",
-            color: AMBER,
+            color: UI.warn,
+            lineHeight: 1.5,
           }}
         >
           El razonamiento de IA no está disponible ahora — mostrando el plan del
           motor determinista (aterrizado en los números).
-        </div>
+        </Card>
       )}
 
       {opts.length > 0 && (
-        <div style={{ ...CARD, borderLeft: `3px solid ${ACCENT}` }}>
-          <p
-            className="text-xs uppercase tracking-wide"
-            style={{ opacity: 0.5, marginBottom: 8 }}
+        <Card>
+          <SectionLabel>Tu plan en 1 vistazo</SectionLabel>
+          <div
+            style={{
+              display: "flex",
+              gap: 32,
+              flexWrap: "wrap",
+              alignItems: "baseline",
+              fontVariantNumeric: "tabular-nums",
+            }}
           >
-            Tu plan en 1 vistazo
-          </p>
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "baseline" }}>
             <span>
-              <b style={{ fontSize: 22, color: ACCENT }}>{fmtMoney(ahorroT)}</b>{" "}
-              <span style={{ fontSize: 12, color: MUTED }}>/mes ahorras</span>
+              <b style={{ fontSize: 22, fontWeight: 600, color: UI.accent }}>
+                {fmtMoney(ahorroT)}
+              </b>{" "}
+              <span style={{ fontSize: 12, color: UI.muted }}>/mes ahorras</span>
             </span>
             <span>
-              <b style={{ fontSize: 22, color: BLUE }}>{fmtMoney(oportT)}</b>{" "}
-              <span style={{ fontSize: 12, color: MUTED }}>/mes capturas</span>
+              <b style={{ fontSize: 22, fontWeight: 600, color: UI.text }}>
+                {fmtMoney(oportT)}
+              </b>{" "}
+              <span style={{ fontSize: 12, color: UI.muted }}>/mes capturas</span>
             </span>
             <span>
-              <b style={{ fontSize: 22 }}>{opts.length}</b>{" "}
-              <span style={{ fontSize: 12, color: MUTED }}>acciones</span>
+              <b style={{ fontSize: 22, fontWeight: 600, color: UI.text }}>{opts.length}</b>{" "}
+              <span style={{ fontSize: 12, color: UI.muted }}>acciones</span>
             </span>
           </div>
-        </div>
+        </Card>
       )}
 
       {opts.map((o, i) => {
@@ -922,68 +875,100 @@ function AccionesTab({
         const target = str_(o.target);
         const title = `${label}${target ? `: ${target}` : ""}`.slice(0, 120);
         return (
-          <div key={i} style={{ ...CARD, borderLeft: `3px solid ${ACCENT}` }}>
+          <Card key={i}>
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                gap: 16,
+                gap: 20,
                 alignItems: "flex-start",
                 flexWrap: "wrap",
               }}
             >
-              <div style={{ flex: 1, minWidth: 240 }}>
-                <p style={{ fontSize: 15, fontWeight: 700 }}>
-                  {label}{" "}
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 14, fontWeight: 550, color: UI.text }}>
+                    {label}
+                  </span>
                   {conf != null && (
-                    <Chip color={conf >= 70 ? ACCENT : conf >= 45 ? AMBER : MUTED}>
-                      confianza {Math.round(conf)}%
-                    </Chip>
+                    <Badge tone={confTone(conf)}>confianza {Math.round(conf)}%</Badge>
                   )}
-                  {o._det ? (
-                    <span style={{ fontSize: 11, color: MUTED, marginLeft: 6 }}>
-                      motor determinista
-                    </span>
-                  ) : null}
-                </p>
-                <p style={{ fontSize: 13, marginTop: 4, opacity: 0.8 }}>
-                  {str_(o.accion) ?? ""}{" "}
-                  {target && <span style={{ color: MUTED }}>{target}</span>}
-                </p>
+                  {o._det ? <Badge tone="muted">motor determinista</Badge> : null}
+                </div>
+                {str_(o.accion) && (
+                  <p style={{ fontSize: 13, marginTop: 6, color: UI.text, lineHeight: 1.5 }}>
+                    {str_(o.accion)}
+                  </p>
+                )}
+                {target && (
+                  <p
+                    style={{
+                      fontSize: 12,
+                      marginTop: 4,
+                      color: UI.muted,
+                      fontFamily: UI.fontMono,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {target}
+                  </p>
+                )}
               </div>
               {vl && imp != null && (
                 <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  <p
-                    className="text-xs uppercase tracking-wide"
-                    style={{ opacity: 0.5 }}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: UI.muted,
+                    }}
                   >
                     {vl.label}
-                  </p>
-                  <p style={{ fontSize: 19, fontWeight: 800, color: vl.color }}>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 600,
+                      color: vl.color,
+                      marginTop: 4,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
                     {fmtMoney(Math.abs(imp))}/mes
-                  </p>
+                  </div>
                 </div>
               )}
             </div>
 
             {str_(o.expected_impact) && (
-              <p style={{ fontSize: 13, marginTop: 8 }}>
-                <b style={{ color: BLUE }}>Qué pasará:</b> {str_(o.expected_impact)}
+              <p style={{ fontSize: 13, marginTop: 12, color: UI.text, lineHeight: 1.5 }}>
+                <span style={{ color: UI.muted }}>Qué pasará:</span>{" "}
+                {str_(o.expected_impact)}
               </p>
             )}
             {detalle.length > 0 && (
-              <ul style={{ fontSize: 13, marginTop: 8, paddingLeft: 18, lineHeight: 1.6 }}>
+              <ul
+                style={{
+                  fontSize: 13,
+                  marginTop: 10,
+                  paddingLeft: 18,
+                  lineHeight: 1.7,
+                  color: UI.text,
+                }}
+              >
                 {detalle.map((d, j) => (
                   <li key={j}>{d}</li>
                 ))}
               </ul>
             )}
             {str_(o.porque) && (
-              <p style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
-                <b>Por qué:</b> {str_(o.porque)}
+              <p style={{ fontSize: 12, color: UI.muted, marginTop: 10, lineHeight: 1.5 }}>
+                <span style={{ color: UI.faint }}>Por qué:</span> {str_(o.porque)}
               </p>
             )}
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 16 }}>
               <ApproveControl
                 ctx={ctx}
                 recKey={keys[`opt-${i}`]}
@@ -991,52 +976,54 @@ function AccionesTab({
                 detail={{ tipo, target, impacto_estimado_mxn_mes: imp }}
               />
             </div>
-          </div>
+          </Card>
         );
       })}
 
       {detTable.length > 0 && (
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <div style={{ padding: "16px 16px 4px" }}>
-            <H2>Recomendaciones deterministas (el grounding)</H2>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel style={{ marginBottom: 0 }}>
+              Recomendaciones deterministas (el grounding)
+            </SectionLabel>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Acción</th>
-                <th style={TH}>Target</th>
-                <th style={{ ...TH, textAlign: "right" }}>$ en juego</th>
-                <th style={{ ...TH, textAlign: "right" }}>Confianza</th>
-                <th style={TH}></th>
-              </tr>
-            </thead>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Acción" },
+                { label: "Target" },
+                { label: "$ en juego", align: "right" },
+                { label: "Confianza", align: "right" },
+                { label: "", align: "right" },
+              ]}
+            />
             <tbody>
               {detTable.map((d, i) => {
                 const cf = num_(d.confidence);
                 return (
-                  <tr key={i}>
-                    <td style={TD}>{str_(d.action_family) ?? "—"}</td>
-                    <td style={TD}>{str_(d.target) ?? "—"}</td>
-                    <td style={{ ...TD, textAlign: "right", color: ACCENT }}>
+                  <Row key={i}>
+                    <Cell>{str_(d.action_family) ?? "—"}</Cell>
+                    <Cell style={{ color: UI.muted }}>{str_(d.target) ?? "—"}</Cell>
+                    <Cell align="right" mono>
                       {fmtMoney(num_(d.dollars_at_stake))}
-                    </td>
-                    <td style={{ ...TD, textAlign: "right" }}>
+                    </Cell>
+                    <Cell align="right" mono>
                       {cf != null ? `${Math.round(cf * 100)}%` : "—"}
-                    </td>
-                    <td style={TD}>
+                    </Cell>
+                    <Cell align="right">
                       <ApproveControl
                         ctx={ctx}
                         recKey={keys[`det-${i}`]}
                         title={`${str_(d.action_family) ?? ""}: ${str_(d.target) ?? ""}`.slice(0, 80)}
                         compact
                       />
-                    </td>
-                  </tr>
+                    </Cell>
+                  </Row>
                 );
               })}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </Card>
       )}
     </div>
   );
@@ -1074,41 +1061,47 @@ function SegmentosTab({
       .map((r, idx) => ({ r, idx, v: segVerdict(num_(r.cvr), acctCvr, Boolean(r.low_vol)) }))
       .filter(({ r, v }) => v.mod != null && v.mod !== 0 && !r.low_vol);
     return (
-      <div key={dkey} style={CARD}>
-        <H2>{label}</H2>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Segmento</th>
-                <th style={{ ...TH, textAlign: "right" }}>Gasto</th>
-                <th style={{ ...TH, textAlign: "right" }}>Conv</th>
-                <th style={{ ...TH, textAlign: "right" }}>CVR</th>
-                <th style={TH}>Vs cuenta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const v = segVerdict(num_(r.cvr), acctCvr, Boolean(r.low_vol));
-                const cvr = num_(r.cvr);
-                return (
-                  <tr key={i}>
-                    <td style={TD}>{str_(r.seg) ?? "—"}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>{fmtMoney(num_(r.cost))}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>{fmtNum(num_(r.conv))}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>
-                      {cvr != null ? `${(cvr * 100).toFixed(1)}%` : "—"}
-                    </td>
-                    <td style={{ ...TD, color: v.color, whiteSpace: "nowrap" }}>{v.label}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      <Card key={dkey} style={{ padding: 0 }}>
+        <div style={{ padding: "20px 24px 12px" }}>
+          <SectionLabel style={{ marginBottom: 0 }}>{label}</SectionLabel>
         </div>
+        <DataTable>
+          <THead
+            cols={[
+              { label: "Segmento" },
+              { label: "Gasto", align: "right" },
+              { label: "Conv", align: "right" },
+              { label: "CVR", align: "right" },
+              { label: "Vs cuenta" },
+            ]}
+          />
+          <tbody>
+            {rows.map((r, i) => {
+              const v = segVerdict(num_(r.cvr), acctCvr, Boolean(r.low_vol));
+              const cvr = num_(r.cvr);
+              return (
+                <Row key={i}>
+                  <Cell>{str_(r.seg) ?? "—"}</Cell>
+                  <Cell align="right" mono>
+                    {fmtMoney(num_(r.cost))}
+                  </Cell>
+                  <Cell align="right" mono>
+                    {fmtNum(num_(r.conv))}
+                  </Cell>
+                  <Cell align="right" mono>
+                    {cvr != null ? `${(cvr * 100).toFixed(1)}%` : "—"}
+                  </Cell>
+                  <Cell style={{ color: v.color, whiteSpace: "nowrap", fontWeight: 500 }}>
+                    {v.label}
+                  </Cell>
+                </Row>
+              );
+            })}
+          </tbody>
+        </DataTable>
         {adjustable.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            <p style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>
+          <div style={{ padding: "12px 24px 20px" }}>
+            <p style={{ fontSize: 12, color: UI.faint, margin: "0 0 4px" }}>
               Ajustes sugeridos · aprobar registra la propuesta, no ejecuta
             </p>
             {adjustable.map(({ r, idx, v }) => {
@@ -1119,15 +1112,25 @@ function SegmentosTab({
                   key={idx}
                   style={{
                     display: "flex",
-                    gap: 10,
+                    gap: 12,
                     alignItems: "center",
                     flexWrap: "wrap",
-                    padding: "6px 0",
-                    borderTop: "1px solid rgba(128,128,128,0.1)",
+                    padding: "8px 0",
+                    borderTop: `1px solid ${UI.border}`,
                   }}
                 >
-                  <span style={{ flex: 1, minWidth: 120, fontSize: 13 }}>{seg}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: mod >= 0 ? ACCENT : AMBER }}>
+                  <span style={{ flex: 1, minWidth: 120, fontSize: 13.5, color: UI.text }}>
+                    {seg}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 550,
+                      fontFamily: UI.fontMono,
+                      fontVariantNumeric: "tabular-nums",
+                      color: mod >= 0 ? UI.accent : UI.warn,
+                    }}
+                  >
                     bid {mod >= 0 ? "+" : ""}
                     {mod}%
                   </span>
@@ -1143,22 +1146,22 @@ function SegmentosTab({
             })}
           </div>
         )}
-      </div>
+      </Card>
     );
   }).filter(Boolean);
 
   if (blocks.length === 0) {
     return (
-      <Empty>
-        Los datos por segmento (dispositivo/edad/género/ingreso/día/hora) se
-        refrescan semanalmente — aparecerán después del próximo refresco pesado.
-      </Empty>
+      <Empty
+        title="Los datos por segmento se refrescan semanalmente."
+        hint="Dispositivo/edad/género/ingreso/día/hora — aparecerán después del próximo refresco pesado."
+      />
     );
   }
 
   return (
-    <div>
-      <p style={{ fontSize: 13, color: MUTED, marginBottom: 16 }}>
+    <div style={STACK}>
+      <p style={{ fontSize: 13.5, color: UI.muted, margin: 0, lineHeight: 1.5 }}>
         Cada segmento vs el CVR de tu cuenta: sube la puja donde convierte mejor,
         bájala donde peor. Aprobar solo registra la propuesta — nada se ejecuta.
       </p>
@@ -1182,117 +1185,128 @@ function CalidadTab({ diag }: { diag: Dict }) {
 
   if (withProblem.length === 0 && lowQs.length === 0 && landing.length === 0) {
     return (
-      <Empty>
-        Sin problemas de calidad detectados — o los datos por keyword llegan en el
-        próximo refresco pesado.
-      </Empty>
+      <Empty
+        title="Sin problemas de calidad detectados."
+        hint="O los datos por keyword llegan en el próximo refresco pesado."
+      />
     );
   }
 
   return (
-    <div>
+    <div style={STACK}>
       {withProblem.length > 0 ? (
-        <div style={CARD}>
-          <H2>Calidad: dónde pagas de más</H2>
-          <p style={{ fontSize: 13, color: MUTED, marginBottom: 10 }}>
-            En estas búsquedas tu Quality Score bajo te encarece cada clic. Arregla
-            el anuncio o la landing y pagas menos por lo mismo. En juego:{" "}
-            <b style={{ color: ACCENT }}>~{fmtMoney(total)}/mes</b>.
-          </p>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={TH}>Keyword</th>
-                  <th style={{ ...TH, textAlign: "right" }}>QS</th>
-                  <th style={TH}>Problema</th>
-                  <th style={TH}>Arreglo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withProblem.map((r, i) => {
-                  let prob = "su calidad es baja";
-                  let fix = "mejora el anuncio y la landing";
-                  const comps = Array.isArray(r.componentes_debiles)
-                    ? (r.componentes_debiles as unknown[]).map((c) => String(c))
-                    : [];
-                  for (const c of comps) {
-                    if (QS_PROBLEM[c]) {
-                      [prob, fix] = QS_PROBLEM[c];
-                      break;
-                    }
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel>Calidad: dónde pagas de más</SectionLabel>
+            <p style={{ fontSize: 13, color: UI.muted, margin: 0, lineHeight: 1.5 }}>
+              En estas búsquedas tu Quality Score bajo te encarece cada clic. Arregla
+              el anuncio o la landing y pagas menos por lo mismo. En juego:{" "}
+              <b style={{ color: UI.text, fontWeight: 550, fontVariantNumeric: "tabular-nums" }}>
+                ~{fmtMoney(total)}/mes
+              </b>
+              .
+            </p>
+          </div>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Keyword" },
+                { label: "QS", align: "right" },
+                { label: "Problema" },
+                { label: "Arreglo" },
+              ]}
+            />
+            <tbody>
+              {withProblem.map((r, i) => {
+                let prob = "su calidad es baja";
+                let fix = "mejora el anuncio y la landing";
+                const comps = Array.isArray(r.componentes_debiles)
+                  ? (r.componentes_debiles as unknown[]).map((c) => String(c))
+                  : [];
+                for (const c of comps) {
+                  if (QS_PROBLEM[c]) {
+                    [prob, fix] = QS_PROBLEM[c];
+                    break;
                   }
-                  const qs = num_(r.qs);
-                  return (
-                    <tr key={i}>
-                      <td style={{ ...TD, fontWeight: 600 }}>
-                        {str_(r.keyword) ?? "—"}
-                        {str_(r.ad_group) && (
-                          <span style={{ color: MUTED, fontWeight: 400 }}>
-                            {" "}
-                            · {str_(r.ad_group)}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ ...TD, textAlign: "right", color: qs != null && qs <= 4 ? RED : AMBER }}>
-                        {qs != null ? `${qs}/10` : "—"}
-                      </td>
-                      <td style={TD}>{prob}</td>
-                      <td style={{ ...TD, color: BLUE }}>{fix}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
-            El arreglo de cada una vive como tarjeta en <b>Acciones</b>.
+                }
+                const qs = num_(r.qs);
+                return (
+                  <Row key={i}>
+                    <Cell style={{ fontWeight: 500 }}>
+                      {str_(r.keyword) ?? "—"}
+                      {str_(r.ad_group) && (
+                        <span style={{ color: UI.muted, fontWeight: 400 }}>
+                          {" "}
+                          · {str_(r.ad_group)}
+                        </span>
+                      )}
+                    </Cell>
+                    <Cell
+                      align="right"
+                      mono
+                      style={{ color: qs != null && qs <= 4 ? UI.danger : UI.warn }}
+                    >
+                      {qs != null ? `${qs}/10` : "—"}
+                    </Cell>
+                    <Cell style={{ color: UI.muted }}>{prob}</Cell>
+                    <Cell style={{ color: UI.text }}>{fix}</Cell>
+                  </Row>
+                );
+              })}
+            </tbody>
+          </DataTable>
+          <p style={{ fontSize: 12, color: UI.faint, padding: "12px 24px 20px", margin: 0 }}>
+            El arreglo de cada una vive como tarjeta en Acciones.
           </p>
-        </div>
+        </Card>
       ) : lowQs.length > 0 ? (
-        <div style={CARD}>
-          <H2>Keywords con Quality Score bajo</H2>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={TH}>Keyword</th>
-                  <th style={{ ...TH, textAlign: "right" }}>QS</th>
-                  <th style={{ ...TH, textAlign: "right" }}>Gasto</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lowQs.slice(0, 12).map((r, i) => (
-                  <tr key={i}>
-                    <td style={TD}>{str_(r.keyword) ?? "—"}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>
-                      {num_(r.qs) != null ? `${num_(r.qs)}/10` : "—"}
-                    </td>
-                    <td style={{ ...TD, textAlign: "right" }}>{fmtMoney(num_(r.cost))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel style={{ marginBottom: 0 }}>
+              Keywords con Quality Score bajo
+            </SectionLabel>
           </div>
-        </div>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Keyword" },
+                { label: "QS", align: "right" },
+                { label: "Gasto", align: "right" },
+              ]}
+            />
+            <tbody>
+              {lowQs.slice(0, 12).map((r, i) => (
+                <Row key={i}>
+                  <Cell>{str_(r.keyword) ?? "—"}</Cell>
+                  <Cell align="right" mono>
+                    {num_(r.qs) != null ? `${num_(r.qs)}/10` : "—"}
+                  </Cell>
+                  <Cell align="right" mono>
+                    {fmtMoney(num_(r.cost))}
+                  </Cell>
+                </Row>
+              ))}
+            </tbody>
+          </DataTable>
+        </Card>
       ) : null}
 
       {landing.length > 0 && (
-        <div style={CARD}>
-          <H2>Landings</H2>
-          <ul style={{ fontSize: 13, paddingLeft: 18, lineHeight: 1.8 }}>
+        <Card>
+          <SectionLabel>Landings</SectionLabel>
+          <ul style={{ fontSize: 13, paddingLeft: 18, lineHeight: 1.9, color: UI.text, margin: 0 }}>
             {landing.slice(0, 10).map((l, i) => {
               const url = str_(l.url) ?? str_(l.final_url) ?? str_(l.landing) ?? "—";
               const estado = str_(l.veredicto) ?? str_(l.status) ?? null;
               return (
                 <li key={i}>
                   <span style={{ wordBreak: "break-all" }}>{url}</span>
-                  {estado && <span style={{ color: MUTED }}> · {estado}</span>}
+                  {estado && <span style={{ color: UI.muted }}> · {estado}</span>}
                 </li>
               );
             })}
           </ul>
-        </div>
+        </Card>
       )}
     </div>
   );
@@ -1301,6 +1315,22 @@ function CalidadTab({ diag }: { diag: Dict }) {
 // ===========================================================================
 // Auditoría — grade hero + categorías con checks + enfoque IA
 // ===========================================================================
+
+/** 8px status dot: pass = faint, warn = amber, fail = red. No emojis. */
+function StatusDot({ color }: { color: string }) {
+  return (
+    <span
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: 999,
+        background: color,
+        flex: "none",
+        marginTop: 6,
+      }}
+    />
+  );
+}
 
 function AuditoriaTab({
   audit,
@@ -1312,7 +1342,7 @@ function AuditoriaTab({
   hasRules: boolean;
 }) {
   if (!audit || !audit.grade) {
-    return <Empty>Aún no hay datos suficientes para auditar esta cuenta.</Empty>;
+    return <Empty title="Aún no hay datos suficientes para auditar esta cuenta." />;
   }
   const gcol = gradeColor(audit.grade);
   const msg: Record<string, string> = {
@@ -1324,57 +1354,80 @@ function AuditoriaTab({
   };
   const adjGrade = str_(auditAi.grado_ajustado);
   const enfoque = str_(auditAi.enfoque);
-  const statusIcon: Record<string, [string, string]> = {
-    fail: ["✕", RED],
-    warn: ["⚠", AMBER],
-    pass: ["✓", ACCENT],
+  const statusDot: Record<string, string> = {
+    fail: UI.danger,
+    warn: UI.warn,
+    pass: UI.faint,
   };
   const order: Record<string, number> = { fail: 0, warn: 1, pass: 2 };
 
   return (
-    <div>
-      <div
-        style={{
-          ...CARD,
-          display: "flex",
-          gap: 18,
-          alignItems: "center",
-          borderLeft: `4px solid ${gcol}`,
-          flexWrap: "wrap",
-        }}
-      >
+    <div style={STACK}>
+      <Card style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
         <div
           style={{
-            width: 64,
-            height: 64,
+            width: 76,
+            height: 76,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            border: `3px solid ${gcol}`,
-            borderRadius: 14,
+            background: UI.surface2,
+            border: `1px solid ${UI.border}`,
+            borderRadius: UI.radius,
             color: gcol,
-            fontSize: 38,
-            fontWeight: 800,
+            fontSize: 44,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
             flex: "none",
           }}
         >
           {audit.grade}
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
-          <p style={{ fontSize: 17, fontWeight: 800 }}>
+          <p
+            style={{
+              fontSize: 15,
+              fontWeight: 550,
+              color: UI.text,
+              margin: 0,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
             Estructura {audit.score != null ? `${audit.score}/100` : "—"}
           </p>
-          <p style={{ fontSize: 13, color: gcol, fontWeight: 700 }}>
+          <p
+            style={{
+              fontSize: 13,
+              color: UI.muted,
+              margin: "4px 0 0",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
             {audit.n_fail ?? 0} falla(s) · {audit.n_warn ?? 0} advertencia(s)
           </p>
-          <p style={{ fontSize: 13, marginTop: 2, opacity: 0.8 }}>
+          <p style={{ fontSize: 13, margin: "4px 0 0", color: UI.muted }}>
             {msg[(audit.grade || "").charAt(0).toUpperCase()] ?? ""}
           </p>
           {adjGrade && (
-            <p style={{ fontSize: 12, marginTop: 4 }}>
-              <Chip color={PURPLE}>IA</Chip>{" "}
-              <span style={{ color: MUTED }}>ajustado al contexto:</span>{" "}
-              <b style={{ color: gradeColor(adjGrade) }}>
+            <p
+              style={{
+                fontSize: 12,
+                margin: "8px 0 0",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+              }}
+            >
+              <Badge tone="muted">IA</Badge>
+              <span style={{ color: UI.muted }}>ajustado al contexto:</span>
+              <b
+                style={{
+                  color: gradeColor(adjGrade),
+                  fontWeight: 600,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
                 {adjGrade}
                 {num_(auditAi.score_ajustado) != null
                   ? ` · ${num_(auditAi.score_ajustado)}/100`
@@ -1383,119 +1436,162 @@ function AuditoriaTab({
             </p>
           )}
         </div>
-      </div>
+      </Card>
 
       {hasRules && (
-        <div style={{ ...CARD, borderLeft: `3px solid ${PURPLE}`, padding: "12px 16px" }}>
-          <p style={{ fontSize: 13 }}>
-            <b>Reglas de negocio activas</b>
-            {audit.n_suppressed
-              ? ` · ${audit.n_suppressed} hallazgo(s) suprimido(s) por regla`
-              : ""}{" "}
-            · edítalas en la pestaña <b>Reglas</b>.
-          </p>
-        </div>
+        <NoteCard>
+          <b style={{ color: UI.text, fontWeight: 550 }}>Reglas de negocio activas</b>
+          {audit.n_suppressed
+            ? ` · ${audit.n_suppressed} hallazgo(s) suprimido(s) por regla`
+            : ""}{" "}
+          · edítalas en la pestaña Reglas.
+        </NoteCard>
       )}
 
       {enfoque && (
-        <div style={{ ...CARD, borderLeft: `3px solid ${PURPLE}` }}>
-          <H2>Enfoque para esta cuenta (IA)</H2>
-          <p style={{ fontSize: 14, lineHeight: 1.5 }}>{enfoque}</p>
+        <Card>
+          <SectionLabel>Enfoque para esta cuenta (IA)</SectionLabel>
+          <p style={{ fontSize: 13.5, lineHeight: 1.6, color: UI.text, margin: 0 }}>{enfoque}</p>
           {str_(auditAi.justificacion) && (
-            <p style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>
+            <p style={{ fontSize: 12, color: UI.muted, marginTop: 8, lineHeight: 1.5 }}>
               {str_(auditAi.justificacion)}
             </p>
           )}
-        </div>
+        </Card>
       )}
 
       {(audit.categories ?? []).map((cat, ci) => {
         const cs = cat.score ?? 0;
-        const ccol = cs >= 80 ? ACCENT : cs >= 50 ? AMBER : RED;
+        const ccol = cs >= 80 ? UI.accent : cs >= 50 ? UI.warn : UI.danger;
         const checks = [...asArr(cat.checks)].sort(
           (a, b) => (order[str_(a.status) ?? ""] ?? 3) - (order[str_(b.status) ?? ""] ?? 3)
         );
         return (
-          <details key={ci} open={cs < 80} style={{ ...CARD, padding: 16 }}>
-            <summary
-              style={{
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                listStyle: "none",
-              }}
-            >
-              <b style={{ minWidth: 170, fontSize: 14 }}>{cat.label ?? "Categoría"}</b>
-              <span
+          <Card key={ci} style={{ padding: 20 }}>
+            <details open={cs < 80}>
+              <summary
                 style={{
-                  flex: 1,
-                  maxWidth: 150,
-                  height: 7,
-                  background: "rgba(128,128,128,0.2)",
-                  borderRadius: 4,
-                  overflow: "hidden",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  listStyle: "none",
                 }}
               >
                 <span
                   style={{
-                    display: "block",
-                    height: "100%",
-                    width: `${Math.max(0, Math.min(100, cs))}%`,
-                    background: ccol,
+                    minWidth: 170,
+                    fontSize: 13.5,
+                    fontWeight: 550,
+                    color: UI.text,
                   }}
-                />
-              </span>
-              <span style={{ color: ccol, fontWeight: 700, fontSize: 13 }}>{cs}</span>
-            </summary>
-            <div style={{ marginTop: 8 }}>
-              {checks.length === 0 && (
-                <p style={{ fontSize: 13, color: MUTED }}>Sin checks en esta categoría.</p>
-              )}
-              {checks.map((c, i) => {
-                const st = str_(c.status) ?? "";
-                const [icon, icol] = statusIcon[st] ?? ["•", MUTED];
-                const suppressed = Boolean(c.suppressed);
-                return (
-                  <div
-                    key={i}
+                >
+                  {cat.label ?? "Categoría"}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    maxWidth: 150,
+                    height: 4,
+                    background: UI.border,
+                    borderRadius: 2,
+                    overflow: "hidden",
+                  }}
+                >
+                  <span
                     style={{
-                      padding: "9px 0",
-                      borderBottom: "1px solid rgba(128,128,128,0.1)",
-                      opacity: suppressed ? 0.5 : 1,
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "flex-start",
+                      display: "block",
+                      height: "100%",
+                      width: `${Math.max(0, Math.min(100, cs))}%`,
+                      background: ccol,
                     }}
-                  >
-                    <span style={{ color: icol, flex: "none", fontWeight: 700 }}>{icon}</span>
-                    <div>
-                      <p style={{ fontSize: 13, fontWeight: 600 }}>{str_(c.title) ?? "—"}</p>
-                      {str_(c.evidence) && (
-                        <p style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
-                          {str_(c.evidence)}
+                  />
+                </span>
+                <span
+                  style={{
+                    color: ccol,
+                    fontWeight: 550,
+                    fontSize: 13,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {cs}
+                </span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                {checks.length === 0 && (
+                  <p style={{ fontSize: 13, color: UI.muted, margin: 0 }}>
+                    Sin checks en esta categoría.
+                  </p>
+                )}
+                {checks.map((c, i) => {
+                  const st = str_(c.status) ?? "";
+                  const dot = statusDot[st] ?? UI.faint;
+                  const suppressed = Boolean(c.suppressed);
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: "10px 0",
+                        borderBottom: `1px solid ${UI.border}`,
+                        display: "flex",
+                        gap: 12,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <StatusDot color={suppressed ? UI.faint : dot} />
+                      <div style={{ minWidth: 0 }}>
+                        <p
+                          style={{
+                            fontSize: 13.5,
+                            fontWeight: 500,
+                            color: suppressed ? UI.faint : UI.text,
+                            margin: 0,
+                          }}
+                        >
+                          {str_(c.title) ?? "—"}
                         </p>
-                      )}
-                      {str_(c.fix) && st !== "pass" && (
-                        <p style={{ fontSize: 12, color: BLUE, marginTop: 3 }}>
-                          → {str_(c.fix)}
-                        </p>
-                      )}
-                      {suppressed && (
-                        <p style={{ fontSize: 11, marginTop: 4 }}>
-                          <Chip color={PURPLE}>
-                            regla de negocio
-                            {str_(c.suppress_reason) ? `: ${str_(c.suppress_reason)}` : ""} · no
-                            penaliza
-                          </Chip>
-                        </p>
-                      )}
+                        {str_(c.evidence) && (
+                          <p
+                            style={{
+                              fontSize: 12,
+                              color: suppressed ? UI.faint : UI.muted,
+                              margin: "3px 0 0",
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {str_(c.evidence)}
+                          </p>
+                        )}
+                        {str_(c.fix) && st !== "pass" && !suppressed && (
+                          <p style={{ fontSize: 12, color: UI.muted, margin: "4px 0 0", lineHeight: 1.5 }}>
+                            <span style={{ color: UI.faint }}>Arreglo:</span> {str_(c.fix)}
+                          </p>
+                        )}
+                        {suppressed && (
+                          <p
+                            style={{
+                              margin: "6px 0 0",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <Badge tone="muted">
+                              regla
+                              {str_(c.suppress_reason) ? `: ${str_(c.suppress_reason)}` : ""}
+                            </Badge>
+                            <span style={{ fontSize: 11, color: UI.faint }}>no penaliza</span>
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </details>
+                  );
+                })}
+              </div>
+            </details>
+          </Card>
         );
       })}
     </div>
@@ -1539,57 +1635,75 @@ function EstrategiaTab({
 
   if (empty) {
     return (
-      <Empty>
-        El plan estratégico (IA) aparecerá aquí después del próximo análisis con
-        razonamiento.
-      </Empty>
+      <Empty
+        title="El plan estratégico (IA) aparecerá aquí."
+        hint="Después del próximo análisis con razonamiento."
+      />
     );
   }
 
   return (
-    <div>
+    <div style={STACK}>
       {(bizEntries.length > 0 || competidores.length > 0) && (
-        <div style={CARD}>
-          <H2>Perfil de negocio (IA)</H2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Card>
+          <SectionLabel>Perfil de negocio (IA)</SectionLabel>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 12,
+            }}
+          >
             {bizEntries.map(([k, v]) => (
               <div
                 key={k}
                 style={{
                   padding: 12,
-                  borderRadius: 8,
-                  background: "rgba(128,128,128,0.06)",
-                  border: "1px solid rgba(128,128,128,0.12)",
+                  borderRadius: UI.radiusSm,
+                  background: UI.surface2,
+                  border: `1px solid ${UI.border}`,
                 }}
               >
-                <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: UI.muted,
+                  }}
+                >
                   {humanize(k)}
+                </div>
+                <p style={{ fontSize: 13, marginTop: 6, lineHeight: 1.5, color: UI.text }}>
+                  {v}
                 </p>
-                <p style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>{v}</p>
               </div>
             ))}
           </div>
           {competidores.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5, marginBottom: 6 }}>
-                Competidores
-              </p>
+            <div style={{ marginTop: 16 }}>
+              <SectionLabel style={{ marginBottom: 8 }}>Competidores</SectionLabel>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {competidores.map((c, i) => (
-                  <Chip key={i} color="#FF8A93">
+                  <Badge key={i} tone="muted">
                     {c}
-                  </Chip>
+                  </Badge>
                 ))}
               </div>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {(diagGeneral || stratMoves.length > 0) && (
-        <div style={{ ...CARD, borderLeft: `3px solid ${PURPLE}` }}>
-          <H2>Estrategia de cuenta (IA)</H2>
-          {diagGeneral && <p style={{ fontSize: 13, lineHeight: 1.6 }}>{diagGeneral}</p>}
+        <Card>
+          <SectionLabel>Estrategia de cuenta (IA)</SectionLabel>
+          {diagGeneral && (
+            <p style={{ fontSize: 13.5, lineHeight: 1.6, color: UI.text, margin: 0 }}>
+              {diagGeneral}
+            </p>
+          )}
           {stratMoves.map((m, i) => {
             const tipo = str_(m.tipo);
             const que = str_(m.que);
@@ -1600,47 +1714,76 @@ function EstrategiaTab({
                 key={i}
                 style={{
                   marginTop: 12,
-                  padding: 12,
-                  borderRadius: 9,
-                  background: "rgba(167,139,250,0.06)",
-                  border: "1px solid rgba(167,139,250,0.18)",
+                  padding: 16,
+                  borderRadius: UI.radiusSm,
+                  background: UI.surface2,
+                  border: `1px solid ${UI.border}`,
                 }}
               >
-                <p style={{ fontSize: 14, fontWeight: 700 }}>
-                  {tipo ? `${tipo.charAt(0).toUpperCase()}${tipo.slice(1)}: ` : ""}
-                  {que ?? "—"}{" "}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 14, fontWeight: 550, color: UI.text }}>
+                    {tipo ? `${tipo.charAt(0).toUpperCase()}${tipo.slice(1)}: ` : ""}
+                    {que ?? "—"}
+                  </span>
                   {conf != null && (
-                    <Chip color={conf >= 70 ? ACCENT : conf >= 45 ? AMBER : MUTED}>
-                      confianza {Math.round(conf)}%
-                    </Chip>
+                    <Badge tone={confTone(conf)}>confianza {Math.round(conf)}%</Badge>
                   )}
-                </p>
+                </div>
                 {str_(m.porque) && (
-                  <p style={{ fontSize: 12, color: MUTED, marginTop: 3 }}>{str_(m.porque)}</p>
+                  <p style={{ fontSize: 12, color: UI.muted, margin: "6px 0 0", lineHeight: 1.5 }}>
+                    {str_(m.porque)}
+                  </p>
                 )}
                 {str_(m.impacto) && (
-                  <p style={{ fontSize: 12, color: "#34D399", marginTop: 3 }}>
-                    → {str_(m.impacto)}
+                  <p style={{ fontSize: 12, margin: "4px 0 0", lineHeight: 1.5 }}>
+                    <span style={{ color: UI.faint }}>Impacto:</span>{" "}
+                    <span style={{ color: UI.accent }}>{str_(m.impacto)}</span>
                   </p>
                 )}
                 {pasos.length > 0 && (
-                  <details style={{ marginTop: 8 }}>
-                    <summary style={{ cursor: "pointer", fontSize: 12, color: PURPLE, fontWeight: 700 }}>
+                  <details style={{ marginTop: 10 }}>
+                    <summary
+                      style={{
+                        cursor: "pointer",
+                        fontSize: 12,
+                        color: UI.muted,
+                        fontWeight: 500,
+                      }}
+                    >
                       Ver plan API · {pasos.length} pasos (dry-run, no ejecuta)
                     </summary>
-                    <ol style={{ fontSize: 12, marginTop: 6, paddingLeft: 18, lineHeight: 1.6 }}>
+                    <ol
+                      style={{
+                        fontSize: 12,
+                        marginTop: 8,
+                        paddingLeft: 18,
+                        lineHeight: 1.7,
+                        color: UI.muted,
+                      }}
+                    >
                       {pasos.map((p, j) => (
                         <li key={j}>
                           {str_(p.descripcion) ?? "—"}
                           {str_(p.tool) && (
-                            <span style={{ color: "#34D399" }}> · {str_(p.tool)}</span>
+                            <span style={{ color: UI.faint, fontFamily: UI.fontMono }}>
+                              {" "}
+                              · {str_(p.tool)}
+                            </span>
                           )}
                         </li>
                       ))}
                     </ol>
                   </details>
                 )}
-                <div style={{ marginTop: 10 }}>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <ApproveControl
                     ctx={ctx}
                     recKey={keys[`strat-${i}`]}
@@ -1648,46 +1791,46 @@ function EstrategiaTab({
                     detail={{ tipo, que }}
                     compact
                   />
-                  <span style={{ fontSize: 11, color: MUTED, marginLeft: 8 }}>
-                    dry-run · no ejecuta
-                  </span>
+                  <span style={{ fontSize: 11, color: UI.faint }}>dry-run · no ejecuta</span>
                 </div>
               </div>
             );
           })}
-        </div>
+        </Card>
       )}
 
       {saturation.length > 0 && (
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <div style={{ padding: "16px 16px 4px" }}>
-            <H2>Techo de mercado / saturación</H2>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel style={{ marginBottom: 0 }}>
+              Techo de mercado / saturación
+            </SectionLabel>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Campaña</th>
-                <th style={{ ...TH, textAlign: "right" }}>IS</th>
-                <th style={{ ...TH, textAlign: "right" }}>Perd. budget</th>
-                <th style={TH}>Veredicto</th>
-              </tr>
-            </thead>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Campaña" },
+                { label: "IS", align: "right" },
+                { label: "Perd. budget", align: "right" },
+                { label: "Veredicto" },
+              ]}
+            />
             <tbody>
               {saturation.map((c, i) => (
-                <tr key={i}>
-                  <td style={TD}>{str_(c.name) ?? "—"}</td>
-                  <td style={{ ...TD, textAlign: "right" }}>
+                <Row key={i}>
+                  <Cell>{str_(c.name) ?? "—"}</Cell>
+                  <Cell align="right" mono>
                     {num_(c.is) != null ? `${num_(c.is)}%` : "—"}
-                  </td>
-                  <td style={{ ...TD, textAlign: "right" }}>
+                  </Cell>
+                  <Cell align="right" mono>
                     {num_(c.lost_budget) != null ? `${num_(c.lost_budget)}%` : "—"}
-                  </td>
-                  <td style={TD}>{str_(c.verdict) ?? "—"}</td>
-                </tr>
+                  </Cell>
+                  <Cell style={{ color: UI.muted }}>{str_(c.verdict) ?? "—"}</Cell>
+                </Row>
               ))}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </Card>
       )}
     </div>
   );
@@ -1713,53 +1856,50 @@ function AnalisisTab({
     trends.length === 0 && forecasts.length === 0 && measured.length === 0 && shadowBets.length === 0;
   if (empty) {
     return (
-      <Empty>
-        Las señales medidas (momentum, forecasts, el loop de medición y las
-        apuestas sombra) aparecerán aquí cuando el sistema acumule historial.
-      </Empty>
+      <Empty
+        title="Las señales medidas aparecerán aquí cuando el sistema acumule historial."
+        hint="Momentum, forecasts, el loop de medición y las apuestas sombra."
+      />
     );
   }
 
   return (
-    <div>
+    <div style={STACK}>
       {trends.length > 0 && (
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <div style={{ padding: "16px 16px 4px" }}>
-            <H2>Momentum por campaña</H2>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel style={{ marginBottom: 0 }}>Momentum por campaña</SectionLabel>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Campaña</th>
-                <th style={{ ...TH, textAlign: "right" }}>Mejora</th>
-              </tr>
-            </thead>
+          <DataTable>
+            <THead cols={[{ label: "Campaña" }, { label: "Mejora", align: "right" }]} />
             <tbody>
               {trends.slice(0, 12).map((t, i) => (
-                <tr key={i}>
-                  <td style={TD}>{str_(t.campana) ?? "—"}</td>
-                  <td style={{ ...TD, textAlign: "right" }}>{signedPct(num_(t.mejora_pct))}</td>
-                </tr>
+                <Row key={i}>
+                  <Cell>{str_(t.campana) ?? "—"}</Cell>
+                  <Cell align="right" mono>
+                    {signedPct(num_(t.mejora_pct))}
+                  </Cell>
+                </Row>
               ))}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </Card>
       )}
 
       {forecasts.length > 0 && (
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <div style={{ padding: "16px 16px 4px" }}>
-            <H2>Forecast (CPA a 7 días)</H2>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel style={{ marginBottom: 0 }}>Forecast (CPA a 7 días)</SectionLabel>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Campaña</th>
-                <th style={{ ...TH, textAlign: "right" }}>CPA actual → 7d</th>
-                <th style={TH}>Tendencia</th>
-                <th style={TH}>Pacing</th>
-              </tr>
-            </thead>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Campaña" },
+                { label: "CPA actual → 7d", align: "right" },
+                { label: "Tendencia" },
+                { label: "Pacing" },
+              ]}
+            />
             <tbody>
               {forecasts.slice(0, 10).map((f, i) => {
                 const cn = num_(f.cpa_actual);
@@ -1767,12 +1907,12 @@ function AnalisisTab({
                 const chg = num_(f.cambio_cpa_pct);
                 const tend = str_(f.tendencia);
                 const tcol =
-                  tend === "empeorando" ? RED : tend === "mejorando" ? "#34D399" : MUTED;
+                  tend === "empeorando" ? UI.danger : tend === "mejorando" ? UI.accent : UI.muted;
                 const pacing = str_(asDict(f.pacing).estado);
                 return (
-                  <tr key={i}>
-                    <td style={TD}>{str_(f.campana) ?? str_(f.campaign) ?? "—"}</td>
-                    <td style={{ ...TD, textAlign: "right", whiteSpace: "nowrap" }}>
+                  <Row key={i}>
+                    <Cell>{str_(f.campana) ?? str_(f.campaign) ?? "—"}</Cell>
+                    <Cell align="right" mono style={{ whiteSpace: "nowrap" }}>
                       {cn != null && cp != null ? (
                         <>
                           {fmtMoney(cn)} → <span style={{ color: tcol }}>{fmtMoney(cp)}</span>
@@ -1781,90 +1921,94 @@ function AnalisisTab({
                       ) : (
                         "—"
                       )}
-                    </td>
-                    <td style={{ ...TD, color: tcol }}>{tend ?? "—"}</td>
-                    <td style={TD}>{pacing ?? "—"}</td>
-                  </tr>
+                    </Cell>
+                    <Cell style={{ color: tcol }}>{tend ?? "—"}</Cell>
+                    <Cell style={{ color: UI.muted }}>{pacing ?? "—"}</Cell>
+                  </Row>
                 );
               })}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </Card>
       )}
 
       {measured.length > 0 && (
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <div style={{ padding: "16px 16px 4px" }}>
-            <H2>Medido (de-confundido) · el loop</H2>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel style={{ marginBottom: 0 }}>
+              Medido (de-confundido) · el loop
+            </SectionLabel>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Acción</th>
-                <th style={{ ...TH, textAlign: "right" }}>Efecto mediano</th>
-                <th style={{ ...TH, textAlign: "right" }}>Win rate</th>
-              </tr>
-            </thead>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Acción" },
+                { label: "Efecto mediano", align: "right" },
+                { label: "Win rate", align: "right" },
+              ]}
+            />
             <tbody>
               {measured.slice(0, 10).map((m, i) => {
                 const wr = num_(m.win_rate);
                 return (
-                  <tr key={i}>
-                    <td style={TD}>{str_(m.familia) ?? str_(m.action) ?? "—"}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>
+                  <Row key={i}>
+                    <Cell>{str_(m.familia) ?? str_(m.action) ?? "—"}</Cell>
+                    <Cell align="right" mono>
                       {signedPct(num_(m.efecto_mediano_pct))}
-                    </td>
-                    <td style={{ ...TD, textAlign: "right" }}>
+                    </Cell>
+                    <Cell align="right" mono>
                       {wr != null ? `${Math.round(wr * 100)}%` : "—"}
-                    </td>
-                  </tr>
+                    </Cell>
+                  </Row>
                 );
               })}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </Card>
       )}
 
       {shadowBets.length > 0 && (
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <div style={{ padding: "16px 16px 4px" }}>
-            <H2>Apuestas sombra (paper-trading)</H2>
-            <p style={{ fontSize: 12, color: MUTED, padding: "0 0 4px" }}>
+        <Card style={{ padding: 0 }}>
+          <div style={{ padding: "20px 24px 12px" }}>
+            <SectionLabel>Apuestas sombra (paper-trading)</SectionLabel>
+            <p style={{ fontSize: 12, color: UI.muted, margin: 0, lineHeight: 1.5 }}>
               Lo que habría pasado si se hubieran aplicado las propuestas — el
               costo de no actuar.
             </p>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={TH}>Acción</th>
-                <th style={TH}>Target</th>
-                <th style={TH}>Estado</th>
-                <th style={{ ...TH, textAlign: "right" }}>$ en juego</th>
-                <th style={{ ...TH, textAlign: "right" }}>Perdido (USD)</th>
-                <th style={{ ...TH, textAlign: "right" }}>Abierta</th>
-              </tr>
-            </thead>
+          <DataTable>
+            <THead
+              cols={[
+                { label: "Acción" },
+                { label: "Target" },
+                { label: "Estado" },
+                { label: "$ en juego", align: "right" },
+                { label: "Perdido (USD)", align: "right" },
+                { label: "Abierta", align: "right" },
+              ]}
+            />
             <tbody>
               {shadowBets.slice(0, 15).map((b, i) => (
-                <tr key={i}>
-                  <td style={TD}>{str_(b.action_family) ?? str_(b.kind) ?? "—"}</td>
-                  <td style={TD}>{str_(b.target) ?? "—"}</td>
-                  <td style={TD}>{str_(b.status) ?? "—"}</td>
-                  <td style={{ ...TD, textAlign: "right" }}>
+                <Row key={i}>
+                  <Cell>{str_(b.action_family) ?? str_(b.kind) ?? "—"}</Cell>
+                  <Cell style={{ color: UI.muted }}>{str_(b.target) ?? "—"}</Cell>
+                  <Cell>
+                    <Badge tone="muted">{str_(b.status) ?? "—"}</Badge>
+                  </Cell>
+                  <Cell align="right" mono>
                     {fmtMoney(num_(b.dollars_at_stake))}
-                  </td>
-                  <td style={{ ...TD, textAlign: "right", color: RED }}>
+                  </Cell>
+                  <Cell align="right" mono style={{ color: UI.danger }}>
                     {fmtMoney(num_(b.missed_usd))}
-                  </td>
-                  <td style={{ ...TD, textAlign: "right", whiteSpace: "nowrap", opacity: 0.6 }}>
+                  </Cell>
+                  <Cell align="right" mono style={{ color: UI.muted, whiteSpace: "nowrap" }}>
                     {fmtDate(str_(b.opened_at))}
-                  </td>
-                </tr>
+                  </Cell>
+                </Row>
               ))}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </Card>
       )}
     </div>
   );
@@ -1873,6 +2017,28 @@ function AnalisisTab({
 // ===========================================================================
 // Reglas — declara las reglas de negocio que el sistema respeta
 // ===========================================================================
+
+const INPUT: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  background: UI.surface,
+  border: `1px solid ${UI.border}`,
+  borderRadius: UI.radiusSm,
+  padding: "10px 12px",
+  fontSize: 13.5,
+  color: UI.text,
+  outline: "none",
+};
+
+const FIELD_LABEL: CSSProperties = {
+  display: "block",
+  fontSize: 12,
+  fontWeight: 500,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  color: UI.muted,
+  marginBottom: 6,
+};
 
 function ReglasTab({
   accountId,
@@ -1891,17 +2057,6 @@ function ReglasTab({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const INPUT: React.CSSProperties = {
-    width: "100%",
-    boxSizing: "border-box",
-    background: "rgba(128,128,128,0.08)",
-    border: "1px solid rgba(128,128,128,0.25)",
-    borderRadius: 8,
-    padding: "9px 11px",
-    fontSize: 14,
-    color: "inherit",
-  };
 
   async function save() {
     setSaving(true);
@@ -1934,53 +2089,41 @@ function ReglasTab({
   }
 
   return (
-    <div style={{ maxWidth: 680 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <H2>Reglas de negocio</H2>
-        {hasRules && <Chip color={PURPLE}>reglas activas</Chip>}
+    <div style={{ maxWidth: 680, display: "grid", gap: 16 }}>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 15, fontWeight: 550, color: UI.text }}>
+            Reglas de negocio
+          </span>
+          {hasRules && <Badge tone="muted">reglas activas</Badge>}
+        </div>
+        <p style={{ fontSize: 13, color: UI.muted, margin: "8px 0 0", lineHeight: 1.5 }}>
+          Lo que tú o el cliente saben y el sistema no puede adivinar. El sistema las
+          respeta en todo (auditoría, recomendaciones): lo declarado manda sobre lo
+          inferido. Vacío = se comporta como hoy.
+        </p>
       </div>
-      <p style={{ fontSize: 13, color: MUTED, marginBottom: 16 }}>
-        Lo que tú o el cliente saben y el sistema no puede adivinar. El sistema las
-        respeta en todo (auditoría, recomendaciones): lo declarado manda sobre lo
-        inferido. Vacío = se comporta como hoy.
-      </p>
 
       {saved && (
         <div
           style={{
-            padding: "10px 14px",
-            borderRadius: 8,
-            marginBottom: 14,
+            padding: "12px 16px",
+            borderRadius: UI.radiusSm,
             fontSize: 13,
-            color: "#34D399",
-            border: "1px solid rgba(16,185,129,0.4)",
-            background: "rgba(16,185,129,0.08)",
+            color: UI.accent,
+            border: "1px solid rgba(16,185,129,0.35)",
+            background: "rgba(16,185,129,0.06)",
+            lineHeight: 1.5,
           }}
         >
-          ✓ Reglas guardadas — el sistema ya las respeta.
+          Reglas guardadas — el sistema ya las respeta.
         </div>
       )}
-      {error && (
-        <div
-          style={{
-            padding: "10px 14px",
-            borderRadius: 8,
-            marginBottom: 14,
-            fontSize: 13,
-            color: "#F87171",
-            border: "1px solid rgba(248,113,113,0.3)",
-            background: "rgba(248,113,113,0.08)",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {error && <ErrorCard message={error} />}
 
-      <div style={CARD}>
-        <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
-          Objetivo del cliente
-        </label>
-        <p style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>
+      <Card>
+        <label style={FIELD_LABEL}>Objetivo del cliente</label>
+        <p style={{ fontSize: 12, color: UI.faint, margin: "0 0 8px", lineHeight: 1.5 }}>
           Hacia qué optimiza el sistema. Con Brandformance deja de tratar el gasto
           de marca como desperdicio.
         </p>
@@ -1992,11 +2135,9 @@ function ReglasTab({
           ))}
         </select>
 
-        <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 140 }}>
-            <label style={{ display: "block", fontSize: 12, color: MUTED, marginBottom: 4 }}>
-              CPA/CPL techo ($)
-            </label>
+            <label style={FIELD_LABEL}>CPA/CPL techo ($)</label>
             <input
               type="number"
               value={cpa}
@@ -2006,9 +2147,7 @@ function ReglasTab({
             />
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
-            <label style={{ display: "block", fontSize: 12, color: MUTED, marginBottom: 4 }}>
-              ROAS meta
-            </label>
+            <label style={FIELD_LABEL}>ROAS meta</label>
             <input
               type="number"
               step="0.1"
@@ -2019,9 +2158,7 @@ function ReglasTab({
             />
           </div>
           <div style={{ flex: 1, minWidth: 160 }}>
-            <label style={{ display: "block", fontSize: 12, color: MUTED, marginBottom: 4 }}>
-              Fase
-            </label>
+            <label style={FIELD_LABEL}>Fase</label>
             <select value={fase} onChange={(e) => setFase(e.target.value)} style={INPUT}>
               {FASES.map(([v, l]) => (
                 <option key={v} value={v}>
@@ -2031,32 +2168,45 @@ function ReglasTab({
             </select>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div style={CARD}>
-        <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+      <Card>
+        <label style={{ display: "flex", gap: 12, alignItems: "flex-start", cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={marca}
             onChange={(e) => setMarca(e.target.checked)}
-            style={{ marginTop: 3, accentColor: ACCENT }}
+            style={{ marginTop: 3, accentColor: UI.accent }}
           />
           <span>
-            <span style={{ display: "block", fontSize: 13, fontWeight: 700 }}>
+            <span
+              style={{
+                display: "block",
+                fontSize: 13.5,
+                fontWeight: 550,
+                color: UI.text,
+              }}
+            >
               La inversión en mi marca es intencional
             </span>
-            <span style={{ display: "block", fontSize: 12, color: MUTED }}>
+            <span
+              style={{
+                display: "block",
+                fontSize: 12,
+                color: UI.muted,
+                marginTop: 4,
+                lineHeight: 1.5,
+              }}
+            >
               Defensa de marca a propósito — el sistema NO la marca como desperdicio
               ni penaliza la «fuga de marca».
             </span>
           </span>
         </label>
-      </div>
+      </Card>
 
-      <div style={CARD}>
-        <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
-          Notas para el sistema
-        </label>
+      <Card>
+        <label style={FIELD_LABEL}>Notas para el sistema</label>
         <textarea
           rows={3}
           value={notas}
@@ -2064,31 +2214,20 @@ function ReglasTab({
           placeholder="Algo más que el sistema deba saber…"
           style={{ ...INPUT, fontFamily: "inherit", resize: "vertical" }}
         />
-      </div>
+      </Card>
 
       {(bp?.excluir_campanas?.length ?? 0) > 0 && (
-        <p style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>
+        <p style={{ fontSize: 12, color: UI.faint, margin: 0, lineHeight: 1.5 }}>
           Campañas que no se deben tocar (regla dura, se conservan al guardar):{" "}
           {bp!.excluir_campanas!.join(", ")}
         </p>
       )}
 
-      <button
-        onClick={save}
-        disabled={saving}
-        style={{
-          padding: "10px 20px",
-          borderRadius: 8,
-          fontSize: 14,
-          fontWeight: 700,
-          color: "#052e22",
-          background: saving ? "rgba(16,185,129,0.5)" : ACCENT,
-          border: "none",
-          cursor: saving ? "wait" : "pointer",
-        }}
-      >
-        {saving ? "Guardando…" : "Guardar reglas"}
-      </button>
+      <div>
+        <PrimaryButton onClick={save} disabled={saving}>
+          {saving ? "Guardando…" : "Guardar reglas"}
+        </PrimaryButton>
+      </div>
     </div>
   );
 }

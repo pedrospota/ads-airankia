@@ -3,6 +3,19 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
 import {
+  PageHeader,
+  StatCard,
+  Card,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  Badge,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
+import {
   fetchPortfolio,
   fmtMoney,
   fmtNum,
@@ -14,35 +27,12 @@ import {
 // vars at runtime, so never prerender this page at build time.
 export const dynamic = "force-dynamic";
 
-const ACCENT = "#10b981";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
-
-function healthColor(health: number | null | undefined): string {
-  if (health == null || !Number.isFinite(health)) return "rgba(128,128,128,0.6)";
-  if (health >= 80) return "#10b981";
-  if (health >= 50) return "#f59e0b";
-  return "#ef4444";
-}
-
-function KpiCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div style={CARD_STYLE}>
-      <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-        {label}
-      </p>
-      <p
-        className="text-2xl font-bold mt-2"
-        style={accent ? { color: ACCENT } : undefined}
-      >
-        {value}
-      </p>
-    </div>
-  );
+/** Salud: ≥80 ok, ≥50 warn, resto danger; sin dato → muted. */
+function healthTone(health: number | null | undefined): "ok" | "warn" | "danger" | "muted" {
+  if (health == null || !Number.isFinite(health)) return "muted";
+  if (health >= 80) return "ok";
+  if (health >= 50) return "warn";
+  return "danger";
 }
 
 export default async function PerformancePage() {
@@ -67,110 +57,94 @@ export default async function PerformancePage() {
     <div className="min-h-screen">
       <Header breadcrumbs={[{ label: "Performance" }]} />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Cockpit</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Portfolio del optimizador de Google Ads — propuestas medidas, solo-lectura
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title="Cockpit"
+          subtitle="Portfolio del optimizador de Google Ads — propuestas medidas, solo-lectura"
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar los datos del optimizador. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar los datos del optimizador. ${error}`} />
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              <KpiCard label="Ahorro detectado" value={fmtMoney(totalAhorro)} accent />
-              <KpiCard label="Oportunidad" value={fmtMoney(totalOportunidad)} />
-              <KpiCard label="Cuentas analizadas" value={fmtNum(accounts.length)} />
+            <div
+              className="grid grid-cols-1 md:grid-cols-3"
+              style={{ gap: 16, marginBottom: 32 }}
+            >
+              <StatCard label="Ahorro detectado" value={fmtMoney(totalAhorro)} />
+              <StatCard label="Oportunidad" value={fmtMoney(totalOportunidad)} />
+              <StatCard label="Cuentas analizadas" value={fmtNum(accounts.length)} />
             </div>
 
             {accounts.length === 0 ? (
-              <div className="text-center py-16" style={{ opacity: 0.4 }}>
-                <p className="text-lg">Todavía no hay cuentas analizadas.</p>
-                <p className="text-sm mt-2">
-                  Los resultados aparecerán aquí después del próximo análisis.
-                </p>
-              </div>
+              <EmptyState
+                title="Todavía no hay cuentas analizadas."
+                hint="Los resultados aparecerán aquí después del próximo análisis."
+              />
             ) : (
-              <div style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-                <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr
-                      className="text-xs uppercase tracking-wide"
-                      style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                    >
-                      <th className="text-left font-medium px-4 py-3">Cuenta</th>
-                      <th className="text-right font-medium px-4 py-3">Inversión 30d</th>
-                      <th className="text-right font-medium px-4 py-3">Ahorro</th>
-                      <th className="text-right font-medium px-4 py-3">Oportunidad</th>
-                      <th className="text-right font-medium px-4 py-3">Propuestas</th>
-                      <th className="text-right font-medium px-4 py-3">Salud</th>
-                      <th className="text-left font-medium px-4 py-3">Top</th>
-                      <th className="text-right font-medium px-4 py-3">Analizada</th>
-                    </tr>
-                  </thead>
+              <Card style={{ padding: 0 }}>
+                <DataTable>
+                  <THead
+                    cols={[
+                      { label: "Cuenta" },
+                      { label: "Inversión 30d", align: "right" },
+                      { label: "Ahorro", align: "right" },
+                      { label: "Oportunidad", align: "right" },
+                      { label: "Propuestas", align: "right" },
+                      { label: "Salud", align: "right" },
+                      { label: "Top" },
+                      { label: "Analizada", align: "right" },
+                    ]}
+                  />
                   <tbody>
                     {accounts.map((a) => (
-                      <tr
-                        key={a.account_id}
-                        style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}
-                      >
-                        <td className="px-4 py-3">
+                      <Row key={a.account_id}>
+                        <Cell>
                           <Link
                             href={`/performance/${encodeURIComponent(a.account_id)}`}
-                            className="font-medium hover:underline"
-                            style={{ color: ACCENT }}
+                            className="hover:underline"
+                            style={{
+                              color: UI.text,
+                              fontWeight: 500,
+                              textDecoration: "none",
+                            }}
                           >
                             {a.name || a.account_id}
                           </Link>
-                        </td>
-                        <td className="text-right px-4 py-3">{fmtMoney(a.spend_30d)}</td>
-                        <td className="text-right px-4 py-3" style={{ color: ACCENT }}>
+                        </Cell>
+                        <Cell align="right" mono>{fmtMoney(a.spend_30d)}</Cell>
+                        <Cell align="right" mono style={{ color: UI.accent }}>
                           {fmtMoney(a.ahorro)}
-                        </td>
-                        <td className="text-right px-4 py-3">{fmtMoney(a.oportunidad)}</td>
-                        <td className="text-right px-4 py-3">{fmtNum(a.n_props)}</td>
-                        <td className="text-right px-4 py-3">
-                          <span
-                            className="font-semibold"
-                            style={{ color: healthColor(a.health) }}
-                          >
+                        </Cell>
+                        <Cell align="right" mono>{fmtMoney(a.oportunidad)}</Cell>
+                        <Cell align="right" mono>{fmtNum(a.n_props)}</Cell>
+                        <Cell align="right">
+                          <Badge tone={healthTone(a.health)}>
                             {a.health != null && Number.isFinite(a.health)
                               ? Math.round(a.health)
                               : "—"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3" style={{ maxWidth: 260 }}>
+                          </Badge>
+                        </Cell>
+                        <Cell style={{ maxWidth: 260 }}>
                           <span
                             className="block truncate"
-                            style={{ opacity: 0.6 }}
+                            style={{ color: UI.muted }}
                             title={a.top ?? undefined}
                           >
                             {a.top || "—"}
                           </span>
-                        </td>
-                        <td
-                          className="text-right px-4 py-3 whitespace-nowrap"
-                          style={{ opacity: 0.5 }}
+                        </Cell>
+                        <Cell
+                          align="right"
+                          style={{ color: UI.faint, whiteSpace: "nowrap" }}
                         >
                           {fmtWhen(a.analyzed_at)}
-                        </td>
-                      </tr>
+                        </Cell>
+                      </Row>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                </DataTable>
+              </Card>
             )}
           </>
         )}

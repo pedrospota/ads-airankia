@@ -3,17 +3,22 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
 import { fetchOptimizers, fmtNum } from "@/lib/sentinel";
+import {
+  PageHeader,
+  Card,
+  StatCard,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  Badge,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
 
 // Per-request data (cache: "no-store") + runtime env vars — never prerender.
 export const dynamic = "force-dynamic";
-
-const ACCENT = "#10b981";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
 
 // The engine only accepts these windows (anything else falls back to 14).
 const DAY_OPTIONS = [7, 14, 30] as const;
@@ -26,40 +31,26 @@ interface OptimizerRow {
   types?: Record<string, number>;
 }
 
-function KpiCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div style={CARD_STYLE}>
-      <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-        {label}
-      </p>
-      <p className="text-2xl font-bold mt-2" style={accent ? { color: ACCENT } : undefined}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
 function DaysSwitcher({ days }: { days: number }) {
   return (
-    <div className="flex items-center gap-2">
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
       {DAY_OPTIONS.map((d) => {
         const active = d === days;
         return (
           <Link
             key={d}
             href={`/security/equipo?days=${d}`}
-            className="text-xs font-medium whitespace-nowrap"
             aria-current={active ? "page" : undefined}
             style={{
               padding: "5px 12px",
               borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 500,
+              whiteSpace: "nowrap",
               textDecoration: "none",
-              color: active ? ACCENT : undefined,
-              opacity: active ? 1 : 0.6,
-              background: active ? "rgba(16,185,129,0.12)" : "transparent",
-              border: active
-                ? "1px solid rgba(16,185,129,0.3)"
-                : "1px solid rgba(128,128,128,0.25)",
+              color: active ? UI.text : UI.muted,
+              background: active ? UI.surface2 : "transparent",
+              border: `1px solid ${active ? UI.border : "transparent"}`,
             }}
           >
             {d} días
@@ -70,24 +61,16 @@ function DaysSwitcher({ days }: { days: number }) {
   );
 }
 
-/** "campaign×3, ad_group_criterion×12" as small chips, biggest first. */
+/** "campaign×3, ad_group_criterion×12" as quiet pills, biggest first. */
 function TypeChips({ types }: { types: Record<string, number> | null | undefined }) {
   const entries = Object.entries(types ?? {}).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
-  if (entries.length === 0) return <span style={{ opacity: 0.4 }}>—</span>;
+  if (entries.length === 0) return <span style={{ color: UI.faint }}>—</span>;
   return (
-    <span className="flex flex-wrap gap-1">
+    <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
       {entries.map(([type, count]) => (
-        <span
-          key={type}
-          className="text-xs px-2 py-0.5 rounded-full whitespace-nowrap"
-          style={{
-            border: "1px solid rgba(128,128,128,0.3)",
-            background: "rgba(128,128,128,0.08)",
-            opacity: 0.8,
-          }}
-        >
+        <Badge key={type} tone="muted">
           {type}×{fmtNum(count)}
-        </span>
+        </Badge>
       ))}
     </span>
   );
@@ -122,92 +105,73 @@ export default async function SecurityTeamPage({
   const nCambios = sorted.reduce((s, r) => s + (r.n_changes ?? 0), 0);
 
   return (
-    <div className="min-h-screen">
+    <div>
       <Header
         breadcrumbs={[{ label: "Seguridad", href: "/security" }, { label: "Equipo" }]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8 flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-3xl font-bold">Equipo — actividad de optimizadores</h1>
-            <p className="mt-2" style={{ opacity: 0.4 }}>
-              Cambios atribuidos por persona en Google Ads — {days} días
-            </p>
-          </div>
-          <DaysSwitcher days={days} />
-        </div>
+      <main style={{ marginTop: 24 }}>
+        <PageHeader
+          title="Equipo"
+          subtitle={`Cambios atribuidos por persona en Google Ads — últimos ${days} días.`}
+          actions={<DaysSwitcher days={days} />}
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar la actividad del equipo. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar la actividad del equipo. ${error}`} />
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              <KpiCard label="Personas activas" value={fmtNum(nPersonas)} accent />
-              <KpiCard label="Cuentas tocadas" value={fmtNum(nCuentas)} />
-              <KpiCard label="Cambios totales" value={fmtNum(nCambios)} />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: 16,
+                marginBottom: 32,
+              }}
+            >
+              <StatCard label="Personas activas" value={fmtNum(nPersonas)} />
+              <StatCard label="Cuentas tocadas" value={fmtNum(nCuentas)} />
+              <StatCard label="Cambios totales" value={fmtNum(nCambios)} />
             </div>
 
             {sorted.length === 0 ? (
-              <div className="text-center py-16" style={{ opacity: 0.4 }}>
-                <p className="text-lg">
-                  Sin cambios atribuidos en los últimos {days} días.
-                </p>
-                <p className="text-sm mt-2">
-                  La actividad del equipo aparecerá aquí cuando el colector detecte
-                  cambios en Google Ads.
-                </p>
-              </div>
+              <Card style={{ padding: 0 }}>
+                <EmptyState
+                  title={`Sin cambios atribuidos en los últimos ${days} días`}
+                  hint="La actividad del equipo aparecerá aquí cuando el colector detecte cambios en Google Ads."
+                />
+              </Card>
             ) : (
-              <div style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-                <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr
-                      className="text-xs uppercase tracking-wide"
-                      style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                    >
-                      <th className="text-left font-medium px-4 py-3">Persona</th>
-                      <th className="text-left font-medium px-4 py-3">Cuenta</th>
-                      <th className="text-right font-medium px-4 py-3">Cambios</th>
-                      <th className="text-left font-medium px-4 py-3">Desglose</th>
-                    </tr>
-                  </thead>
+              <Card style={{ padding: 0 }}>
+                <DataTable>
+                  <THead
+                    cols={[
+                      { label: "Persona" },
+                      { label: "Cuenta" },
+                      { label: "Cambios", align: "right", width: 110 },
+                      { label: "Desglose" },
+                    ]}
+                  />
                   <tbody>
                     {sorted.map((r, i) => (
-                      <tr
-                        key={`${r.person ?? "?"}-${r.account_id ?? i}`}
-                        style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}
-                      >
-                        <td className="px-4 py-3 font-medium">
+                      <Row key={`${r.person ?? "?"}-${r.account_id ?? i}`}>
+                        <Cell style={{ fontWeight: 500, whiteSpace: "nowrap" }}>
                           {r.person || "(desconocido)"}
-                        </td>
-                        <td className="px-4 py-3" style={{ opacity: 0.8 }}>
+                        </Cell>
+                        <Cell style={{ color: UI.muted }}>
                           {r.account_name || r.account_id || "—"}
-                        </td>
-                        <td
-                          className="text-right px-4 py-3 font-semibold"
-                          style={{ color: ACCENT }}
-                        >
+                        </Cell>
+                        <Cell align="right" mono>
                           {fmtNum(r.n_changes)}
-                        </td>
-                        <td className="px-4 py-3">
+                        </Cell>
+                        <Cell>
                           <TypeChips types={r.types} />
-                        </td>
-                      </tr>
+                        </Cell>
+                      </Row>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                </DataTable>
+              </Card>
             )}
           </>
         )}

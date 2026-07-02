@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useTheme } from "@/components/theme-provider";
-import { useMode } from "@/components/mode-provider";
 
 interface Brand {
   id: string;
@@ -14,31 +13,13 @@ interface Brand {
 
 export function BrandsGrid({ brands }: { brands: Brand[] }) {
   const { colors } = useTheme();
-  const { mode } = useMode();
 
-  // Mode-aware destination: Clásico → existing citations view;
-  // Nuevo → the campaigns dashboard (the place to return to), from which the
-  // user can review existing Search campaigns or start a new one.
-  const hrefFor = (id: string) =>
-    mode === "nuevo"
-      ? `/brands/${id}/campaigns`
-      : `/brands/${id}/citations`;
+  // Every brand leads to its campaigns dashboard, from which the user can
+  // review existing Search campaigns or start a new one.
+  const hrefFor = (id: string) => `/brands/${id}/campaigns`;
 
   return (
     <>
-      {mode === "nuevo" && (
-        <div
-          className="mb-4 px-4 py-3 rounded-xl text-sm"
-          style={{
-            background: "rgba(16,185,129,0.08)",
-            border: "1px solid rgba(16,185,129,0.25)",
-            color: colors.text,
-          }}
-        >
-          <span style={{ fontWeight: 600, color: colors.accent }}>Guided mode — create a campaign step by step</span>
-          {" — pick a brand to start creating your ad campaign."}
-        </div>
-      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {brands.map((brand) => (
         <Link

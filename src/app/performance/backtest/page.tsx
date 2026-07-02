@@ -1,18 +1,22 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
+import {
+  PageHeader,
+  StatCard,
+  Card,
+  DataTable,
+  THead,
+  Row,
+  Cell,
+  EmptyState,
+  ErrorCard,
+  UI,
+} from "@/components/ui-kit";
 import { fetchBacktest, fmtMoney, fmtNum } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
 export const dynamic = "force-dynamic";
-
-const ACCENT = "#10b981";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 20,
-};
 
 // El engine devuelve el rollup de compute_backtest():
 // { n_recs, n_accounts, dollars, proj_point, proj_low, proj_high, ahorro,
@@ -52,34 +56,6 @@ function parseFamilies(v: unknown): FamilyRow[] {
     }));
 }
 
-function KpiCard({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: boolean;
-}) {
-  return (
-    <div style={CARD_STYLE}>
-      <p className="text-xs uppercase tracking-wide" style={{ opacity: 0.5 }}>
-        {label}
-      </p>
-      <p className="text-2xl font-bold mt-2" style={accent ? { color: ACCENT } : undefined}>
-        {value}
-      </p>
-      {sub && (
-        <p className="text-xs mt-1" style={{ opacity: 0.4 }}>
-          {sub}
-        </p>
-      )}
-    </div>
-  );
-}
-
 export default async function BacktestPage() {
   const authClient = await createSupabaseServerClient();
   const { data: { user } } = await authClient.auth.getUser();
@@ -115,31 +91,22 @@ export default async function BacktestPage() {
         ]}
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Backtest</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Si hubieras seguido las recomendaciones: efecto medido vs proyección, por familia
-          </p>
-        </div>
+      <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
+        <PageHeader
+          title="Backtest"
+          subtitle="Si hubieras seguido las recomendaciones: efecto medido vs proyección, por familia"
+        />
 
         {error ? (
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 8,
-              background: "rgba(248,113,113,0.1)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: "#F87171",
-            }}
-          >
-            No pudimos cargar el backtest. {error}
-          </div>
+          <ErrorCard message={`No pudimos cargar el backtest. ${error}`} />
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-              <KpiCard label="$ en juego" value={fmtMoney(dollars)} accent />
-              <KpiCard
+            <div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4"
+              style={{ gap: 16, marginBottom: 32 }}
+            >
+              <StatCard label="$ en juego" value={fmtMoney(dollars)} />
+              <StatCard
                 label="Proyección"
                 value={fmtMoney(projPoint)}
                 sub={
@@ -148,11 +115,11 @@ export default async function BacktestPage() {
                     : undefined
                 }
               />
-              <KpiCard
+              <StatCard
                 label="Ahorro / Crecimiento"
                 value={`${fmtMoney(ahorro)} / ${fmtMoney(growth)}`}
               />
-              <KpiCard
+              <StatCard
                 label="Recomendaciones"
                 value={fmtNum(nRecs)}
                 sub={`${fmtNum(nAccounts)} cuentas · ${fmtNum(backed)} con evidencia · ${fmtNum(episodes)} episodios`}
@@ -160,63 +127,57 @@ export default async function BacktestPage() {
             </div>
 
             {families.length === 0 ? (
-              <div className="text-center py-16" style={{ opacity: 0.4 }}>
-                <p className="text-lg">Todavía no hay datos de backtest.</p>
-                <p className="text-sm mt-2">
-                  Cuando existan recomendaciones con histórico, verás aquí el efecto medido
-                  por familia de acción.
-                </p>
-              </div>
+              <EmptyState
+                title="Todavía no hay datos de backtest."
+                hint="Cuando existan recomendaciones con histórico, verás aquí el efecto medido por familia de acción."
+              />
             ) : (
-              <div style={{ ...CARD_STYLE, padding: 0, overflowX: "auto" }}>
-                <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr
-                      className="text-xs uppercase tracking-wide"
-                      style={{ opacity: 0.5, borderBottom: "1px solid rgba(128,128,128,0.2)" }}
-                    >
-                      <th className="text-left font-medium px-4 py-3">Familia</th>
-                      <th className="text-right font-medium px-4 py-3">Recs</th>
-                      <th className="text-right font-medium px-4 py-3">$ en juego</th>
-                      <th className="text-right font-medium px-4 py-3">Proyección $</th>
-                      <th className="text-right font-medium px-4 py-3">Efecto medido</th>
-                      <th className="text-right font-medium px-4 py-3">Episodios</th>
-                      <th className="text-right font-medium px-4 py-3">Confianza</th>
-                    </tr>
-                  </thead>
+              <Card style={{ padding: 0 }}>
+                <DataTable>
+                  <THead
+                    cols={[
+                      { label: "Familia" },
+                      { label: "Recs", align: "right" },
+                      { label: "$ en juego", align: "right" },
+                      { label: "Proyección $", align: "right" },
+                      { label: "Efecto medido", align: "right" },
+                      { label: "Episodios", align: "right" },
+                      { label: "Confianza", align: "right" },
+                    ]}
+                  />
                   <tbody>
                     {families.map((f) => (
-                      <tr key={f.family} style={{ borderBottom: "1px solid rgba(128,128,128,0.12)" }}>
-                        <td className="px-4 py-3 font-medium">{f.family}</td>
-                        <td className="text-right px-4 py-3">{fmtNum(f.n)}</td>
-                        <td className="text-right px-4 py-3">{fmtMoney(f.dollars)}</td>
-                        <td className="text-right px-4 py-3" style={{ color: ACCENT }}>
-                          {fmtMoney(f.proj)}
-                        </td>
-                        <td className="text-right px-4 py-3">
+                      <Row key={f.family}>
+                        <Cell style={{ fontWeight: 500 }}>{f.family}</Cell>
+                        <Cell align="right" mono>{fmtNum(f.n)}</Cell>
+                        <Cell align="right" mono>{fmtMoney(f.dollars)}</Cell>
+                        <Cell align="right" mono>{fmtMoney(f.proj)}</Cell>
+                        <Cell align="right" mono>
                           {f.eff_med != null ? (
                             <span
-                              className="font-medium"
-                              style={{ color: f.eff_med >= 0 ? ACCENT : "#ef4444" }}
+                              style={{
+                                fontWeight: 500,
+                                color: f.eff_med >= 0 ? UI.accent : UI.danger,
+                              }}
                             >
                               {f.eff_med > 0 ? "+" : ""}
                               {f.eff_med.toFixed(1)}%
                             </span>
                           ) : (
-                            <span style={{ opacity: 0.4 }}>sin histórico</span>
+                            <span style={{ color: UI.faint }}>sin histórico</span>
                           )}
-                        </td>
-                        <td className="text-right px-4 py-3" style={{ opacity: 0.7 }}>
+                        </Cell>
+                        <Cell align="right" mono style={{ color: UI.muted }}>
                           {fmtNum(f.episodes)}
-                        </td>
-                        <td className="text-right px-4 py-3" style={{ opacity: 0.7 }}>
+                        </Cell>
+                        <Cell align="right" mono style={{ color: UI.muted }}>
                           {f.conf != null ? `${Math.round(f.conf * 100)}%` : "—"}
-                        </td>
-                      </tr>
+                        </Cell>
+                      </Row>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                </DataTable>
+              </Card>
             )}
           </>
         )}

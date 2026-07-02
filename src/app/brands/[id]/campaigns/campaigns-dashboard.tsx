@@ -119,8 +119,8 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
     },
     {
       href: `/brands/${brandId}/campaigns/new/display`,
-      title: "Display campaign (image ads)",
-      desc: "We create banners with your brand and images so you show up on websites, blogs, and apps your audience visits.",
+      title: "Display — retargeting de citas (banners IA)",
+      desc: "Detectamos dónde te citan las IAs y creamos banners con tu marca para aparecer exactamente en esos sitios, blogs y apps.",
       recommended: false,
     },
   ];
@@ -289,6 +289,20 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
         ]}
         action={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* The citation-intelligence feature keeps its own front door: see WHERE
+                the AIs cite you (feeds the Display retargeting + AI banners flow). */}
+            <SecondaryButton
+              href={`/brands/${brandId}/citations`}
+              style={secondaryStyle}
+            >
+              Citas de IA
+            </SecondaryButton>
+            <SecondaryButton
+              href={`/brands/${brandId}/benchmark`}
+              style={secondaryStyle}
+            >
+              Benchmark
+            </SecondaryButton>
             {selectable.length > 0 &&
               (selectMode ? (
                 <SecondaryButton

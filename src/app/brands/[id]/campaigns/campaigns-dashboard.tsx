@@ -109,6 +109,27 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
   const router = useRouter();
   const newHref = `/brands/${brandId}/campaigns/new/search`;
 
+  // The two ways to create a campaign, shown as prominent cards at the top of
+  // the hub. Search is the flagship (most autonomous) so it goes first.
+  const createOptions = [
+    {
+      href: newHref,
+      emoji: "🔎",
+      title: "Search campaign",
+      desc: "Your ad shows up when someone searches Google for what you offer. The AI builds it; you just review and turn it on.",
+      cta: "Create with AI",
+      recommended: true,
+    },
+    {
+      href: `/brands/${brandId}/campaigns/new/display`,
+      emoji: "🖼️",
+      title: "Display campaign (image ads)",
+      desc: "We create banners with your brand and images so you show up on websites, blogs, and apps your audience visits.",
+      cta: "Create banners",
+      recommended: false,
+    },
+  ];
+
   // Which campaign (by run id) is currently being discarded.
   const [discardingId, setDiscardingId] = useState<string | null>(null);
 
@@ -333,10 +354,77 @@ export function CampaignsDashboard({ brandId, brandName, items }: DashboardProps
       />
 
       <main className="max-w-3xl mx-auto px-6 py-8">
-        <div style={{ marginBottom: 20 }}>
+        {/* Create-a-campaign hub: the two creators (Search and Display) as
+            clear siblings. This replaces the old /campaigns/new/choose
+            pre-screen — same two options, now always visible. */}
+        <section style={{ marginBottom: 32 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-            Your Search campaigns
+            Create a campaign
           </h1>
+          <p style={{ fontSize: 14, color: colors.textMuted, marginBottom: 16 }}>
+            Choose how you want to advertise <strong>{brandName}</strong>.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {createOptions.map((o) => (
+              <Link
+                key={o.href}
+                href={o.href}
+                style={{
+                  display: "block",
+                  position: "relative",
+                  textDecoration: "none",
+                  background: colors.bgCard,
+                  border: `1px solid ${o.recommended ? colors.accent : colors.border}`,
+                  borderRadius: 16,
+                  padding: "20px 22px",
+                }}
+              >
+                {o.recommended && (
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 14,
+                      right: 14,
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: "0.04em",
+                      color: "#000",
+                      background: colors.accent,
+                      borderRadius: 999,
+                      padding: "3px 9px",
+                    }}
+                  >
+                    RECOMMENDED
+                  </span>
+                )}
+                <div style={{ fontSize: 28, lineHeight: 1, marginBottom: 10 }} aria-hidden="true">
+                  {o.emoji}
+                </div>
+                <h2 style={{ fontSize: 16.5, fontWeight: 700, color: colors.text }}>
+                  {o.title}
+                </h2>
+                <p style={{ fontSize: 13, color: colors.textMuted, marginTop: 6, lineHeight: 1.5 }}>
+                  {o.desc}
+                </p>
+                <p
+                  style={{
+                    fontSize: 12.5,
+                    color: o.recommended ? colors.accent : colors.textFaint,
+                    marginTop: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  {o.cta} →
+                </p>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <div style={{ marginBottom: 20 }}>
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+            Your Search campaigns
+          </h2>
           <p style={{ fontSize: 14, color: colors.textMuted }}>
             Here you can see all your campaigns and where each one stands. You
             can come back anytime to review them, turn them on, or pick up one

@@ -1,86 +1,112 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
-import { Header } from "@/components/header";
+import { createSupabaseReadClient } from "@/lib/supabase-server";
+import {
+  ConexionesClient,
+  type ConnectionRow,
+  type BrandOption,
+} from "./conexiones-client";
 
 // Auth is cookie-based per-request, so never prerender this page.
 export const dynamic = "force-dynamic";
 
-const ACCENT = "#10b981";
-const CARD_STYLE: React.CSSProperties = {
-  background: "rgba(128,128,128,0.06)",
-  border: "1px solid rgba(128,128,128,0.2)",
-  borderRadius: 12,
-  padding: 24,
-};
-
-export default async function ConexionesPage() {
+export default async function ConexionesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const authClient = await createSupabaseServerClient();
-  const { data: { user } } = await authClient.auth.getUser();
+  const {
+    data: { user },
+  } = await authClient.auth.getUser();
   if (!user) redirect("/login");
 
+  const {
+    data: { session },
+  } = await authClient.auth.getSession();
+  const accessToken = session?.access_token;
+  const db = createSupabaseReadClient(accessToken);
+
+  const params = await searchParams;
+  const connected = params.connected === "1";
+  const warn = typeof params.warn === "string" ? params.warn : null;
+  const errorParam = typeof params.error === "string" ? params.error : null;
+
+  let connections: ConnectionRow[] = [];
+  let brands: BrandOption[] = [];
+  let loadError: string | null = null;
+
+  try {
+    // Workspaces of the user (RLS also scopes everything below, this is just
+    // to scope the brand list explicitly).
+    const { data: memberships, error: wsError } = await db
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", user.id);
+    if (wsError) throw wsError;
+    const workspaceIds = (memberships ?? []).map((m) => m.workspace_id);
+
+    if (workspaceIds.length > 0) {
+      const [connRes, brandRes] = await Promise.all([
+        db
+          .from("ads_google_connections")
+          .select(
+            "id, google_email, status, is_engine_source, created_at, ads_connection_accounts(id, customer_id, descriptive_name, currency, time_zone, is_manager, enabled, brand_id)"
+          )
+          .in("workspace_id", workspaceIds)
+          .order("created_at", { ascending: false }),
+        db
+          .from("brand_project")
+          .select("id, name")
+          .in("workspace_id", workspaceIds)
+          .order("name"),
+      ]);
+
+      if (connRes.error) throw connRes.error;
+      if (brandRes.error) throw brandRes.error;
+
+      connections = (connRes.data ?? []).map((c) => ({
+        id: c.id,
+        google_email: c.google_email ?? null,
+        status: c.status ?? null,
+        is_engine_source: c.is_engine_source ?? null,
+        created_at: c.created_at ?? null,
+        accounts: (c.ads_connection_accounts ?? [])
+          .map((a) => ({
+            id: a.id,
+            customer_id: a.customer_id ?? null,
+            descriptive_name: a.descriptive_name ?? null,
+            currency: a.currency ?? null,
+            time_zone: a.time_zone ?? null,
+            is_manager: a.is_manager ?? null,
+            enabled: a.enabled ?? null,
+            brand_id: a.brand_id ?? null,
+          }))
+          .sort((a, b) => (a.customer_id ?? "").localeCompare(b.customer_id ?? "")),
+      }));
+      brands = (brandRes.data ?? []).map((b) => ({
+        id: b.id,
+        name: b.name ?? null,
+      }));
+    } else {
+      loadError =
+        "No encontramos ningún workspace en tu cuenta. Crea uno primero en AI Rankia.";
+    }
+  } catch (e) {
+    loadError =
+      e instanceof Error
+        ? e.message
+        : "No se pudieron cargar tus conexiones. Recarga la página.";
+  }
+
   return (
-    <div className="min-h-screen">
-      <Header breadcrumbs={[{ label: "Conexiones" }]} />
-
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Conexiones</h1>
-          <p className="mt-2" style={{ opacity: 0.4 }}>
-            Conecta tus cuentas de Google Ads y asígnalas a tus marcas
-          </p>
-        </div>
-
-        <div style={{ ...CARD_STYLE, maxWidth: 640 }}>
-          <div className="flex items-center gap-3 mb-4">
-            <h2 className="text-lg font-semibold">Google Ads</h2>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                padding: "2px 8px",
-                borderRadius: 999,
-                background: "rgba(16,185,129,0.12)",
-                color: ACCENT,
-                border: "1px solid rgba(16,185,129,0.3)",
-                letterSpacing: "0.03em",
-              }}
-            >
-              Próximamente — F3
-            </span>
-          </div>
-
-          <p className="text-sm mb-3" style={{ opacity: 0.6, lineHeight: 1.6 }}>
-            Aquí podrás conectar tus cuentas de Google Ads una por una y
-            asignar cada cuenta a la marca que le corresponda. Una vez
-            conectadas, el optimizador las analizará automáticamente y sus
-            datos alimentarán las secciones de Performance y Seguridad.
-          </p>
-          <p className="text-sm mb-6" style={{ opacity: 0.6, lineHeight: 1.6 }}>
-            Esta funcionalidad todavía no está disponible: llegará en la fase
-            F3 de la plataforma.
-          </p>
-
-          <button
-            type="button"
-            disabled
-            aria-disabled="true"
-            title="Disponible próximamente (F3)"
-            style={{
-              padding: "10px 18px",
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              background: "rgba(16,185,129,0.15)",
-              color: ACCENT,
-              border: "1px solid rgba(16,185,129,0.3)",
-              opacity: 0.5,
-              cursor: "not-allowed",
-            }}
-          >
-            Conectar Google Ads
-          </button>
-        </div>
-      </main>
-    </div>
+    <ConexionesClient
+      connections={connections}
+      brands={brands}
+      connected={connected}
+      warn={warn}
+      errorParam={errorParam}
+      loadError={loadError}
+    />
   );
 }

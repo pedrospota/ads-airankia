@@ -290,3 +290,65 @@ export function postRevert(id: string, rec_key: string): Promise<{ ok?: boolean 
 export function postRules(id: string, rules: Record<string, unknown>): Promise<{ ok?: boolean }> {
   return sentinelPost(`/api/v1/accounts/${encodeURIComponent(id)}/rules`, rules);
 }
+
+// ---------------------------------------------------------------------------
+// Remaining native views: triage (Auditoría MCC), datalake, diagnostics,
+// config (Ajustes). Permissive types — every field may be null/absent.
+// ---------------------------------------------------------------------------
+
+export interface TriageRow {
+  account_id?: string;
+  name?: string | null;
+  grade?: string | null;
+  score?: number | null;
+  n_fail?: number | null;
+  n_warn?: number | null;
+  n_suppressed?: number | null;
+  worst?: Array<{ label?: string | null; score?: number | null }> | null;
+}
+
+export function fetchTriage(): Promise<{ rows?: TriageRow[] | null }> {
+  return sentinelFetch("/api/v1/triage");
+}
+
+export interface DatalakeRow {
+  episode_id?: string | null;
+  account_id?: string | null;
+  client_name?: string | null;
+  campaign_name?: string | null;
+  entity_level?: string | null;
+  action_type?: string | null;
+}
+
+export function fetchDatalake(limit = 100): Promise<{ total?: number | null; rows?: DatalakeRow[] | null }> {
+  return sentinelFetch(`/api/v1/datalake?limit=${encodeURIComponent(limit)}`);
+}
+
+export interface DiagnosticRow {
+  account_id?: string;
+  name?: string | null;
+  computed_at?: string | null;
+  search_cost_30d?: number | null;
+  n_saturation?: number | null;
+}
+
+export function fetchDiagnostics(): Promise<{ rows?: DiagnosticRow[] | null }> {
+  return sentinelFetch("/api/v1/diagnostics");
+}
+
+export interface EngineConfig {
+  alerts_enabled?: boolean | null;
+  telegram_configured?: boolean | null;
+  chat_configured?: boolean | null;
+  llm_model?: string | null;
+  vision_model?: string | null;
+  digest_hour_utc?: number | null;
+  scan_interval_minutes?: number | null;
+  token_connected?: boolean | null;
+  token_email?: string | null;
+  mcc?: string | null;
+}
+
+export function fetchConfig(): Promise<EngineConfig> {
+  return sentinelFetch("/api/v1/config");
+}

@@ -6,14 +6,6 @@ import { useTheme } from "./theme-provider";
 import { ModeSwitch } from "./mode-switch";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 
-const PLATFORM_NAV = [
-  { href: "/brands", label: "Marcas" },
-  { href: "/performance", label: "Performance" },
-  { href: "/security", label: "Seguridad" },
-  { href: "/spy", label: "Spy" },
-  { href: "/conexiones", label: "Conexiones" },
-];
-
 export function Header({
   breadcrumbs,
   action,
@@ -58,17 +50,8 @@ export function Header({
               ADS
             </span>
           </Link>
-          {/* Platform nav — all native Next.js pages, so we use <Link> for
-              normal client-side routing. */}
-          <nav className="flex items-center gap-1" style={{ marginLeft: 6 }}>
-            {PLATFORM_NAV.map((item) => (
-              <Link key={item.href} href={item.href}
-                 style={{ color: colors.textMuted, fontSize: 13, fontWeight: 500,
-                          padding: '4px 8px', borderRadius: 6, textDecoration: 'none' }}>
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          {/* Platform nav removed — the global left sidebar (AppSidebar) owns
+              cross-section navigation now. */}
           {breadcrumbs?.map((crumb, i) => (
             <span key={i} className="flex items-center gap-3">
               <span style={{ color: colors.border }}>/</span>

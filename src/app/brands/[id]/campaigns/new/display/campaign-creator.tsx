@@ -236,7 +236,7 @@ export function CampaignCreator({ brand, citations }: { brand: Brand; citations:
 
   return (
     <div className="min-h-screen">
-      <Header breadcrumbs={[{ label: "Brands", href: "/brands" }, { label: brand.name, href: `/brands/${brand.id}/citations` }, { label: "New campaign" }]} />
+      <Header breadcrumbs={[{ label: "Brands", href: "/brands" }, { label: brand.name, href: `/brands/${brand.id}/citations` }, { label: "Campaigns", href: `/brands/${brand.id}/campaigns` }, { label: "New display campaign" }]} />
 
       {/* Step bar */}
       <div style={{ borderBottom: `1px solid ${colors.border}`, padding: '12px 24px', background: colors.bgCard }}>

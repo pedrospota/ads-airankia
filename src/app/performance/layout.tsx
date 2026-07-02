@@ -1,14 +1,16 @@
+import { AppShell } from "@/components/app-shell";
 import { SectionNav } from "@/components/section-nav";
 
-// Thin section layout: just the sub-nav bar + children. It also wraps the
-// account detail pages (/performance/[id]) — pages render their own <Header>.
+// Section layout: global sidebar (AppShell) + sub-nav bar + children. It also
+// wraps the account detail pages (/performance/[id]) — pages render their own
+// <Header>.
 export default function PerformanceLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <AppShell>
       <SectionNav
         items={[
           { href: "/performance", label: "Cockpit" },
@@ -20,6 +22,6 @@ export default function PerformanceLayout({
         ]}
       />
       {children}
-    </>
+    </AppShell>
   );
 }

@@ -161,7 +161,7 @@ export default async function PlaybookPage() {
                 style={{
                   marginBottom: 24,
                   padding: "12px 18px",
-                  borderColor: `${UI.warn}4D`,
+                  borderColor: `color-mix(in srgb, ${UI.warn} 30%, transparent)`,
                 }}
               >
                 <span style={{ fontSize: 13, color: UI.warn }}>

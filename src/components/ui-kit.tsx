@@ -1,19 +1,27 @@
 /**
  * ui-kit.tsx — AI Rankia Ads premium UI kit (dark-first, "quiet & expensive").
  *
+ * AESTHETIC: luxury-refined enterprise with an editorial signature — serif
+ * display typography (Newsreader, --font-display) over a near-black
+ * instrument panel; Instrument Sans (--font-ui) for all UI text.
+ *
  * SERVER-SAFE: no hooks, no "use client". Every export is a pure function of
  * props + inline style objects, so it works in BOTH server and client
- * components. Colors are the dark palette exported as `UI` tokens.
- * (Light theme is handled at the page level via useTheme for client
- * components; server surfaces are dark-first by design.)
+ * components. Color tokens are CSS custom properties (var(--uik-*), defined
+ * in globals.css under .dark/.light), so every ui-kit surface — including
+ * server-rendered ones — follows the theme toggle automatically.
+ *
+ * MOTION: PageHeader/Card/StatCard render with the `.rise` class
+ * (globals.css); sibling stagger is pure CSS :nth-child — no page edits and
+ * no API change required.
  *
  * PUBLIC API
  *   UI                                       — style tokens (colors, radii, maxWidth)
- *   <PageHeader title subtitle? actions? />  — 26px page title row, 32px bottom margin
+ *   <PageHeader title subtitle? actions? />  — serif display title + hairline divider
  *   <Card style?>…</Card>                    — surface card: radius 12, 1px border, padding 24
  *   <StatCard label value sub? tone? />      — KPI stat; `tone` colors the `sub` line
  *                                              (tone: "ok" | "warn" | "danger" | "muted")
- *   <SectionLabel>…</SectionLabel>           — 11px uppercase tracking-0.08em muted label
+ *   <SectionLabel>…</SectionLabel>           — 11px uppercase tracking muted label
  *   DataTable primitives (compose with a plain <tbody>):
  *     <DataTable>
  *       <THead cols={[{ label: "Campaña" }, { label: "Coste", align: "right" }]} />
@@ -24,48 +32,16 @@
  *         </Row>
  *       </tbody>
  *     </DataTable>
- *   <Badge tone="ok|warn|danger|muted|accent">…</Badge>  — tinted pill
- *   <EmptyState title hint? action? />       — centered, generous padding
+ *   <Badge tone="ok|warn|danger|muted|accent" dot?>…</Badge>
+ *     — tinted pill; `dot` renders the quiet 6px-dot status variant instead
+ *   <EmptyState title hint? action? />       — serif italic title + CSS ornament
  *   <ErrorCard message />                    — quiet red-tinted alert
  *   <PrimaryButton|SecondaryButton|GhostDangerButton href? …props>
  *     — plain <button type="button"> by default; renders an <a> when `href`
  *       is given. Pass onClick etc. from client components only.
  *
- * USAGE EXAMPLE (server component page):
- *   import {
- *     PageHeader, Card, StatCard, DataTable, THead, Row, Cell,
- *     Badge, EmptyState, ErrorCard, PrimaryButton, SecondaryButton, UI,
- *   } from "@/components/ui-kit";
- *
- *   export default function Page() {
- *     return (
- *       <>
- *         <PageHeader
- *           title="Cockpit"
- *           subtitle="Rendimiento del MCC en los últimos 30 días"
- *           actions={<PrimaryButton href="/performance/ajustes">Configurar</PrimaryButton>}
- *         />
- *         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, marginBottom: 32 }}>
- *           <StatCard label="Coste" value="12.480 €" sub="+4,2% vs. mes anterior" tone="ok" />
- *         </div>
- *         <Card style={{ padding: 0 }}>
- *           <DataTable>
- *             <THead cols={[{ label: "Campaña" }, { label: "Estado" }, { label: "Coste", align: "right" }]} />
- *             <tbody>
- *               <Row>
- *                 <Cell>Search — ES</Cell>
- *                 <Cell><Badge tone="ok">Activa</Badge></Cell>
- *                 <Cell align="right" mono>1.240,50 €</Cell>
- *               </Row>
- *             </tbody>
- *           </DataTable>
- *         </Card>
- *       </>
- *     );
- *   }
- *
  * Note: when a Card directly wraps a DataTable, use <Card style={{ padding: 0 }}>
- * and let the table cells provide the spacing (as above).
+ * and let the table cells provide the spacing.
  */
 
 import type { CSSProperties, ReactNode } from "react";
@@ -77,30 +53,41 @@ import React from "react";
 
 export const UI = {
   /** Page background */
-  bg: "#0A0A0B",
+  bg: "var(--uik-bg)",
   /** Card / raised surface */
-  surface: "#101012",
+  surface: "var(--uik-surface)",
   /** Second-level surface (active nav item, inset wells) */
-  surface2: "#151518",
-  /** The only border. Always 1px, never shadows. */
-  border: "#1F1F23",
+  surface2: "var(--uik-surface2)",
+  /** The only border. Always 1px hairline, never shadows. */
+  border: "var(--uik-border)",
+  /** Emphasized hairline (hover borders, ornaments). */
+  borderStrong: "var(--uik-border-strong)",
+  /** Card top hairline (subtle luminosity in dark; plain border in light). */
+  borderTop: "var(--uik-border-top)",
   /** Table row hover */
-  hover: "#121214",
-  text: "#F7F8F8",
-  muted: "#8A8F98",
-  faint: "#55575D",
+  hover: "var(--uik-hover)",
+  text: "var(--uik-text)",
+  muted: "var(--uik-muted)",
+  faint: "var(--uik-faint)",
   /** Sparingly: primary actions, active states, positive deltas ONLY. */
-  accent: "#10B981",
-  danger: "#EF4444",
-  warn: "#F59E0B",
+  accent: "var(--uik-accent)",
+  /** Accent wash for active/selected fills. */
+  accentSoft: "var(--uik-accent-soft)",
+  /** Accent hairline segments (PageHeader divider, row-hover bar). */
+  accentHairline: "var(--uik-accent-hairline)",
+  danger: "var(--uik-danger)",
+  warn: "var(--uik-warn)",
   radius: 12,
   radiusSm: 8,
   maxWidth: 1150,
   fontMono: "var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace",
+  /** Editorial serif — display moments ONLY (page titles, empty states). */
+  fontDisplay: "var(--font-display), Georgia, 'Times New Roman', serif",
 } as const;
 
 /* ---------------------------------------------------------------------------
- * Page header
+ * Page header — the editorial signature: Newsreader 30px/500 over the panel,
+ * closed by a hairline divider with an 80px accent segment.
  * ------------------------------------------------------------------------- */
 
 export function PageHeader({
@@ -115,40 +102,57 @@ export function PageHeader({
   style?: CSSProperties;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "space-between",
-        gap: 16,
-        marginBottom: 32,
-        ...style,
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <h1
-          style={{
-            fontSize: 26,
-            fontWeight: 600,
-            letterSpacing: "-0.02em",
-            lineHeight: 1.25,
-            color: UI.text,
-            margin: 0,
-          }}
-        >
-          {title}
-        </h1>
-        {subtitle != null && (
-          <p style={{ fontSize: 13.5, color: UI.muted, margin: "6px 0 0", lineHeight: 1.5 }}>
-            {subtitle}
-          </p>
+    <div className="rise" style={{ marginBottom: 32, ...style }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h1
+            style={{
+              fontFamily: UI.fontDisplay,
+              fontSize: 30,
+              fontWeight: 500,
+              letterSpacing: "-0.01em",
+              lineHeight: 1.15,
+              color: UI.text,
+              margin: 0,
+            }}
+          >
+            {title}
+          </h1>
+          {subtitle != null && (
+            <p style={{ fontSize: 13.5, color: UI.muted, margin: "7px 0 0", lineHeight: 1.5 }}>
+              {subtitle}
+            </p>
+          )}
+        </div>
+        {actions != null && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {actions}
+          </div>
         )}
       </div>
-      {actions != null && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {actions}
-        </div>
-      )}
+      {/* Hairline divider with an 80px accent segment on the left */}
+      <div
+        aria-hidden="true"
+        style={{ position: "relative", height: 1, background: UI.border, marginTop: 20 }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            height: 1,
+            width: 80,
+            background: UI.accentHairline,
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -170,7 +174,7 @@ export function SectionLabel({
         fontSize: 11,
         fontWeight: 500,
         textTransform: "uppercase",
-        letterSpacing: "0.08em",
+        letterSpacing: "0.1em",
         color: UI.muted,
         marginBottom: 12,
         ...style,
@@ -182,7 +186,7 @@ export function SectionLabel({
 }
 
 /* ---------------------------------------------------------------------------
- * Card
+ * Card — hairline border with subtle top luminosity, rises on entry
  * ------------------------------------------------------------------------- */
 
 export function Card({
@@ -194,9 +198,12 @@ export function Card({
 }) {
   return (
     <div
+      className="rise"
       style={{
         background: UI.surface,
         border: `1px solid ${UI.border}`,
+        // Subtle luminosity: the top hairline catches a little more light.
+        borderTopColor: UI.borderTop,
         borderRadius: UI.radius,
         padding: 24,
         overflow: "hidden",
@@ -235,9 +242,11 @@ export function StatCard({
 }) {
   return (
     <div
+      className="rise"
       style={{
         background: UI.surface,
         border: `1px solid ${UI.border}`,
+        borderTopColor: UI.borderTop,
         borderRadius: UI.radius,
         padding: 20,
         ...style,
@@ -245,10 +254,10 @@ export function StatCard({
     >
       <div
         style={{
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: 500,
           textTransform: "uppercase",
-          letterSpacing: "0.08em",
+          letterSpacing: "0.1em",
           color: UI.muted,
         }}
       >
@@ -256,7 +265,7 @@ export function StatCard({
       </div>
       <div
         style={{
-          fontSize: 26,
+          fontSize: 28,
           fontWeight: 600,
           letterSpacing: "-0.02em",
           lineHeight: 1.2,
@@ -302,8 +311,14 @@ export function DataTable({
 }) {
   return (
     <div style={{ overflowX: "auto" }}>
-      {/* Row hover without hooks: a tiny scoped stylesheet (server-safe). */}
-      <style>{`.uik-row:hover td{background:${UI.hover};}`}</style>
+      {/* Row hover without hooks: a tiny scoped stylesheet (server-safe).
+          Hover = background + a 2px left accent hairline that fades in. */}
+      <style>{`
+        .uik-row td{transition:background 150ms ease,box-shadow 150ms ease;}
+        .uik-row:hover td{background:${UI.hover};}
+        .uik-row td:first-child{box-shadow:inset 2px 0 0 0 transparent;}
+        .uik-row:hover td:first-child{box-shadow:inset 2px 0 0 0 ${UI.accentHairline};}
+      `}</style>
       <table
         style={{
           width: "100%",
@@ -330,10 +345,10 @@ export function THead({ cols }: { cols: TableCol[] }) {
               textAlign: col.align ?? "left",
               width: col.width,
               padding: "10px 12px",
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: 500,
               textTransform: "uppercase",
-              letterSpacing: "0.08em",
+              letterSpacing: "0.1em",
               color: UI.muted,
               borderBottom: `1px solid ${UI.border}`,
               whiteSpace: "nowrap",
@@ -414,14 +429,46 @@ const BADGE_TONES = {
 
 export function Badge({
   tone = "muted",
+  dot = false,
   children,
   style,
 }: {
   tone?: keyof typeof BADGE_TONES;
+  /** Quiet status variant: 6px colored dot + 11.5px label, no pill chrome. */
+  dot?: boolean;
   children: ReactNode;
   style?: CSSProperties;
 }) {
   const c = BADGE_TONES[tone];
+  if (dot) {
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 11.5,
+          fontWeight: 500,
+          lineHeight: "16px",
+          whiteSpace: "nowrap",
+          color: c,
+          ...style,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            background: c,
+            flexShrink: 0,
+          }}
+        />
+        {children}
+      </span>
+    );
+  }
   return (
     <span
       style={{
@@ -435,8 +482,9 @@ export function Badge({
         lineHeight: "16px",
         whiteSpace: "nowrap",
         color: c,
-        background: `${c}1F`, // 12% tint
-        border: `1px solid ${c}4D`,
+        // color-mix instead of hex-alpha concatenation: tones are var(--uik-*).
+        background: `color-mix(in srgb, ${c} 12%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${c} 30%, transparent)`,
         ...style,
       }}
     >
@@ -472,9 +520,38 @@ export function EmptyState({
         ...style,
       }}
     >
-      <div style={{ fontSize: 15, color: UI.muted }}>{title}</div>
+      {/* Minimal CSS ornament: a 1px ring with a centered dot (border-drawn). */}
+      <div
+        aria-hidden="true"
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 999,
+          border: `1px solid ${UI.borderStrong}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 18,
+        }}
+      >
+        <span style={{ width: 4, height: 4, borderRadius: 999, background: UI.faint }} />
+      </div>
+      <div
+        style={{
+          fontFamily: UI.fontDisplay,
+          fontStyle: "italic",
+          fontWeight: 400,
+          fontSize: 18,
+          letterSpacing: "0.01em",
+          color: UI.muted,
+        }}
+      >
+        {title}
+      </div>
       {hint != null && (
-        <div style={{ fontSize: 13, color: UI.faint, marginTop: 6, maxWidth: 440 }}>{hint}</div>
+        <div style={{ fontSize: 13, color: UI.faint, marginTop: 8, maxWidth: 440, lineHeight: 1.55 }}>
+          {hint}
+        </div>
       )}
       {action != null && <div style={{ marginTop: 20 }}>{action}</div>}
     </div>
@@ -492,8 +569,8 @@ export function ErrorCard({
     <div
       role="alert"
       style={{
-        background: "rgba(239,68,68,0.06)",
-        border: "1px solid rgba(239,68,68,0.35)",
+        background: `color-mix(in srgb, ${UI.danger} 6%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${UI.danger} 35%, transparent)`,
         borderRadius: UI.radius,
         padding: "14px 18px",
         fontSize: 13.5,
@@ -509,6 +586,7 @@ export function ErrorCard({
 
 /* ---------------------------------------------------------------------------
  * Buttons — plain <button>/<a>; safe in server components (no handlers there)
+ * Hover/active choreography lives in globals.css under .uik-btn-* (150ms).
  * ------------------------------------------------------------------------- */
 
 export interface ButtonProps extends React.HTMLAttributes<HTMLElement> {
@@ -520,6 +598,10 @@ export interface ButtonProps extends React.HTMLAttributes<HTMLElement> {
   disabled?: boolean;
 }
 
+/* Variant colors (background/color/border) live in globals.css under the
+   .uik-btn-* classes — NOT inline — so the .light theme overrides can win.
+   Only layout/typography is inline. fontWeight 550 is genuine: Instrument
+   Sans is loaded as a variable font (wght axis) in layout.tsx. */
 const buttonBase: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -536,56 +618,38 @@ const buttonBase: CSSProperties = {
   userSelect: "none",
 };
 
-const PRIMARY: CSSProperties = {
-  background: "#FFFFFF",
-  color: "#0A0A0B",
-  border: "1px solid #FFFFFF",
-};
-
-const SECONDARY: CSSProperties = {
-  background: "transparent",
-  color: UI.text,
-  border: `1px solid ${UI.border}`,
-};
-
-const GHOST_DANGER: CSSProperties = {
-  background: "transparent",
-  color: UI.danger,
-  border: "1px solid transparent",
-};
-
 function renderButton(
-  variant: CSSProperties,
-  { href, type = "button", disabled, style, children, ...rest }: ButtonProps
+  variantClass: string,
+  { href, type = "button", disabled, style, className, children, ...rest }: ButtonProps
 ) {
   const s: CSSProperties = {
     ...buttonBase,
-    ...variant,
     ...(disabled ? { opacity: 0.5, cursor: "not-allowed", pointerEvents: "none" } : null),
     ...style,
   };
+  const cls = ["uik-btn", variantClass, className].filter(Boolean).join(" ");
   if (href && !disabled) {
     return (
-      <a href={href} style={s} {...rest}>
+      <a href={href} className={cls} style={s} {...rest}>
         {children}
       </a>
     );
   }
   return (
-    <button type={type} disabled={disabled} style={s} {...rest}>
+    <button type={type} disabled={disabled} className={cls} style={s} {...rest}>
       {children}
     </button>
   );
 }
 
 export function PrimaryButton(props: ButtonProps) {
-  return renderButton(PRIMARY, props);
+  return renderButton("uik-btn-primary", props);
 }
 
 export function SecondaryButton(props: ButtonProps) {
-  return renderButton(SECONDARY, props);
+  return renderButton("uik-btn-secondary", props);
 }
 
 export function GhostDangerButton(props: ButtonProps) {
-  return renderButton(GHOST_DANGER, props);
+  return renderButton("uik-btn-ghost-danger", props);
 }

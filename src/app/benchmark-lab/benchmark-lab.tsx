@@ -193,7 +193,6 @@ export function BenchmarkLab({ windmillConfigured, initialReport }: Props) {
       <style>{`
         @keyframes air-spin { to { transform: rotate(360deg); } }
         @keyframes air-pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
-        @keyframes air-rise { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
       `}</style>
 
       <Header breadcrumbs={[{ label: "Benchmark Lab" }]} />
@@ -804,7 +803,7 @@ function ReportView(props: {
   };
 
   return (
-    <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 20, animation: "air-rise 0.3s ease both" }}>
+    <div className="rise" style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 20 }}>
       {report.demo && (
         <div
           style={{

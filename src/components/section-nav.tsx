@@ -60,6 +60,13 @@ export function SectionNav({ items }: { items: SectionNavItem[] }) {
                 borderBottom: active
                   ? `2px solid ${colors.accent}`
                   : "2px solid transparent",
+                transition: "color 150ms ease, border-color 150ms ease",
+              }}
+              onMouseEnter={(e) => {
+                if (!active) e.currentTarget.style.color = colors.text;
+              }}
+              onMouseLeave={(e) => {
+                if (!active) e.currentTarget.style.color = colors.textMuted;
               }}
             >
               {item.label}

@@ -12,10 +12,14 @@ interface ThemeContextType {
     bgCard: string;
     bgInput: string;
     border: string;
+    /** Emphasized hairline (hover borders, ornaments). */
+    borderStrong: string;
     text: string;
     textMuted: string;
     textFaint: string;
     accent: string;
+    /** Accent wash for active/selected fills. */
+    accentSoft: string;
     /** Second-level surface: active nav items, inset wells. */
     surface2: string;
     /** Table-row / list hover background. */
@@ -25,32 +29,36 @@ interface ThemeContextType {
   };
 }
 
-// Premium dark-first palette (mirrors src/components/ui-kit.tsx UI tokens).
+// Luxury-refined dark palette (mirrors src/components/ui-kit.tsx UI tokens).
 const DARK = {
-  bg: '#0A0A0B',
-  bgCard: '#101012',
-  bgInput: '#0A0A0B',
-  border: '#1F1F23',
-  text: '#F7F8F8',
-  textMuted: '#8A8F98',
-  textFaint: '#55575D',
+  bg: '#09090B',
+  bgCard: '#0E0E11',
+  bgInput: '#09090B',
+  border: 'rgba(255,255,255,0.07)',
+  borderStrong: 'rgba(255,255,255,0.12)',
+  text: '#F5F6F7',
+  textMuted: '#9A9FA8',
+  textFaint: '#5B5E66',
   accent: '#10B981',
-  surface2: '#151518',
-  hover: '#121214',
+  accentSoft: 'rgba(16,185,129,0.12)',
+  surface2: '#131316',
+  hover: '#101014',
   danger: '#EF4444',
   warn: '#F59E0B',
 };
 
 const LIGHT = {
-  bg: '#FFFFFF',
-  bgCard: '#FAFAFA',
+  bg: '#FCFCFC',
+  bgCard: '#FFFFFF',
   bgInput: '#FFFFFF',
-  border: '#E7E7EA',
+  border: 'rgba(0,0,0,0.08)',
+  borderStrong: 'rgba(0,0,0,0.14)',
   text: '#101012',
   textMuted: '#6B7076',
   textFaint: '#A5A7AD',
   accent: '#059669',
-  surface2: '#F1F1F3',
+  accentSoft: 'rgba(5,150,105,0.10)',
+  surface2: '#F2F2F3',
   hover: '#F6F6F7',
   danger: '#DC2626',
   warn: '#D97706',
@@ -73,6 +81,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.body.style.background = theme === "dark" ? DARK.bg : LIGHT.bg;
     document.body.style.color = theme === "dark" ? DARK.text : LIGHT.text;
+    // Keep the html theme class in sync so globals.css scoping
+    // (.light scrollbars, .light .uik-btn-* hovers) follows the toggle.
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.classList.toggle("light", theme !== "dark");
     localStorage.setItem("ads-theme", theme);
   }, [theme]);
 

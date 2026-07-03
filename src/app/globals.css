@@ -1,37 +1,267 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-ui);
   --font-mono: var(--font-geist-mono);
 }
+
+/* ---------------------------------------------------------------------------
+   Palette tokens — single source of truth for the ui-kit (`UI.*` points at
+   these via var(--uik-*)), so server-rendered ui-kit surfaces follow the
+   Header theme toggle instead of being dark-hardcoded.
+   --------------------------------------------------------------------------- */
 
 /* Dark theme (default) */
 .dark {
   --background: #09090b;
-  --foreground: #fafafa;
+  --foreground: #f5f6f7;
+
+  --uik-bg: #09090b;
+  --uik-surface: #0e0e11;
+  --uik-surface2: #131316;
+  --uik-border: rgba(255, 255, 255, 0.07);
+  --uik-border-strong: rgba(255, 255, 255, 0.12);
+  /* Subtle luminosity: card top hairline catches a little more light. */
+  --uik-border-top: rgba(255, 255, 255, 0.11);
+  --uik-hover: #101014;
+  --uik-text: #f5f6f7;
+  --uik-muted: #9a9fa8;
+  --uik-faint: #5b5e66;
+  --uik-accent: #10b981;
+  --uik-accent-soft: rgba(16, 185, 129, 0.12);
+  /* Accent hairline segments (PageHeader divider, row-hover bar). */
+  --uik-accent-hairline: rgba(16, 185, 129, 0.55);
+  --uik-danger: #ef4444;
+  --uik-warn: #f59e0b;
 }
 
-/* Light theme */
+/* Light theme (mirrored) */
 .light {
-  --background: #ffffff;
-  --foreground: #09090b;
+  --background: #fcfcfc;
+  --foreground: #101012;
+
+  --uik-bg: #fcfcfc;
+  --uik-surface: #ffffff;
+  --uik-surface2: #f2f2f3;
+  --uik-border: rgba(0, 0, 0, 0.08);
+  --uik-border-strong: rgba(0, 0, 0, 0.14);
+  /* No luminosity trick on white — the top hairline stays the plain border. */
+  --uik-border-top: rgba(0, 0, 0, 0.08);
+  --uik-hover: #f6f6f7;
+  --uik-text: #101012;
+  --uik-muted: #6b7076;
+  --uik-faint: #a5a7ad;
+  --uik-accent: #059669;
+  --uik-accent-soft: rgba(5, 150, 105, 0.1);
+  --uik-accent-hairline: rgba(5, 150, 105, 0.55);
+  --uik-danger: #dc2626;
+  --uik-warn: #d97706;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-ui), ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* The display serif (Newsreader) is loaded as a variable font with the opsz
+   axis; opt display moments into the optical-size cut so 30-40px titles get
+   the display drawing, not the text cut. */
+h1,
+.font-display {
+  font-optical-sizing: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Atmosphere
+   --------------------------------------------------------------------------- */
+
+/* Full-viewport film grain: inline SVG feTurbulence, rendered once from the
+   root layout. Sits above the canvas (z-index 1) but never blocks input. */
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+/* Faint top radial glow on every content <main>: an instrument-panel halo. */
+main {
+  background-image: radial-gradient(
+    640px 220px at 28% -40px,
+    rgba(16, 185, 129, 0.05),
+    transparent 70%
+  );
+  background-repeat: no-repeat;
+}
+
+/* AppShell renders <main>, and many pages render their own inner <main>
+   inside it; only the outermost one may paint the halo, otherwise two glows
+   overlap offset by the header height. */
+main main {
+  background-image: none;
+}
+
+/* Refined text selection. Deviates from accentSoft (0.12) on purpose: at 12%
+   the selection is illegible over the near-black canvas, so dark uses 0.25. */
+::selection {
+  background: rgba(16, 185, 129, 0.25);
+}
+.light ::selection {
+  background: rgba(5, 150, 105, 0.14);
+}
+
+/* Thin custom scrollbar. Firefox first (scrollbar-width/color), then the
+   fine-grained WebKit styling for Chromium/Safari. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+html.light {
+  scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+}
+.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+/* ---------------------------------------------------------------------------
+   Motion — one orchestrated moment per page.
+   `.rise` is applied by ui-kit (PageHeader, Card, StatCard); stagger is pure
+   CSS via :nth-child among siblings (the ONE stagger mechanism), so common
+   stat grids cascade without any page edits.
+   --------------------------------------------------------------------------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.rise:nth-child(2) {
+  animation-delay: 60ms;
+}
+.rise:nth-child(3) {
+  animation-delay: 120ms;
+}
+.rise:nth-child(4) {
+  animation-delay: 180ms;
+}
+.rise:nth-child(5) {
+  animation-delay: 240ms;
+}
+.rise:nth-child(6) {
+  animation-delay: 300ms;
+}
+.rise:nth-child(n + 7) {
+  animation-delay: 340ms;
+}
+
+/* Sidebar active bar: 150ms slide-in. */
+@keyframes bar-in {
+  from {
+    transform: scaleY(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons (ui-kit renders these classes; server-safe, styles live here)
+   --------------------------------------------------------------------------- */
+
+.uik-btn {
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+/* Variant colors live HERE (not inline) so the .light overrides can win. */
+.uik-btn-primary {
+  background: #ffffff;
+  color: #09090b;
+  border: 1px solid #ffffff;
+}
+.light .uik-btn-primary {
+  background: #111113;
+  color: #fcfcfc;
+  border-color: #111113;
+}
+.uik-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.light .uik-btn-primary:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.uik-btn-primary:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+.uik-btn-secondary {
+  background: transparent;
+  color: var(--uik-text);
+  border: 1px solid var(--uik-border-strong);
+}
+.uik-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.light .uik-btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.16);
+}
+.uik-btn-ghost-danger {
+  background: transparent;
+  color: var(--uik-danger);
+  border: 1px solid transparent;
+}
+.uik-btn-ghost-danger:hover {
+  background: rgba(239, 68, 68, 0.08);
 }
 
 /* ---------------------------------------------------------------------------
    Accessibility: keyboard focus must always be visible. Many inputs/buttons
    set inline `outline: none`, so this override (with !important) restores a
    clear focus ring ONLY for keyboard users (:focus-visible), never on mouse
-   click. Uses the brand accent green.
+   click. Uses the brand accent green at 40%.
    --------------------------------------------------------------------------- */
 :focus-visible {
-  outline: 2px solid #10b981 !important;
+  outline: 2px solid rgba(16, 185, 129, 0.4) !important;
   outline-offset: 2px;
-  border-radius: 6px;
 }
 
 /* Respect users who ask the OS to reduce motion: drop animations/transitions. */

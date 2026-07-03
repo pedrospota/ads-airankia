@@ -19,7 +19,7 @@ export function Header({
 }) {
   const { theme, toggleTheme, colors } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
-  const crumbSeparator = theme === "dark" ? "#2A2A2E" : "#D4D4D8";
+  const crumbSeparator = colors.borderStrong;
   // The model/LLM settings page lives at /admin. We always show the link so it's
   // easy to find; the page itself is admin-gated server-side, so a non-admin who
   // clicks it just gets a friendly "not an admin" notice (no settings leaked).
@@ -48,6 +48,7 @@ export function Header({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    transition: "background 150ms ease, border-color 150ms ease",
   };
 
   const menuItemStyle: React.CSSProperties = {
@@ -63,6 +64,7 @@ export function Header({
     alignItems: "center",
     gap: 8,
     textDecoration: "none",
+    transition: "background 150ms ease",
   };
 
   return (
@@ -100,7 +102,10 @@ export function Header({
                   fontSize: 13,
                   textDecoration: "none",
                   whiteSpace: "nowrap",
+                  transition: "color 150ms ease",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = colors.text)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = colors.textMuted)}
               >
                 {crumb.label}
               </Link>
@@ -164,10 +169,11 @@ export function Header({
                   marginTop: 8,
                   zIndex: 50,
                   background: colors.bgCard,
-                  border: `1px solid ${colors.border}`,
+                  border: `1px solid ${colors.borderStrong}`,
                   borderRadius: 10,
                   padding: 4,
                   minWidth: 180,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
                 }}
               >
                 <Link

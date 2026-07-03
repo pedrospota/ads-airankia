@@ -14,8 +14,9 @@ import { AppSidebar } from "./app-sidebar";
  * itself is a client component), so layouts can keep fetching data.
  *
  * Page rhythm: the main area inherits the themed body background
- * (#0A0A0B dark / #FFFFFF light, set by ThemeProvider); children render
- * inside a 1150px centered column with 40px/32px padding.
+ * (#09090B dark / #FCFCFC light, set by ThemeProvider) plus a faint top
+ * radial accent glow (globals.css `main` rule); children render inside a
+ * 1150px centered column with 40px/32px padding.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (

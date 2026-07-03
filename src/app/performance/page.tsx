@@ -119,7 +119,7 @@ export default async function PerformancePage() {
                         <Cell align="right" mono>{fmtMoney(a.oportunidad)}</Cell>
                         <Cell align="right" mono>{fmtNum(a.n_props)}</Cell>
                         <Cell align="right">
-                          <Badge tone={healthTone(a.health)}>
+                          <Badge tone={healthTone(a.health)} dot>
                             {a.health != null && Number.isFinite(a.health)
                               ? Math.round(a.health)
                               : "—"}

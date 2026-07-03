@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./theme-provider";
+import { UI } from "./ui-kit";
 
 const SIDEBAR_WIDTH = 220;
 
@@ -244,7 +245,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { colors } = useTheme();
   const activeHref = findActiveHref(pathname ?? "");
-  // Hover = surface (#101012 dark), active = surface2 (#151518 dark).
+  // Hover = card surface (#0E0E11 dark), active = surface2 (#131316 dark).
   const hoverBg = colors.bgCard;
   const activeBg = colors.surface2;
 
@@ -273,9 +274,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       >
         <span
           style={{
-            fontSize: 15,
-            fontWeight: 600,
-            letterSpacing: "-0.01em",
+            fontFamily: UI.fontDisplay,
+            fontSize: 17,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
             color: colors.text,
           }}
         >
@@ -287,9 +289,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             fontWeight: 700,
             padding: "1px 5px",
             borderRadius: 4,
-            background: "rgba(16,185,129,0.12)",
+            background: colors.accentSoft,
             color: colors.accent,
-            border: "1px solid rgba(16,185,129,0.3)",
+            border: `1px solid color-mix(in srgb, ${colors.accent} 30%, transparent)`,
             letterSpacing: "0.06em",
           }}
         >
@@ -306,9 +308,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <div key={group.label} style={{ marginTop: 24 }}>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: 500,
-                letterSpacing: "0.08em",
+                letterSpacing: "0.12em",
                 textTransform: "uppercase",
                 color: colors.textFaint,
                 padding: "0 12px",
@@ -338,6 +340,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                       textDecoration: "none",
                       color: active ? colors.text : colors.textMuted,
                       background: active ? activeBg : "transparent",
+                      transition: "background 150ms ease, color 150ms ease",
                     }}
                     onMouseEnter={(e) => {
                       if (!active) e.currentTarget.style.background = hoverBg;
@@ -358,6 +361,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                           width: 2,
                           borderRadius: 2,
                           background: colors.accent,
+                          // 150ms slide-in (keyframes in globals.css)
+                          animation: "bar-in 150ms ease both",
+                          transformOrigin: "center",
                         }}
                       />
                     )}

@@ -13,6 +13,7 @@ import {
   ErrorCard,
   UI,
 } from "@/components/ui-kit";
+import { CsvButton } from "@/components/csv-button";
 import { fetchRecommendations, fmtMoney, fmtNum, fmtWhen } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
@@ -89,6 +90,13 @@ export default async function RecomendacionesPage() {
         <PageHeader
           title="Recomendaciones"
           subtitle="Todas las propuestas del optimizador, agrupadas por cuenta — solo-lectura"
+          actions={
+            <CsvButton
+              path="/export/recommendations.csv"
+              label="Descargar CSV"
+              filename="recommendations.csv"
+            />
+          }
         />
 
         {error ? (

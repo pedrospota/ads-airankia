@@ -8,6 +8,7 @@ import {
   Badge,
   EmptyState,
   ErrorCard,
+  PrimaryButton,
   UI,
 } from "@/components/ui-kit";
 import { fetchConfig, fmtNum, type EngineConfig } from "@/lib/sentinel";
@@ -43,10 +44,38 @@ function YesNoBadge({ on, label }: { on: boolean | null | undefined; label: stri
   );
 }
 
-export default async function AjustesPage() {
+const INPUT_STYLE: React.CSSProperties = {
+  boxSizing: "border-box",
+  background: UI.surface2,
+  border: `1px solid ${UI.border}`,
+  borderRadius: 8,
+  padding: "9px 12px",
+  fontSize: 13.5,
+  color: UI.text,
+  outline: "none",
+};
+
+const FIELD_LABEL_STYLE: React.CSSProperties = {
+  display: "block",
+  fontSize: 12,
+  fontWeight: 500,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  color: UI.muted,
+  marginBottom: 6,
+};
+
+export default async function AjustesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ga4?: string | string[] }>;
+}) {
   const authClient = await createSupabaseServerClient();
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) redirect("/login");
+
+  const sp = await searchParams;
+  const ga4Flag = Array.isArray(sp.ga4) ? sp.ga4[0] : sp.ga4;
 
   let cfg: EngineConfig | null = null;
   let error: string | null = null;
@@ -71,7 +100,7 @@ export default async function AjustesPage() {
       <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
         <PageHeader
           title="Ajustes del motor"
-          subtitle="Configuración vigente del optimizador — solo lectura; la edición fina vive en el motor por ahora"
+          subtitle="Configuración vigente del optimizador — lectura, más el evento GA4 real por propiedad; la edición fina vive en el motor por ahora"
         />
 
         {error ? (
@@ -162,6 +191,66 @@ export default async function AjustesPage() {
                   </span>
                 </p>
               </div>
+            </Card>
+
+            {/* Evento GA4 real */}
+            <Card style={{ gridColumn: "1 / -1" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <SectionLabel style={{ marginBottom: 0 }}>Evento GA4 real</SectionLabel>
+                {ga4Flag === "ok" && <Badge tone="ok">guardado</Badge>}
+                {ga4Flag === "err" && <Badge tone="danger">no se pudo guardar</Badge>}
+              </div>
+              <p
+                style={{
+                  fontSize: 13.5,
+                  lineHeight: 1.6,
+                  color: UI.muted,
+                  margin: "10px 0 16px",
+                  maxWidth: 720,
+                }}
+              >
+                Elige el evento que SÍ es la conversión para una propiedad GA4 (p. ej.{" "}
+                <code style={{ fontFamily: UI.fontMono, fontSize: 12.5 }}>OfertaAceptada</code>).
+                El próximo escaneo mide las conversiones solo con ese evento.
+              </p>
+              <form
+                method="post"
+                action="/api/performance/ga4-event"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "flex-end",
+                  gap: 12,
+                }}
+              >
+                <div style={{ flex: "1 1 200px", minWidth: 180 }}>
+                  <label htmlFor="ga4-property-id" style={FIELD_LABEL_STYLE}>
+                    Property ID
+                  </label>
+                  <input
+                    id="ga4-property-id"
+                    name="property_id"
+                    required
+                    placeholder="123456789"
+                    style={{ ...INPUT_STYLE, width: "100%", fontFamily: UI.fontMono }}
+                  />
+                </div>
+                <div style={{ flex: "2 1 260px", minWidth: 220 }}>
+                  <label htmlFor="ga4-chosen-event" style={FIELD_LABEL_STYLE}>
+                    Evento de conversión
+                  </label>
+                  <input
+                    id="ga4-chosen-event"
+                    name="chosen_event"
+                    placeholder="OfertaAceptada"
+                    style={{ ...INPUT_STYLE, width: "100%", fontFamily: UI.fontMono }}
+                  />
+                </div>
+                <PrimaryButton type="submit">Guardar</PrimaryButton>
+              </form>
+              <p style={{ fontSize: 12, color: UI.faint, margin: "10px 0 0" }}>
+                Vacío = volver a auto (suma los eventos clave no-basura).
+              </p>
             </Card>
           </div>
         )}

@@ -16,6 +16,7 @@ import {
   ErrorCard,
   UI,
 } from "@/components/ui-kit";
+import { CsvButton } from "@/components/csv-button";
 import { fetchDatalake, fmtNum, type DatalakeRow } from "@/lib/sentinel";
 
 // Datos del optimizador por request (cache: "no-store") — nunca prerender.
@@ -57,6 +58,25 @@ export default async function DatalakePage() {
         <PageHeader
           title="Datalake de decisiones"
           subtitle="Cada decisión de optimización queda registrada como un episodio — el datalake que alimenta la IA"
+          actions={
+            <>
+              <CsvButton
+                path="/export/decision-records.csv"
+                label="CSV"
+                filename="decision-records.csv"
+              />
+              <CsvButton
+                path="/export/decision-records.jsonl"
+                label="JSONL (IA)"
+                filename="decision-records.jsonl"
+              />
+              <CsvButton
+                path="/export/playbook.csv"
+                label="Playbook CSV"
+                filename="playbook.csv"
+              />
+            </>
+          }
         />
 
         {error ? (

@@ -39,6 +39,31 @@ function Icon({ name }: { name: string }) {
         <path d="M9 14l2 2 4-4" />
       </>
     ),
+    diagnostics: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M6 12h3l2-4 2 8 2-4h3" />
+      </>
+    ),
+    playbook: (
+      <>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      </>
+    ),
+    qs: (
+      <>
+        <circle cx="12" cy="8" r="7" />
+        <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
+      </>
+    ),
+    dominios: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </>
+    ),
     simulacion: (
       <>
         <line x1="4" y1="21" x2="4" y2="14" />
@@ -159,9 +184,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/performance", label: "Cockpit", icon: "cockpit" },
       { href: "/performance/recomendaciones", label: "Recomendaciones", icon: "recomendaciones" },
+      { href: "/performance/diagnostics", label: "Diagnostico", icon: "diagnostics" },
       { href: "/performance/auditoria", label: "Auditoria MCC", icon: "auditoria" },
       { href: "/performance/simulacion", label: "Simulacion", icon: "simulacion" },
       { href: "/performance/backtest", label: "Backtest", icon: "backtest" },
+      { href: "/performance/playbook", label: "Playbook", icon: "playbook" },
+      { href: "/performance/qs", label: "QS", icon: "qs" },
       { href: "/performance/datalake", label: "Datalake", icon: "datalake" },
       { href: "/performance/costos", label: "Costos", icon: "costos" },
       { href: "/performance/salud", label: "Salud", icon: "salud" },
@@ -173,6 +201,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/security", label: "Monitor", icon: "monitor" },
       { href: "/security/equipo", label: "Equipo", icon: "equipo" },
+      { href: "/security/dominios", label: "Dominios", icon: "dominios" },
     ],
   },
   {

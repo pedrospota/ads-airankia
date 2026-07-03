@@ -17,6 +17,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AccountFull } from "@/lib/sentinel";
 import {
   UI,
@@ -31,6 +33,7 @@ import {
   EmptyState,
   ErrorCard,
   PrimaryButton,
+  SecondaryButton,
   GhostDangerButton,
 } from "@/components/ui-kit";
 
@@ -335,6 +338,40 @@ function ApproveControl({
 }
 
 // ---------------------------------------------------------------------------
+// On-demand generation plumbing (/api/performance/generate). The engine runs
+// each job in background (~30 s); the button shows a loading state and then
+// router.refresh() re-pulls the payload.
+// ---------------------------------------------------------------------------
+
+interface GenCtx {
+  busyKind: string | null;
+  run: (kind: string) => void;
+}
+
+function GenButton({
+  gen,
+  kind,
+  label,
+  busyLabel,
+}: {
+  gen: GenCtx;
+  kind: string;
+  label: string;
+  busyLabel: string;
+}) {
+  const busy = gen.busyKind === kind;
+  return (
+    <SecondaryButton
+      onClick={() => gen.run(kind)}
+      disabled={gen.busyKind != null}
+      style={{ padding: "6px 12px", fontSize: 12.5 }}
+    >
+      {busy ? busyLabel : label}
+    </SecondaryButton>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Small shared atoms
 // ---------------------------------------------------------------------------
 
@@ -412,6 +449,61 @@ export function AccountTabs({
   });
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // ---- on-demand generation + CSV download ------------------------------------
+  const router = useRouter();
+  const [genBusy, setGenBusy] = useState<string | null>(null);
+  const [csvBusy, setCsvBusy] = useState(false);
+
+  async function runGenerate(kind: string) {
+    setGenBusy(kind);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/performance/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, kind }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      router.refresh();
+    } catch {
+      setActionError(
+        "No se pudo lanzar la generación en el optimizador. Inténtalo de nuevo."
+      );
+    } finally {
+      setGenBusy(null);
+    }
+  }
+
+  const gen: GenCtx = { busyKind: genBusy, run: runGenerate };
+
+  async function downloadApprovedCsv() {
+    setCsvBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/performance/engine-csv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: `/export/approved.csv?account=${encodeURIComponent(accountId)}`,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cambios_aprobados_${accountId}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setActionError("No se pudo descargar el CSV de aprobados. Inténtalo de nuevo.");
+    } finally {
+      setCsvBusy(false);
+    }
+  }
 
   async function approve(recKey: string, title: string, detail?: Dict) {
     setBusyKey(recKey);
@@ -535,6 +627,42 @@ export function AccountTabs({
       <div
         style={{
           display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <SecondaryButton
+          onClick={() => runGenerate("reason-now")}
+          disabled={genBusy != null}
+          style={{ padding: "6px 12px", fontSize: 12.5 }}
+        >
+          {genBusy === "reason-now" ? "Re-analizando…" : "Re-analizar"}
+        </SecondaryButton>
+        <SecondaryButton
+          onClick={downloadApprovedCsv}
+          disabled={csvBusy}
+          style={{ padding: "6px 12px", fontSize: 12.5 }}
+        >
+          {csvBusy ? "Descargando…" : "Aprobados (CSV)"}
+        </SecondaryButton>
+        <Link
+          href={`/performance/simulacion?account=${encodeURIComponent(accountId)}`}
+          style={{
+            fontSize: 12.5,
+            color: UI.muted,
+            textDecoration: "underline",
+            textUnderlineOffset: 3,
+          }}
+        >
+          Simulación de esta cuenta
+        </Link>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
           gap: 4,
           flexWrap: "wrap",
           borderBottom: `1px solid ${UI.border}`,
@@ -585,9 +713,9 @@ export function AccountTabs({
       {tab === "segmentos" && (
         <SegmentosTab diag={diag} keys={keys} ctx={ctx} />
       )}
-      {tab === "calidad" && <CalidadTab diag={diag} />}
+      {tab === "calidad" && <CalidadTab diag={diag} gen={gen} />}
       {tab === "auditoria" && (
-        <AuditoriaTab audit={audit} auditAi={auditAi} hasRules={!!bp} />
+        <AuditoriaTab audit={audit} auditAi={auditAi} hasRules={!!bp} gen={gen} />
       )}
       {tab === "estrategia" && (
         <EstrategiaTab
@@ -600,7 +728,12 @@ export function AccountTabs({
         />
       )}
       {tab === "analisis" && (
-        <AnalisisTab signals={signals} measured={measured} shadowBets={shadowBets} />
+        <AnalisisTab
+          signals={signals}
+          measured={measured}
+          shadowBets={shadowBets}
+          gen={gen}
+        />
       )}
       {tab === "reglas" && <ReglasTab accountId={accountId} bp={bp} />}
     </div>
@@ -1174,7 +1307,7 @@ function SegmentosTab({
 // Calidad — dónde pagas de más por Quality Score + landing
 // ===========================================================================
 
-function CalidadTab({ diag }: { diag: Dict }) {
+function CalidadTab({ diag, gen }: { diag: Dict; gen: GenCtx }) {
   const lowQs = asArr(diag.low_qs);
   const withProblem = lowQs
     .filter((r) => Array.isArray(r.componentes_debiles) && (r.componentes_debiles as unknown[]).length > 0)
@@ -1183,17 +1316,41 @@ function CalidadTab({ diag }: { diag: Dict }) {
   const total = withProblem.reduce((s, r) => s + (num_(r.cost) ?? 0), 0);
   const landing = asArr(diag.landing);
 
+  const actionsRow = (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <GenButton
+        gen={gen}
+        kind="landing-scan-now"
+        label="Escanear landings"
+        busyLabel="Escaneando…"
+      />
+      <GenButton
+        gen={gen}
+        kind="landing-brief"
+        label="Brief landing/CRO"
+        busyLabel="Generando…"
+      />
+      <span style={{ fontSize: 11, color: UI.faint }}>
+        corre en el motor (~30 s) · refresca para ver el resultado
+      </span>
+    </div>
+  );
+
   if (withProblem.length === 0 && lowQs.length === 0 && landing.length === 0) {
     return (
-      <Empty
-        title="Sin problemas de calidad detectados."
-        hint="O los datos por keyword llegan en el próximo refresco pesado."
-      />
+      <div style={STACK}>
+        {actionsRow}
+        <Empty
+          title="Sin problemas de calidad detectados."
+          hint="O los datos por keyword llegan en el próximo refresco pesado."
+        />
+      </div>
     );
   }
 
   return (
     <div style={STACK}>
+      {actionsRow}
       {withProblem.length > 0 ? (
         <Card style={{ padding: 0 }}>
           <div style={{ padding: "20px 24px 12px" }}>
@@ -1336,10 +1493,12 @@ function AuditoriaTab({
   audit,
   auditAi,
   hasRules,
+  gen,
 }: {
   audit: AccountFull["audit"];
   auditAi: Dict;
   hasRules: boolean;
+  gen: GenCtx;
 }) {
   if (!audit || !audit.grade) {
     return <Empty title="Aún no hay datos suficientes para auditar esta cuenta." />;
@@ -1354,6 +1513,7 @@ function AuditoriaTab({
   };
   const adjGrade = str_(auditAi.grado_ajustado);
   const enfoque = str_(auditAi.enfoque);
+  const hasAuditAi = Object.keys(auditAi).length > 0;
   const statusDot: Record<string, string> = {
     fail: UI.danger,
     warn: UI.warn,
@@ -1437,6 +1597,20 @@ function AuditoriaTab({
           )}
         </div>
       </Card>
+
+      {!hasAuditAi && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <GenButton
+            gen={gen}
+            kind="audit-ai"
+            label="Interpretar con IA"
+            busyLabel="Interpretando…"
+          />
+          <span style={{ fontSize: 11, color: UI.faint }}>
+            ajusta el grado al contexto del negocio (~30 s) · refresca para verlo
+          </span>
+        </div>
+      )}
 
       {hasRules && (
         <NoteCard>
@@ -1844,27 +2018,69 @@ function AnalisisTab({
   signals,
   measured,
   shadowBets,
+  gen,
 }: {
   signals: Dict;
   measured: Dict[];
   shadowBets: Dict[];
+  gen: GenCtx;
 }) {
   const trends = asArr(signals.trends);
   const forecasts = asArr(signals.forecasts).filter((f) => !f.low_data);
+
+  const entregables = (
+    <Card>
+      <SectionLabel>Entregables de equipo</SectionLabel>
+      <p style={{ fontSize: 12, color: UI.muted, margin: "0 0 12px", lineHeight: 1.5 }}>
+        Briefs generados por IA para cada equipo — se generan en el motor
+        (~30 s); refresca para verlos.
+      </p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <GenButton
+          gen={gen}
+          kind="team-brief:creativos"
+          label="Brief creativos"
+          busyLabel="Generando…"
+        />
+        <GenButton
+          gen={gen}
+          kind="team-brief:audiencias"
+          label="Brief audiencias"
+          busyLabel="Generando…"
+        />
+        <GenButton
+          gen={gen}
+          kind="team-brief:feed"
+          label="Brief feed"
+          busyLabel="Generando…"
+        />
+        <GenButton
+          gen={gen}
+          kind="tracking-brief"
+          label="Brief de tracking"
+          busyLabel="Generando…"
+        />
+      </div>
+    </Card>
+  );
 
   const empty =
     trends.length === 0 && forecasts.length === 0 && measured.length === 0 && shadowBets.length === 0;
   if (empty) {
     return (
-      <Empty
-        title="Las señales medidas aparecerán aquí cuando el sistema acumule historial."
-        hint="Momentum, forecasts, el loop de medición y las apuestas sombra."
-      />
+      <div style={STACK}>
+        <Empty
+          title="Las señales medidas aparecerán aquí cuando el sistema acumule historial."
+          hint="Momentum, forecasts, el loop de medición y las apuestas sombra."
+        />
+        {entregables}
+      </div>
     );
   }
 
   return (
     <div style={STACK}>
+      {entregables}
       {trends.length > 0 && (
         <Card style={{ padding: 0 }}>
           <div style={{ padding: "20px 24px 12px" }}>

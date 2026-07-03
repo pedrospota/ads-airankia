@@ -35,6 +35,13 @@ interface KindAgg {
   cost: number;
 }
 
+interface ModelAgg {
+  model: string;
+  calls: number;
+  tokens: number;
+  cost: number;
+}
+
 export default async function CostosPage() {
   const authClient = await createSupabaseServerClient();
   const { data: { user } } = await authClient.auth.getUser();
@@ -64,6 +71,18 @@ export default async function CostosPage() {
     byKind.set(kind, agg);
   }
   const kinds = [...byKind.values()].sort((a, b) => b.cost - a.cost);
+
+  // Agrupado por modelo de IA, ordenado por costo desc.
+  const byModel = new Map<string, ModelAgg>();
+  for (const r of rows) {
+    const model = r.model || "desconocido";
+    const agg = byModel.get(model) ?? { model, calls: 0, tokens: 0, cost: 0 };
+    agg.calls += r.calls ?? 0;
+    agg.tokens += (r.prompt_tokens ?? 0) + (r.completion_tokens ?? 0);
+    agg.cost += r.cost_usd ?? 0;
+    byModel.set(model, agg);
+  }
+  const models = [...byModel.values()].sort((a, b) => b.cost - a.cost);
 
   // Totales por día, más recientes primero.
   const byDay = new Map<string, number>();
@@ -129,6 +148,46 @@ export default async function CostosPage() {
                             </Cell>
                             <Cell align="right" mono style={{ fontWeight: 600 }}>
                               {fmtMoney(k.cost, 2)}
+                            </Cell>
+                          </Row>
+                        ))}
+                      </tbody>
+                    </DataTable>
+                  </Card>
+
+                  <Card style={{ padding: 0, marginTop: 24 }}>
+                    <div
+                      style={{
+                        padding: "12px 16px",
+                        borderBottom: `1px solid ${UI.border}`,
+                        fontSize: 11,
+                        fontWeight: 500,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: UI.muted,
+                      }}
+                    >
+                      Por modelo
+                    </div>
+                    <DataTable>
+                      <THead
+                        cols={[
+                          { label: "Modelo" },
+                          { label: "Llamadas", align: "right" },
+                          { label: "Tokens", align: "right" },
+                          { label: "Costo USD", align: "right" },
+                        ]}
+                      />
+                      <tbody>
+                        {models.map((m) => (
+                          <Row key={m.model}>
+                            <Cell style={{ fontWeight: 500 }}>{m.model}</Cell>
+                            <Cell align="right" mono>{fmtNum(m.calls)}</Cell>
+                            <Cell align="right" mono style={{ color: UI.muted }}>
+                              {fmtNum(m.tokens)}
+                            </Cell>
+                            <Cell align="right" mono style={{ fontWeight: 600 }}>
+                              {fmtMoney(m.cost, 2)}
                             </Cell>
                           </Row>
                         ))}

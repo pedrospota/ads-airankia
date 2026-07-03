@@ -397,3 +397,254 @@ export async function postEngineSetToken(
     throw new Error(`El motor respondió ${res.status} ${res.statusText} en /admin/set-token.`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Legacy GET bridge — the engine's on-demand triggers (/account/{id}/reason-now,
+// team-brief, …) and CSV exports live on legacy GET routes gated by ?key=.
+// ⚠️ SERVER-ONLY (like everything here): the key must never reach the browser.
+// ---------------------------------------------------------------------------
+
+/** Build the legacy GET URL: base + path + (?|&)key=SENTINEL_API_KEY. */
+function engineLegacyUrl(path: string): string {
+  const baseUrl = process.env.SENTINEL_API_URL;
+  const apiKey = process.env.SENTINEL_API_KEY;
+  if (!baseUrl || !apiKey) {
+    throw new Error(
+      "El optimizador no está configurado (faltan SENTINEL_API_URL / SENTINEL_API_KEY en el servidor)."
+    );
+  }
+  const sep = path.includes("?") ? "&" : "?";
+  return `${baseUrl.replace(/\/+$/, "")}${path}${sep}key=${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Fire an on-demand trigger on the engine (reason-now, audit-ai, briefs…).
+ * The engine kicks a background job and answers with a redirect — so 200/302/303
+ * all count as "accepted". redirect:"manual" keeps us from following it.
+ */
+export async function engineTrigger(path: string): Promise<{ ok: boolean; status: number }> {
+  let res: Response;
+  try {
+    res = await fetch(engineLegacyUrl(path), {
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch (e) {
+    throw new Error(
+      `No se pudo conectar con el optimizador (${path}): ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  return { ok: res.status === 200 || res.status === 302 || res.status === 303, status: res.status };
+}
+
+/**
+ * Fetch one of the engine's CSV/JSONL exports. Returns the raw Response so the
+ * caller can stream the body straight through (content-type + disposition
+ * included). redirect:"manual" → an unexpected 302 means the key was rejected.
+ */
+export async function engineCsv(path: string): Promise<Response> {
+  try {
+    return await fetch(engineLegacyUrl(path), {
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch (e) {
+    throw new Error(
+      `No se pudo conectar con el optimizador (${path}): ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Engine HTML bridge (client report). ⚠️ SERVER-ONLY like the whole module.
+// ---------------------------------------------------------------------------
+
+/**
+ * GET an HTML page from the engine, authenticated. Uses the legacy ?key= gate
+ * (session-secret) AND sends x-api-key so /api/v1/* paths work too. Returns
+ * the raw HTML text; throws on any non-OK response.
+ */
+export async function fetchEngineHtml(path: string): Promise<string> {
+  const apiKey = process.env.SENTINEL_API_KEY ?? "";
+  let res: Response;
+  try {
+    res = await fetch(engineLegacyUrl(path), {
+      headers: { "x-api-key": apiKey },
+      cache: "no-store",
+    });
+  } catch (e) {
+    throw new Error(
+      `No se pudo conectar con el optimizador (${path}): ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  if (!res.ok) {
+    throw new Error(
+      `El optimizador respondió ${res.status} ${res.statusText} en ${path}.`
+    );
+  }
+  return res.text();
+}
+
+/**
+ * GET a PUBLIC HTML page from the engine WITHOUT any credential — for the
+ * public token pages (e.g. /r/{account}/{token}) the engine validates its own
+ * signed token, so no key must ever be attached to the request. Returns the
+ * raw HTML text; throws on any non-OK response (e.g. 404 = invalid token).
+ */
+export async function fetchEnginePublicHtml(path: string): Promise<string> {
+  const baseUrl = process.env.SENTINEL_API_URL;
+  if (!baseUrl) {
+    throw new Error(
+      "El optimizador no está configurado (falta SENTINEL_API_URL en el servidor)."
+    );
+  }
+  const url = `${baseUrl.replace(/\/+$/, "")}${path}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch (e) {
+    throw new Error(
+      `No se pudo conectar con el optimizador (${path}): ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  if (!res.ok) {
+    throw new Error(
+      `El optimizador respondió ${res.status} ${res.statusText} en ${path}.`
+    );
+  }
+  return res.text();
+}
+
+// ---------------------------------------------------------------------------
+// Measured intelligence (playbook / scorecard) + anti-hijack allowlist.
+// Permissive types — every field may be null/absent; render defensively.
+// ---------------------------------------------------------------------------
+
+/** One (action_family × objective) cell of the measured playbook. */
+export interface PlaybookCell {
+  action_family?: string | null;
+  /** Defensive alias — some payloads may say `family`. */
+  family?: string | null;
+  objective?: string | null;
+  n?: number | null;
+  n_effect?: number | null;
+  n_decisive?: number | null;
+  n_improved?: number | null;
+  n_worsened?: number | null;
+  n_surfed?: number | null;
+  /** Global cells only: how many accounts contribute evidence. */
+  n_accounts?: number | null;
+  /** 0–1 over decisive episodes (improved / worsened). */
+  win_rate?: number | null;
+  /** Median NET effect in % (de-confounded: net of the account trend). */
+  median_net?: number | null;
+}
+
+export interface PlaybookAccount {
+  account_id?: string | null;
+  name?: string | null;
+  cells?: PlaybookCell[] | null;
+}
+
+export interface PlaybookResponse {
+  global?: PlaybookCell[] | null;
+  by_account?: PlaybookAccount[] | null;
+}
+
+export function fetchPlaybook(): Promise<PlaybookResponse> {
+  return sentinelFetch<PlaybookResponse>("/api/v1/playbook");
+}
+
+/** Per-person measured scorecard row (debiased by account difficulty). */
+export interface ScorecardRow {
+  optimizer?: string | null;
+  /** Defensive aliases for the person field. */
+  person?: string | null;
+  name?: string | null;
+  email?: string | null;
+  n?: number | null;
+  n_effect?: number | null;
+  n_decisive?: number | null;
+  n_improved?: number | null;
+  n_worsened?: number | null;
+  n_surfed?: number | null;
+  n_accounts?: number | null;
+  /** 0–1 over decisive episodes. */
+  win_rate?: number | null;
+  /** Median NET effect in % (de-confounded). */
+  median_net?: number | null;
+  /** Partial-pooled net effect in %. */
+  median_shrunk?: number | null;
+  /** Counter.most_common(3) → [["campaign", 12], …]. */
+  top_families?: Array<[string, number]> | null;
+}
+
+export function fetchScorecard(): Promise<{ rows?: ScorecardRow[] | null }> {
+  return sentinelFetch<{ rows?: ScorecardRow[] | null }>("/api/v1/scorecard");
+}
+
+/** One entry of the anti-hijack brand-domain allowlist. */
+export interface BrandDomainRow {
+  id?: number | string | null;
+  domain?: string | null;
+  scope?: string | null;
+  added_by?: string | null;
+}
+
+export function fetchBrandDomains(): Promise<{ rows?: BrandDomainRow[] | null }> {
+  return sentinelFetch<{ rows?: BrandDomainRow[] | null }>("/api/v1/brand-domains");
+}
+
+/** Add or remove an allowlist domain. `scope` defaults to "global" engine-side. */
+export function postBrandDomain(body: {
+  action: "add" | "remove";
+  domain: string;
+  scope?: string;
+  by?: string;
+}): Promise<{ ok?: boolean }> {
+  return sentinelPost("/api/v1/brand-domains", body);
+}
+
+// ---------------------------------------------------------------------------
+// Legacy POST bridge — some engine endpoints (e.g. POST /ga4-event) take an
+// urlencoded HTML form and gate on a "key" field INSIDE the form body.
+// ⚠️ SERVER-ONLY (like everything here): the key must never reach the browser.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST an urlencoded form to a legacy engine endpoint. The SENTINEL_API_KEY is
+ * injected into the body as the "key" field (that is how these routes gate).
+ * The engine answers a form post with a redirect: 303 = accepted, while a 302
+ * to "/" means the key was rejected — so only 200/303 count as ok.
+ * redirect:"manual" keeps us from following either.
+ */
+export async function enginePostForm(
+  path: string,
+  form: Record<string, string>
+): Promise<{ ok: boolean; status: number }> {
+  const baseUrl = process.env.SENTINEL_API_URL;
+  const apiKey = process.env.SENTINEL_API_KEY;
+  if (!baseUrl || !apiKey) {
+    throw new Error(
+      "El optimizador no está configurado (faltan SENTINEL_API_URL / SENTINEL_API_KEY en el servidor)."
+    );
+  }
+  const body = new URLSearchParams({ ...form, key: apiKey });
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch (e) {
+    throw new Error(
+      `No se pudo conectar con el optimizador (${path}): ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  return { ok: res.status === 200 || res.status === 303, status: res.status };
+}

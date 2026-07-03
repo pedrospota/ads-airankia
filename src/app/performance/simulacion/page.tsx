@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { Header } from "@/components/header";
@@ -41,16 +42,25 @@ function isOpen(bet: SimBet): boolean {
   return (bet.status ?? "").toLowerCase() === "abierta";
 }
 
-export default async function SimulacionPage() {
+export default async function SimulacionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ account?: string | string[] }>;
+}) {
   const authClient = await createSupabaseServerClient();
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) redirect("/login");
+
+  const sp = await searchParams;
+  const rawAccount = Array.isArray(sp.account) ? sp.account[0] : sp.account;
+  const account =
+    typeof rawAccount === "string" && rawAccount.trim() ? rawAccount.trim() : undefined;
 
   let bets: SimBet[] = [];
   let error: string | null = null;
 
   try {
-    const data = await fetchSimulacion();
+    const data = await fetchSimulacion(account);
     bets = data.bets ?? [];
   } catch (e) {
     error = e instanceof Error ? e.message : "No se pudo cargar la simulación.";
@@ -75,6 +85,30 @@ export default async function SimulacionPage() {
           title="Simulación"
           subtitle="Paper trading: cada recomendación se simula sin aplicarse — esto habría pasado si le hacías caso."
         />
+
+        {account && (
+          <div style={{ marginBottom: 16 }}>
+            <Link
+              href="/performance/simulacion"
+              title="Quitar filtro de cuenta"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 12px",
+                borderRadius: 999,
+                border: `1px solid ${UI.border}`,
+                background: UI.surface2,
+                fontSize: 12.5,
+                color: UI.text,
+                textDecoration: "none",
+              }}
+            >
+              Cuenta: <b style={{ fontWeight: 550 }}>{account}</b>
+              <span style={{ color: UI.muted }}>(quitar)</span>
+            </Link>
+          </div>
+        )}
 
         {error ? (
           <ErrorCard message={`No pudimos cargar la simulación. ${error}`} />

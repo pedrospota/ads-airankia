@@ -1,8 +1,10 @@
 // ============================================================================
 // POST /api/copiloto — the Copiloto chat endpoint.
 //
-// Body: { messages: [{ role: "user" | "assistant", content: string }] }
-// Reply: { reply: string, toolsUsed: string[] }  |  { error: string }
+// Body: { messages: [{ role: "user" | "assistant", content: string }],
+//         mode?: "lectura" | "dryrun" }        (invalid/missing → "lectura")
+// Reply: { reply: string, toolsUsed: string[], mode: CopilotoMode }
+//        | { error: string }
 //
 // Auth-gated with the Supabase session (401 for anonymous callers). Runs an
 // OpenAI-compatible tool-calling loop against OpenRouter: the model decides
@@ -10,6 +12,12 @@
 // tool calls SERVER-SIDE via the sentinel fetchers (SENTINEL_API_KEY never
 // reaches the browser), append the results, and iterate — max 6 rounds under
 // a ~30s overall budget (AbortController per call).
+//
+// Modes (there is NO "write" mode — this platform never executes against
+// Google Ads): "lectura" offers only read tools and executeTool blocks any
+// write-intent call; "dryrun" adds the propose_* SIMULATION tools plus
+// record_proposal, whose only effect is a propose-only engine Approval that
+// a human applies via Google Ads Editor.
 //
 // The existing OpenRouter helper (src/lib/llm/openrouter.ts) only supports a
 // single FORCED structured call, not a multi-turn tool loop, so this route
@@ -21,7 +29,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-auth";
 import { getOpenRouterKey } from "@/lib/llm/settings";
-import { copilotoTools, executeTool } from "@/lib/copiloto-tools";
+import { executeTool, toolsForMode, type CopilotoMode } from "@/lib/copiloto-tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +56,19 @@ const SYSTEM_PROMPT =
   "auditoría, efecto %); si un dato no aparece en las herramientas, dilo — " +
   "nunca lo inventes. Formatea con **negritas** para lo importante y listas " +
   'con "- " cuando enumeres; sin tablas.';
+
+/** Appended to the system prompt per mode. */
+const MODE_NOTES: Record<CopilotoMode, string> = {
+  lectura:
+    "MODO SOLO LECTURA: si piden cambios, explica que activen el modo Dry-run " +
+    "(interruptor junto al campo de texto) para simular.",
+  dryrun:
+    "MODO DRY-RUN: las herramientas de cambio SIMULAN — nunca tocan Google Ads. " +
+    "Muestra el preview claramente marcado como SIMULACIÓN. Solo llama " +
+    "record_proposal cuando el usuario CONFIRME explícitamente (sí/hazlo/regístrala); " +
+    "registrar crea una propuesta aprobada (propose-only) que el humano aplica vía " +
+    "Google Ads Editor.",
+};
 
 // ---------------------------------------------------------------------------
 // Minimal OpenAI-compatible wire types
@@ -138,12 +159,15 @@ export async function POST(request: NextRequest) {
   }
 
   // ---- Parse + sanitize the chat history ----------------------------------
-  let raw: { messages?: unknown };
+  let raw: { messages?: unknown; mode?: unknown };
   try {
-    raw = (await request.json()) as { messages?: unknown };
+    raw = (await request.json()) as { messages?: unknown; mode?: unknown };
   } catch {
     return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
   }
+
+  // Anything that isn't exactly "dryrun" falls back to the safe default.
+  const mode: CopilotoMode = raw.mode === "dryrun" ? "dryrun" : "lectura";
 
   const history: ConvoMessage[] = (Array.isArray(raw.messages) ? raw.messages : [])
     .filter(
@@ -177,8 +201,9 @@ export async function POST(request: NextRequest) {
   }
 
   const model = resolveModel();
+  const tools = toolsForMode(mode);
   const convo: ConvoMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: `${SYSTEM_PROMPT}\n\n${MODE_NOTES[mode]}` },
     ...history,
   ];
   const toolsUsed: string[] = [];
@@ -199,7 +224,7 @@ export async function POST(request: NextRequest) {
         temperature: 0.3,
       };
       if (allowTools) {
-        body.tools = copilotoTools;
+        body.tools = tools;
         body.tool_choice = "auto";
       }
 
@@ -243,7 +268,7 @@ export async function POST(request: NextRequest) {
 
         let result: string;
         try {
-          result = await executeTool(name, args);
+          result = await executeTool(name, args, mode);
         } catch (e) {
           // Engine unreachable / view failed → tell the model, keep going.
           result = JSON.stringify({
@@ -277,5 +302,5 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ reply, toolsUsed });
+  return NextResponse.json({ reply, toolsUsed, mode });
 }

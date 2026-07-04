@@ -3,11 +3,17 @@
 /**
  * Copiloto — chat over the user's OWN measured Google Ads data.
  *
- * Talks to POST /api/copiloto with { messages: [{role, content}] } and renders
- * { reply, toolsUsed }. Quiet, premium, single 760px column: welcome state with
- * three suggestion cards, right-aligned user bubbles, left-aligned assistant
- * turns with "consultó:" tool chips, and a sticky composer at the column
- * bottom (Enter sends, Shift+Enter newline).
+ * Talks to POST /api/copiloto with { messages: [{role, content}], mode } and
+ * renders { reply, toolsUsed, mode }. Quiet, premium, single 760px column:
+ * welcome state with suggestion cards, right-aligned user bubbles,
+ * left-aligned assistant turns with "consultó:" tool chips, and a sticky
+ * composer at the column bottom (Enter sends, Shift+Enter newline).
+ *
+ * Modes (two-pill toggle next to the composer): "Solo lectura" and "Dry-run".
+ * Dry-run offers the model SIMULATION tools that never touch Google Ads —
+ * assistant turns that used them get a "SIMULACIÓN" chip, and record_proposal
+ * (a propose-only Approval the human applies via Google Ads Editor) gets a
+ * "propuesta registrada" chip. There is NO write mode.
  */
 
 import { Fragment, useEffect, useRef, useState } from "react";
@@ -16,6 +22,9 @@ import { Badge, ErrorCard, UI } from "@/components/ui-kit";
 // ---------------------------------------------------------------------------
 // Types + copy
 // ---------------------------------------------------------------------------
+
+/** Client-local copy — copiloto-tools.ts is server-only, never import it here. */
+type CopilotoMode = "lectura" | "dryrun";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -26,6 +35,7 @@ interface ChatMessage {
 interface CopilotoResponse {
   reply?: string;
   toolsUsed?: string[];
+  mode?: string;
   error?: string;
 }
 
@@ -44,6 +54,12 @@ const SUGGESTIONS: Array<{ q: string; hint: string }> = [
   },
 ];
 
+/** Extra suggestion card, only shown while Dry-run is active. */
+const DRYRUN_SUGGESTION: { q: string; hint: string } = {
+  q: "Simula bajar el presupuesto de mi peor campaña",
+  hint: "Preview del cambio — nada se toca en Google Ads",
+};
+
 /** Short Spanish labels for the tool chips ("consultó: portfolio, playbook"). */
 const TOOL_LABELS: Record<string, string> = {
   get_portfolio: "portfolio",
@@ -57,10 +73,20 @@ const TOOL_LABELS: Record<string, string> = {
   get_scorecard: "scorecard",
   get_salud: "salud",
   get_costs: "costes IA",
+  propose_budget_change: "presupuesto (sim)",
+  propose_pause_campaign: "pausa (sim)",
+  propose_negative_keyword: "negativa (sim)",
+  propose_bid_modifier: "puja (sim)",
+  record_proposal: "registrar propuesta",
 };
 
 function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name.replace(/^get_/, "");
+}
+
+/** Write-intent tools (dry-run simulations + the propose-only record). */
+function isWriteTool(name: string): boolean {
+  return name.startsWith("propose_") || name === "record_proposal";
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +213,55 @@ function AssistantLabel() {
   );
 }
 
+/**
+ * One pill of the mode switch. House style (see DaysSwitcher): borderRadius
+ * 999, active gets surface2 + hairline; the Dry-run pill takes a warn-amber
+ * tint when active instead.
+ */
+function ModePill({
+  active,
+  warn = false,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  warn?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        padding: "4px 12px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 500,
+        whiteSpace: "nowrap",
+        cursor: "pointer",
+        transition: "background 150ms ease, border-color 150ms ease, color 150ms ease",
+        color: active ? (warn ? UI.warn : UI.text) : UI.muted,
+        background: active
+          ? warn
+            ? `color-mix(in srgb, ${UI.warn} 12%, transparent)`
+            : UI.surface2
+          : "transparent",
+        border: `1px solid ${
+          active
+            ? warn
+              ? `color-mix(in srgb, ${UI.warn} 30%, transparent)`
+              : UI.border
+            : "transparent"
+        }`,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -197,6 +272,7 @@ export function CopilotoClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  const [mode, setMode] = useState<CopilotoMode>("lectura");
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -226,6 +302,7 @@ export function CopilotoClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           messages: next.map((m) => ({ role: m.role, content: m.content })),
+          mode,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as CopilotoResponse;
@@ -268,6 +345,8 @@ export function CopilotoClient() {
   }
 
   const canSend = !loading && input.trim().length > 0;
+  const dryrun = mode === "dryrun";
+  const suggestions = dryrun ? [...SUGGESTIONS, DRYRUN_SUGGESTION] : SUGGESTIONS;
 
   return (
     <div
@@ -335,10 +414,14 @@ export function CopilotoClient() {
             </p>
 
             <div
-              className="grid grid-cols-1 md:grid-cols-3"
+              className={
+                suggestions.length > 3
+                  ? "grid grid-cols-1 md:grid-cols-2"
+                  : "grid grid-cols-1 md:grid-cols-3"
+              }
               style={{ gap: 12, marginTop: 32, width: "100%" }}
             >
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <button
                   key={s.q}
                   type="button"
@@ -434,6 +517,12 @@ export function CopilotoClient() {
                             {toolLabel(t)}
                           </Badge>
                         ))}
+                        {(m.toolsUsed ?? []).some(isWriteTool) && (
+                          <Badge tone="warn">SIMULACIÓN</Badge>
+                        )}
+                        {(m.toolsUsed ?? []).includes("record_proposal") && (
+                          <Badge tone="accent">propuesta registrada</Badge>
+                        )}
                       </>
                     )}
                   </div>
@@ -566,6 +655,36 @@ export function CopilotoClient() {
               </svg>
             )}
           </button>
+        </div>
+
+        {/* Mode switch (junto al campo de texto) + dry-run note */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            margin: "8px 4px 0",
+          }}
+        >
+          <div
+            role="group"
+            aria-label="Modo del Copiloto"
+            style={{ display: "flex", alignItems: "center", gap: 4 }}
+          >
+            <ModePill active={!dryrun} onClick={() => setMode("lectura")}>
+              Solo lectura
+            </ModePill>
+            <ModePill warn active={dryrun} onClick={() => setMode("dryrun")}>
+              Dry-run
+            </ModePill>
+          </div>
+          {dryrun && (
+            <span style={{ fontSize: 11, lineHeight: 1.4, color: UI.warn }}>
+              Simulación: nada se modifica en Google Ads; puedes registrar
+              propuestas.
+            </span>
+          )}
         </div>
 
         <p

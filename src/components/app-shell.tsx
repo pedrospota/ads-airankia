@@ -1,4 +1,5 @@
 import { AppSidebar } from "./app-sidebar";
+import { CommandPaletteMount } from "./command-palette";
 
 /**
  * Global app shell: persistent left sidebar + content column.
@@ -11,7 +12,10 @@ import { AppSidebar } from "./app-sidebar";
  *   return <AppShell>{children}</AppShell>;
  *
  * Server-component friendly (this file has no "use client"; the sidebar
- * itself is a client component), so layouts can keep fetching data.
+ * itself is a client component), so layouts can keep fetching data. The
+ * ⌘K / Ctrl+K command palette is mounted via <CommandPaletteMount/> — a
+ * tiny client island that owns its own open state + window keydown listener,
+ * so this shell never needs "use client".
  *
  * Page rhythm: the main area inherits the themed body background
  * (#09090B dark / #FCFCFC light, set by ThemeProvider) plus a faint top
@@ -29,6 +33,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }}
     >
       <AppSidebar />
+      {/* Global Cmd/Ctrl+K launcher. Renders an overlay only when open. */}
+      <CommandPaletteMount />
       <main style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{

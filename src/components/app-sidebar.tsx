@@ -140,6 +140,27 @@ function Icon({ name }: { name: string }) {
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       </>
     ),
+    copiloto: (
+      <>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path d="M12 7.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1L9 10.5l2.1-.9z" />
+      </>
+    ),
+    keywords: (
+      <>
+        <line x1="4" y1="9" x2="20" y2="9" />
+        <line x1="4" y1="15" x2="20" y2="15" />
+        <line x1="10" y1="3" x2="8" y2="21" />
+        <line x1="16" y1="3" x2="14" y2="21" />
+      </>
+    ),
+    introduccion: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="16" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12.01" y2="8" />
+      </>
+    ),
   };
 
   return (
@@ -181,8 +202,16 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ href: "/brands", label: "Marcas", icon: "brands" }],
   },
   {
+    label: "Asistentes",
+    items: [
+      { href: "/copiloto", label: "Copiloto", icon: "copiloto" },
+      { href: "/keywords", label: "Keywords", icon: "keywords" },
+    ],
+  },
+  {
     label: "Rendimiento",
     items: [
+      { href: "/performance/introduccion", label: "Introduccion", icon: "introduccion" },
       { href: "/performance", label: "Cockpit", icon: "cockpit" },
       { href: "/performance/recomendaciones", label: "Recomendaciones", icon: "recomendaciones" },
       { href: "/performance/diagnostics", label: "Diagnostico", icon: "diagnostics" },
@@ -376,6 +405,39 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         ))}
       </nav>
+
+      {/* Footer: subtle ⌘K launcher hint, pinned to the bottom. */}
+      <div
+        style={{
+          marginTop: "auto",
+          flexShrink: 0,
+          padding: "12px 24px 16px",
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          fontSize: 11,
+          color: colors.textFaint,
+        }}
+      >
+        <span>Buscar</span>
+        <kbd
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 2,
+            padding: "1px 5px",
+            borderRadius: 4,
+            border: `1px solid ${colors.border}`,
+            background: colors.surface2,
+            color: colors.textMuted,
+            fontSize: 10.5,
+            fontFamily: UI.fontMono,
+            lineHeight: 1.4,
+          }}
+        >
+          ⌘K
+        </kbd>
+      </div>
     </div>
   );
 }

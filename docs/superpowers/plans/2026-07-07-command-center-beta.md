@@ -543,6 +543,13 @@ git commit -m "feat(command): cc_actions/cc_executions/cc_settings schema + 007 
 > phase; source: marketingskills/NotFair "significant edit" threshold). This adds one
 > settings field, one migration column (apply in Task 3), and two gate functions +
 > tests below. The base-10 code in Steps 1/3 stays verbatim; apply these deltas too.
+>
+> **Post-review hardening (applied after implementation):** `capability` and
+> `actionAllowed` guard their `.includes()` with `?? []` so a malformed JSONB
+> `allowed_action_types`/`actionTypes` fails closed (blocks) instead of throwing;
+> `absBudgetCap` evidence says "ausente" when the budget is null; tests added for the
+> fail-closed paths, the `remove_negatives` rollback-allow, a real small Meta delta,
+> and exact-threshold boundaries. (Gate PASS/FAIL logic unchanged.)
 
 - [ ] **Step 0: Add the `maxDailyBudgetMicros` settings field to types (amends committed Task 1 `types.ts`)**
 

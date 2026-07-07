@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { executeAction, rollbackAction, type ExecutorDeps } from "../executor";
-import { CC_SETTINGS_DEFAULTS, type EntitySnapshot, type NetworkAdapter } from "../types";
+import { CC_SETTINGS_DEFAULTS, type EntitySnapshot, type NetworkAdapter, type CcInternalActionType, type CcSettingsValues } from "../types";
 
 function snapshot(over: Partial<EntitySnapshot> = {}): EntitySnapshot {
   return { entityKind: "campaign", entityRef: "111", status: "ENABLED",
@@ -131,6 +131,20 @@ describe("executeAction", () => {
     const out = await executeAction("a1", "op@x.com", ["w1"], deps);
     expect(out.ok).toBe(false);
     expect(out.error).toContain("aprobada");
+  });
+
+  it("create actions use a synthetic before (no snapshot call) and still gate", async () => {
+    const deps = fakeDeps();
+    deps.repo.getAction = async () => baseAction({ status: "approved", actionType: "create_budget", entityRef: "temp:budget:1", payload: { name: "b", amountMicros: 5_000_000 } }) as never;
+    let snapCalled = false;
+    deps.adapters = { for: () => fakeAdapter({
+      capabilities: () => ({ read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_budget"] }),
+      snapshot: async () => { snapCalled = true; throw new Error("should not snapshot a temp entity"); }
+    }) };
+    deps.settings = { get: async () => ({ ...CC_SETTINGS_DEFAULTS, allowedActionTypes: ["create_budget"] as CcInternalActionType[] } as CcSettingsValues) };
+    const out = await executeAction("a1", "op@x.com", ["w1"], deps);
+    expect(snapCalled).toBe(false);
+    expect(out.ok).toBe(true);
   });
 });
 

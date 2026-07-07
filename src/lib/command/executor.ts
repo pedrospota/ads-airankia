@@ -48,13 +48,21 @@ function toInput(row: CcActionRow, override?: CcActionInput): CcActionInput {
   };
 }
 
+const CREATE_ACTION_TYPES = new Set(["create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad"]);
+
 async function prepare(row: CcActionRow, input: CcActionInput, deps: ExecutorDeps) {
   const adapter = deps.adapters.for(row.network as CcNetwork);
   const auth = await deps.auth.resolve(row);
   const capabilities = adapter.capabilities(auth);
-  const before = capabilities.read
-    ? await adapter.snapshot(auth, row.accountRef, input.entityKind, input.entityRef)
-    : ({ entityKind: input.entityKind, entityRef: input.entityRef, status: "UNKNOWN" } as EntitySnapshot);
+  const isCreate = CREATE_ACTION_TYPES.has(input.actionType);
+  if (!isCreate && input.entityRef.startsWith("temp:")) {
+    throw new Error(`Ref temporal en acción no-create: ${input.actionType} ${input.entityRef}`);
+  }
+  const before = isCreate
+    ? ({ entityKind: input.entityKind, entityRef: input.entityRef, status: "UNKNOWN" } as EntitySnapshot)
+    : capabilities.read
+      ? await adapter.snapshot(auth, row.accountRef, input.entityKind, input.entityRef)
+      : ({ entityKind: input.entityKind, entityRef: input.entityRef, status: "UNKNOWN" } as EntitySnapshot);
   const settings = await deps.settings.get(row.workspaceId);
   const executedTodayForAccount = await deps.repo.countExecutedToday(row.accountRef);
   const validateResult =
@@ -90,7 +98,10 @@ async function performWrite(opts: {
   try {
     const exec = await adapter.execute(auth, row.accountRef, input, before);
     let after: EntitySnapshot | null = null;
-    try { after = await adapter.snapshot(auth, row.accountRef, input.entityKind, input.entityRef); } catch { /* verificación opcional */ }
+    const isCreate = CREATE_ACTION_TYPES.has(input.actionType);
+    if (!isCreate) {
+      try { after = await adapter.snapshot(auth, row.accountRef, input.entityKind, input.entityRef); } catch { /* verificación opcional */ }
+    }
     const finalRecipe = adapter.buildRollback(input, before, exec) ?? recipe;
     await deps.repo.updateExecution(ledger.id, {
       operation: exec.operation, request: exec.request, response: exec.response,

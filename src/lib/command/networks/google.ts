@@ -4,7 +4,9 @@
 import { mintAccessToken } from "@/lib/ads-connections";
 import type {
   AdapterAuth, AdapterCapabilities, CcActionInput, CcEntityKind,
-  EntitySnapshot, ExecuteResult, NetworkAdapter, RollbackRecipe,
+  CreateAdGroupPayload, CreateAdPayload, CreateBudgetPayload, CreateCampaignPayload,
+  CreateKeywordsPayload, EntitySnapshot, ExecuteResult, NetworkAdapter,
+  RemoveEntityPayload, RollbackRecipe,
 } from "../types";
 
 const apiVersion = () => process.env.GOOGLE_ADS_API_VERSION || "v21";
@@ -46,6 +48,67 @@ function num(value: unknown): number {
 }
 
 interface Mutation { endpoint: string; body: Record<string, unknown> }
+
+// Google geoTargetConstants country criteria IDs (slice-1 set = countries in
+// Cuentas). Fail-closed: an unmapped country code must THROW, never be
+// skipped — skipping a geo criterion means the campaign targets the whole
+// world, the opposite of what was proposed/approved.
+const COUNTRY_GEO: Record<string, string> = {
+  MX: "2484", ES: "2724", US: "2840", AR: "2032", CO: "2170", CL: "2152", PE: "2604",
+};
+
+/** v2 BiddingStrategy is only these 3. Payload already carries micros/ratio directly — do NOT re-multiply. */
+function biddingFields(bidding: CreateCampaignPayload["bidding"]): Record<string, unknown> {
+  switch (bidding.strategy) {
+    case "MAXIMIZE_CONVERSIONS":
+      return { maximizeConversions: {} };
+    case "TARGET_CPA":
+      return { maximizeConversions: { targetCpaMicros: String(bidding.targetCpaMicros) } };
+    case "TARGET_ROAS":
+      return { maximizeConversionValue: { targetRoas: bidding.targetRoas } };
+    default:
+      throw new Error(`Estrategia de puja no soportada: ${(bidding as { strategy: string }).strategy}`);
+  }
+}
+
+/**
+ * create_campaign step 2 — geo + language CampaignCriterion mutate, built AT
+ * EXECUTE TIME from the just-created campaign's resourceName. Cannot be
+ * validateOnly'd pre-create (the campaign doesn't exist yet), so this is
+ * intentionally NOT routed through buildMutation/validate().
+ */
+function buildCampaignCriteriaMutation(campaignResourceName: string, payload: CreateCampaignPayload): Mutation {
+  if (!payload.geoTargetIds?.length) {
+    throw new Error("create_campaign requiere al menos un geoTargetId (evita orientación mundial).");
+  }
+  const geoOps = payload.geoTargetIds.map((code) => {
+    const geoId = COUNTRY_GEO[code];
+    if (!geoId) throw new Error(`País no soportado: ${code}`);
+    return { create: { campaign: campaignResourceName, location: { geoTargetConstant: `geoTargetConstants/${geoId}` } } };
+  });
+  const langOps = payload.languageId
+    ? [{ create: { campaign: campaignResourceName, language: { languageConstant: `languageConstants/${payload.languageId}` } } }]
+    : [];
+  return { endpoint: "campaignCriteria:mutate", body: { operations: [...geoOps, ...langOps] } };
+}
+
+// remove_entity routes by the resourceName segment to the owning service.
+// Order doesn't matter for correctness here (segments are mutually
+// exclusive substrings), but keep the more specific ones first for clarity.
+const REMOVE_ENDPOINTS: ReadonlyArray<readonly [string, string]> = [
+  ["/campaignBudgets/", "campaignBudgets:mutate"],
+  ["/campaignCriteria/", "campaignCriteria:mutate"],
+  ["/adGroupCriteria/", "adGroupCriteria:mutate"],
+  ["/adGroupAds/", "adGroupAds:mutate"],
+  ["/adGroups/", "adGroups:mutate"],
+  ["/campaigns/", "campaigns:mutate"],
+];
+
+function endpointForResourceName(resourceName: string): string {
+  const match = REMOVE_ENDPOINTS.find(([segment]) => resourceName.includes(segment));
+  if (!match) throw new Error(`No se pudo inferir el servicio de eliminación para: ${resourceName}`);
+  return match[1];
+}
 
 /** Single source of truth for mutate bodies — used by validate() and execute(). */
 function buildMutation(accountRef: string, action: CcActionInput, before: EntitySnapshot): Mutation {
@@ -89,6 +152,113 @@ function buildMutation(accountRef: string, action: CcActionInput, before: Entity
       const payload = action.payload as { resourceNames: string[] };
       return { endpoint: "campaignCriteria:mutate", body: { operations: payload.resourceNames.map((rn) => ({ remove: rn })) } };
     }
+    case "create_budget": {
+      const payload = action.payload as CreateBudgetPayload;
+      return {
+        endpoint: "campaignBudgets:mutate",
+        body: {
+          operations: [{
+            create: { name: payload.name, amountMicros: String(payload.amountMicros), deliveryMethod: "STANDARD" },
+          }],
+        },
+      };
+    }
+    case "create_campaign": {
+      // Step 1 ONLY (campaign create). Geo/language criteria are a SEPARATE
+      // mutate built at execute time from the campaign's resourceName — see
+      // buildCampaignCriteriaMutation. validate() therefore only rehearses
+      // this step, which is correct: the criteria step references a campaign
+      // that doesn't exist yet and cannot be validateOnly'd pre-create.
+      const payload = action.payload as CreateCampaignPayload;
+      return {
+        endpoint: "campaigns:mutate",
+        body: {
+          operations: [{
+            create: {
+              name: payload.name,
+              status: "PAUSED", // SAFETY: never anything else on create.
+              advertisingChannelType: payload.channel ?? "SEARCH",
+              campaignBudget: payload.budgetRef,
+              networkSettings: {
+                targetGoogleSearch: true, targetSearchNetwork: false,
+                targetContentNetwork: false, targetPartnerSearchNetwork: false,
+              },
+              geoTargetTypeSetting: {
+                positiveGeoTargetType: payload.presenceOnly ? "PRESENCE" : "PRESENCE_OR_INTEREST",
+                negativeGeoTargetType: "PRESENCE",
+              },
+              ...biddingFields(payload.bidding),
+            },
+          }],
+        },
+      };
+    }
+    case "create_ad_group": {
+      const payload = action.payload as CreateAdGroupPayload;
+      return {
+        endpoint: "adGroups:mutate",
+        body: {
+          operations: [{
+            create: {
+              name: payload.name,
+              campaign: payload.campaignRef,
+              type: "SEARCH_STANDARD",
+              status: "ENABLED", // ad group enabled; the PAUSED campaign is the delivery gate.
+              ...(payload.cpcBidMicros != null ? { cpcBidMicros: payload.cpcBidMicros } : {}),
+            },
+          }],
+        },
+      };
+    }
+    case "create_keywords": {
+      const payload = action.payload as CreateKeywordsPayload;
+      const positives = payload.keywords.filter((kw) => !kw.negative);
+      const negatives = payload.keywords.filter((kw) => kw.negative);
+      return {
+        endpoint: "adGroupCriteria:mutate",
+        body: {
+          operations: [
+            ...positives.map((kw) => ({
+              create: { adGroup: payload.adGroupRef, status: "ENABLED", keyword: { text: kw.text, matchType: kw.match } },
+            })),
+            ...negatives.map((kw) => ({
+              create: { adGroup: payload.adGroupRef, negative: true, keyword: { text: kw.text, matchType: kw.match } },
+            })),
+          ],
+        },
+      };
+    }
+    case "create_ad": {
+      const payload = action.payload as CreateAdPayload;
+      return {
+        endpoint: "adGroupAds:mutate",
+        body: {
+          operations: [{
+            create: {
+              adGroup: payload.adGroupRef,
+              status: "ENABLED", // ad enabled; the PAUSED campaign is the ONLY delivery gate.
+              ad: {
+                finalUrls: [payload.finalUrl],
+                responsiveSearchAd: {
+                  headlines: payload.headlines.map((h) => ({ text: h.text, ...(h.pinnedField ? { pinnedField: h.pinnedField } : {}) })),
+                  descriptions: payload.descriptions.map((d) => ({ text: d.text })),
+                  ...(payload.path1 ? { path1: payload.path1 } : {}),
+                  ...(payload.path2 ? { path2: payload.path2 } : {}),
+                },
+              },
+            },
+          }],
+        },
+      };
+    }
+    case "remove_entity": {
+      const payload = action.payload as RemoveEntityPayload;
+      if (!payload.resourceNames?.length) throw new Error("remove_entity requiere al menos un resourceName.");
+      const endpoint = endpointForResourceName(payload.resourceNames[0]);
+      const mixed = payload.resourceNames.some((rn) => endpointForResourceName(rn) !== endpoint);
+      if (mixed) throw new Error("remove_entity: los resourceNames mezclan distintos servicios.");
+      return { endpoint, body: { operations: payload.resourceNames.map((rn) => ({ remove: rn })) } };
+    }
     default:
       throw new Error(`Acción no soportada en Google: ${action.actionType}`);
   }
@@ -113,7 +283,13 @@ export const googleAdapter: NetworkAdapter = {
     if (!auth.googleRefreshToken) {
       return { read: false, write: false, actionTypes: [], reason: "Sin conexión de Google Ads activa (Conexiones)." };
     }
-    return { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives"] };
+    return {
+      read: true, write: true,
+      actionTypes: [
+        "budget_update", "pause", "enable", "add_negatives", "remove_negatives",
+        "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad", "remove_entity",
+      ],
+    };
   },
 
   async listCampaigns(auth, accountRef) {
@@ -160,12 +336,28 @@ export const googleAdapter: NetworkAdapter = {
     const mutation = buildMutation(accountRef, action, beforeSnap);
     const response = await postMutate(auth, accountRef, mutation);
     const results = (response.results as Array<{ resourceName?: string }> | undefined) ?? [];
-    return {
-      operation: mutation.endpoint,
-      request: mutation.body,
-      response,
-      resourceNames: results.map((r) => r.resourceName).filter((r): r is string => Boolean(r)),
-    };
+    const resourceNames = results.map((r) => r.resourceName).filter((r): r is string => Boolean(r));
+
+    if (action.actionType === "create_campaign") {
+      // Two-step create: the campaign body above is step 1. Geo + language
+      // criteria (step 2) can ONLY be built now, from the campaign's real
+      // resourceName — skipping this step means whole-world targeting.
+      const campaignResourceName = resourceNames[0];
+      if (!campaignResourceName) throw new Error("Google Ads no devolvió el resourceName de la campaña creada.");
+      const criteriaMutation = buildCampaignCriteriaMutation(campaignResourceName, action.payload as CreateCampaignPayload);
+      const criteriaResponse = await postMutate(auth, accountRef, criteriaMutation);
+      const criteriaResults = (criteriaResponse.results as Array<{ resourceName?: string }> | undefined) ?? [];
+      const criteriaResourceNames = criteriaResults.map((r) => r.resourceName).filter((r): r is string => Boolean(r));
+      return {
+        operation: mutation.endpoint,
+        request: mutation.body,
+        response: { campaign: response, campaignCriteria: criteriaResponse },
+        // Campaign FIRST — the runner resolves resourceNames[0] as the tmp: for this action's localRef.
+        resourceNames: [campaignResourceName, ...criteriaResourceNames],
+      };
+    }
+
+    return { operation: mutation.endpoint, request: mutation.body, response, resourceNames };
   },
 
   buildRollback(action, beforeSnap, exec): RollbackRecipe | null {
@@ -183,6 +375,22 @@ export const googleAdapter: NetworkAdapter = {
         if (!exec.resourceNames?.length) return null;
         return { action: { ...common, actionType: "remove_negatives", payload: { resourceNames: exec.resourceNames } },
                  note: `Eliminar ${exec.resourceNames.length} negativas creadas.` };
+      case "create_campaign": {
+        // Only the campaign — its criteria cascade-delete with it. Removing a
+        // criterion after its parent campaign is gone errors, so never list
+        // exec.resourceNames[1..] (the criteria) here.
+        if (!exec.resourceNames?.length) return null;
+        return { action: { ...common, actionType: "remove_entity", payload: { resourceNames: [exec.resourceNames[0]] } },
+                 note: "Eliminar recurso creado." };
+      }
+      case "create_budget":
+      case "create_ad_group":
+      case "create_keywords":
+      case "create_ad": {
+        if (!exec.resourceNames?.length) return null;
+        return { action: { ...common, actionType: "remove_entity", payload: { resourceNames: exec.resourceNames } },
+                 note: "Eliminar recurso creado." };
+      }
       default:
         return null;
     }

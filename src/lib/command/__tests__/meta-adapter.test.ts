@@ -20,6 +20,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   delete process.env.META_SYSTEM_USER_TOKEN;
   delete process.env.META_AD_ACCOUNT_IDS;
+  delete process.env.META_APP_SECRET;
 });
 
 function before(over: Partial<EntitySnapshot> = {}): EntitySnapshot {
@@ -70,6 +71,41 @@ describe("metaAdapter", () => {
     expect(String(calls.at(-1)?.init?.body)).toContain("status=PAUSED");
     await metaAdapter.execute({}, "act_1", { actionType: "enable", entityKind: "campaign", entityRef: "777", payload: {} }, before());
     expect(String(calls.at(-1)?.init?.body)).toContain("status=ACTIVE");
+  });
+
+  it("adds appsecret_proof to snapshot (GET) calls when META_APP_SECRET is set, omits it when unset", async () => {
+    responder = (url) => {
+      if (url.includes("/insights")) return { data: [] };
+      return { id: "555", name: "Adset X", status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "2000" };
+    };
+    process.env.META_APP_SECRET = "app-secret";
+    await metaAdapter.snapshot({}, "act_1", "adset", "555");
+    const entityCall = calls.find((c) => c.url.includes("/555?"));
+    expect(entityCall?.url).toMatch(/[?&]appsecret_proof=[0-9a-f]{64}(&|$)/);
+
+    calls = [];
+    delete process.env.META_APP_SECRET;
+    await metaAdapter.snapshot({}, "act_1", "adset", "555");
+    const entityCallNoSecret = calls.find((c) => c.url.includes("/555?"));
+    expect(entityCallNoSecret?.url).not.toContain("appsecret_proof");
+  });
+
+  it("adds appsecret_proof to execute (POST) calls when META_APP_SECRET is set, omits it when unset", async () => {
+    responder = () => ({ success: true });
+    process.env.META_APP_SECRET = "app-secret";
+    await metaAdapter.execute({}, "act_1",
+      { actionType: "pause", entityKind: "campaign", entityRef: "777", payload: {} }, before());
+    const call = calls.at(-1);
+    expect(call?.url).toMatch(/\/777\?appsecret_proof=[0-9a-f]{64}$/);
+    expect(String(call?.init?.body)).toContain("status=PAUSED");
+
+    calls = [];
+    delete process.env.META_APP_SECRET;
+    await metaAdapter.execute({}, "act_1",
+      { actionType: "pause", entityKind: "campaign", entityRef: "777", payload: {} }, before());
+    const callNoSecret = calls.at(-1);
+    expect(callNoSecret?.url).not.toContain("appsecret_proof");
+    expect(callNoSecret?.url.endsWith("/777")).toBe(true);
   });
 
   it("buildRollback inverts pause/enable/budget", () => {

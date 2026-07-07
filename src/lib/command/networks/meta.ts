@@ -2,8 +2,9 @@
 // v1 auth: system-user token via META_SYSTEM_USER_TOKEN env; accounts
 // allowlisted via META_AD_ACCOUNT_IDS. Without a token the adapter degrades
 // to capabilities {write:false} and the UI shows "pendiente de credenciales".
+import { createHmac } from "node:crypto";
 import type {
-  AdapterAuth, AdapterCapabilities, CcActionInput,
+  AdapterAuth, AdapterCapabilities,
   EntitySnapshot, ExecuteResult, NetworkAdapter, RollbackRecipe,
 } from "../types";
 import { MICROS_PER_MINOR_UNIT, MICROS_PER_UNIT } from "../types";
@@ -17,8 +18,20 @@ export function metaAccountRefs(): string[] {
     .split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+// appsecret_proof: required by Meta when the app has "Require app secret proof
+// for server API calls" enabled (standard for system-user tokens). Only added
+// when META_APP_SECRET is configured; omitted otherwise for back-compat.
+function appsecretProof(accessToken: string): string | null {
+  const secret = (process.env.META_APP_SECRET ?? "").trim();
+  if (!secret) return null;
+  return createHmac("sha256", secret).update(accessToken).digest("hex");
+}
+
 async function metaGet(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
-  const search = new URLSearchParams({ ...params, access_token: token() });
+  const tok = token();
+  const search = new URLSearchParams({ ...params, access_token: tok });
+  const proof = appsecretProof(tok);
+  if (proof) search.set("appsecret_proof", proof);
   const res = await fetch(`${graph()}${path}?${search}`, { cache: "no-store" });
   const text = await res.text();
   if (!res.ok) throw new Error(`Meta API GET ${path} ${res.status}: ${text.slice(0, 400)}`);
@@ -26,8 +39,11 @@ async function metaGet(path: string, params: Record<string, string>): Promise<Re
 }
 
 async function metaPost(path: string, form: Record<string, string>): Promise<Record<string, unknown>> {
-  const body = new URLSearchParams({ ...form, access_token: token() });
-  const res = await fetch(`${graph()}${path}`, {
+  const tok = token();
+  const body = new URLSearchParams({ ...form, access_token: tok });
+  const proof = appsecretProof(tok);
+  const query = proof ? `?${new URLSearchParams({ appsecret_proof: proof })}` : "";
+  const res = await fetch(`${graph()}${path}${query}`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -54,7 +70,12 @@ function mapLearning(info: unknown): EntitySnapshot["learningPhase"] {
   return "UNKNOWN";
 }
 
-const CONVERSION_ACTIONS = new Set(["purchase", "omni_purchase", "lead", "offsite_conversion.fb_pixel_purchase", "offsite_conversion.fb_pixel_lead"]);
+const CONVERSION_ACTIONS = new Set([
+  "purchase", "omni_purchase", "lead", "omni_lead",
+  "offsite_conversion.fb_pixel_purchase", "offsite_conversion.fb_pixel_lead",
+  "offsite_conversion.fb_pixel_custom", "onsite_conversion.purchase",
+  "omni_complete_registration", "lead_grouped",
+]);
 
 function insightsToSignals(data: unknown): { conversions30d: number | null; spend30dMicros: number | null } {
   const rows = (data as { data?: Array<Record<string, unknown>> })?.data ?? [];

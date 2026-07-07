@@ -5,6 +5,7 @@ import { getCommandAccess, commandDenied } from "@/lib/command/access";
 import { fetchAccountFull } from "@/lib/sentinel";
 import { mapEngineOptimizations } from "@/lib/command/engine-import";
 import { createActionDeduped } from "@/lib/command/actions-repo";
+import { createSupabaseReadClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Faltan campos: engine_account_id, connection_id, account_ref" }, { status: 400 });
   }
   if (!access.workspaceIds.includes(workspaceId)) return NextResponse.json({ error: "workspace inválido" }, { status: 403 });
+  {
+    const db = createSupabaseReadClient(access.accessToken);
+    const { data: conn } = await db.from("ads_google_connections").select("workspace_id").eq("id", connectionId).maybeSingle();
+    if (!conn || String(conn.workspace_id) !== workspaceId) {
+      return NextResponse.json({ error: "connection_id no pertenece a este workspace" }, { status: 400 });
+    }
+  }
   try {
     const full = await fetchAccountFull(engineAccountId);
     const opts = (full.ai_plan?.optimizations ?? []) as never[];

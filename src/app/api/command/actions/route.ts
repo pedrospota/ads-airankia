@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCommandAccess, commandDenied } from "@/lib/command/access";
 import { createAction, listActions } from "@/lib/command/actions-repo";
+import { createSupabaseReadClient } from "@/lib/supabase-server";
 import { CC_ACTION_TYPES, type CcActionType, type CcNetwork } from "@/lib/command/types";
 
 export const runtime = "nodejs";
@@ -48,6 +49,13 @@ export async function POST(request: NextRequest) {
   }
   if (network === "google_ads" && typeof body.connection_id !== "string") {
     return NextResponse.json({ error: "connection_id es obligatorio para Google Ads" }, { status: 400 });
+  }
+  if (network === "google_ads" && typeof body.connection_id === "string") {
+    const db = createSupabaseReadClient(access.accessToken);
+    const { data: conn } = await db.from("ads_google_connections").select("workspace_id").eq("id", body.connection_id).maybeSingle();
+    if (!conn || String(conn.workspace_id) !== workspaceId) {
+      return NextResponse.json({ error: "connection_id no pertenece a este workspace" }, { status: 400 });
+    }
   }
   try {
     const action = await createAction({

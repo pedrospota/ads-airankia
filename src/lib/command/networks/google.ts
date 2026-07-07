@@ -59,7 +59,7 @@ function buildMutation(accountRef: string, action: CcActionInput, before: Entity
         endpoint: "campaignBudgets:mutate",
         body: {
           operations: [{
-            updateMask: "amount_micros",
+            updateMask: "amountMicros",
             update: { resourceName: before.budgetResourceName, amountMicros: String(payload.newDailyBudgetMicros) },
           }],
         },

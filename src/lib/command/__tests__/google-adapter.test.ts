@@ -71,7 +71,7 @@ describe("googleAdapter", () => {
     const body = JSON.parse(String(call?.init?.body));
     expect(body.validateOnly).toBe(true);
     expect(body.operations[0].update.amountMicros).toBe("12000000");
-    expect(body.operations[0].updateMask).toBe("amount_micros");
+    expect(body.operations[0].updateMask).toBe("amountMicros");
   });
 
   it("execute budget_update mutates without validateOnly and hashes request", async () => {

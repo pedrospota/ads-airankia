@@ -886,7 +886,7 @@ git commit -m "feat(command): deterministic gate engine (10 gates, full test mat
 - Create: `src/lib/command/networks/google.ts`
 - Test: `src/lib/command/__tests__/google-adapter.test.ts`
 
-Context you need: auth uses the **workspace's connected account** refresh token (decrypted upstream and passed in `AdapterAuth.googleRefreshToken`) — never `process.env.GOOGLE_ADS_REFRESH_TOKEN`. `mintAccessToken(refreshToken)` already exists in `@/lib/ads-connections` (it POSTs `https://oauth2.googleapis.com/token` with `GOOGLE_ADS_CLIENT_ID/SECRET` env). Mirror the mutate body idiom of `src/lib/google-ads.ts` `updateBudget()` (`updateMask: "amount_micros"`, `amountMicros: String(n)`).
+Context you need: auth uses the **workspace's connected account** refresh token (decrypted upstream and passed in `AdapterAuth.googleRefreshToken`) — never `process.env.GOOGLE_ADS_REFRESH_TOKEN`. `mintAccessToken(refreshToken)` already exists in `@/lib/ads-connections` (it POSTs `https://oauth2.googleapis.com/token` with `GOOGLE_ADS_CLIENT_ID/SECRET` env). Mirror the mutate body idiom of `src/lib/google-ads.ts` `updateBudget()` (`updateMask: "amountMicros"`, `amountMicros: String(n)`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -965,7 +965,7 @@ describe("googleAdapter", () => {
     const body = JSON.parse(String(call?.init?.body));
     expect(body.validateOnly).toBe(true);
     expect(body.operations[0].update.amountMicros).toBe("12000000");
-    expect(body.operations[0].updateMask).toBe("amount_micros");
+    expect(body.operations[0].updateMask).toBe("amountMicros");
   });
 
   it("execute budget_update mutates without validateOnly and hashes request", async () => {
@@ -1088,7 +1088,7 @@ function buildMutation(accountRef: string, action: CcActionInput, before: Entity
         endpoint: "campaignBudgets:mutate",
         body: {
           operations: [{
-            updateMask: "amount_micros",
+            updateMask: "amountMicros",
             update: { resourceName: before.budgetResourceName, amountMicros: String(payload.newDailyBudgetMicros) },
           }],
         },

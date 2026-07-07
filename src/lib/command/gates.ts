@@ -33,7 +33,7 @@ const killSwitch: Gate = (i) =>
     i.settings.executionsPaused ? "Ejecuciones pausadas (kill switch activo en ajustes)." : "Kill switch inactivo.");
 
 const capability: Gate = (i) => {
-  const ok = i.capabilities.write && i.capabilities.actionTypes.includes(i.action.actionType);
+  const ok = i.capabilities.write && (i.capabilities.actionTypes ?? []).includes(i.action.actionType);
   return gate("CAPABILITY", "blocking", ok,
     ok ? "El adaptador soporta escritura y este tipo de acción."
        : `Adaptador sin capacidad: ${i.capabilities.reason ?? `no soporta ${i.action.actionType}`}.`);
@@ -44,7 +44,7 @@ const actionAllowed: Gate = (i) => {
   if (i.action.actionType === "remove_negatives") {
     return gate("ACTION_ALLOWED", "blocking", true, "remove_negatives (rollback interno).");
   }
-  const ok = (i.settings.allowedActionTypes as string[]).includes(i.action.actionType);
+  const ok = ((i.settings.allowedActionTypes as string[] | undefined) ?? []).includes(i.action.actionType);
   return gate("ACTION_ALLOWED", "blocking", ok,
     ok ? `${i.action.actionType} permitido por ajustes.` : `${i.action.actionType} no está en allowed_action_types.`);
 };
@@ -120,9 +120,12 @@ const absBudgetCap: Gate = (i) => {
   }
   const next = budgetMicros(i);
   const ok = next !== null && next <= i.settings.maxDailyBudgetMicros;
-  return gate("ABS_BUDGET_CAP", "blocking", ok,
-    ok ? `Presupuesto ${next} ≤ tope ${i.settings.maxDailyBudgetMicros} micros.`
-       : `Presupuesto ${next} supera el tope absoluto ${i.settings.maxDailyBudgetMicros} micros.`);
+  const evidence = next === null
+    ? "Presupuesto ausente para evaluar el tope absoluto."
+    : ok
+      ? `Presupuesto ${next} ≤ tope ${i.settings.maxDailyBudgetMicros} micros.`
+      : `Presupuesto ${next} supera el tope absoluto ${i.settings.maxDailyBudgetMicros} micros.`;
+  return gate("ABS_BUDGET_CAP", "blocking", ok, evidence);
 };
 
 const metaLearningReset: Gate = (i) => {

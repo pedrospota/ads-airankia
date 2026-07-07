@@ -41,6 +41,22 @@ describe("gates", () => {
       action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 11_000_000 } } }));
     expect(blockingFailures(rs).map(r => r.id)).toContain("ACTION_ALLOWED");
   });
+  it("ACTION_ALLOWED fails closed (no throw) when allowedActionTypes is malformed", () => {
+    const bad = { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: null as unknown as typeof CC_SETTINGS_DEFAULTS.allowedActionTypes };
+    let rs!: ReturnType<typeof runGates>;
+    expect(() => { rs = runGates(baseInput({ settings: bad })); }).not.toThrow();
+    expect(rs!.find(r => r.id === "ACTION_ALLOWED")?.status).toBe("fail");
+  });
+  it("CAPABILITY fails closed (no throw) when actionTypes is malformed", () => {
+    const caps = { read: true, write: true, actionTypes: null as unknown as string[] };
+    let rs!: ReturnType<typeof runGates>;
+    expect(() => { rs = runGates(baseInput({ capabilities: caps as never })); }).not.toThrow();
+    expect(rs!.find(r => r.id === "CAPABILITY")?.status).toBe("fail");
+  });
+  it("ACTION_ALLOWED permits remove_negatives (internal rollback type)", () => {
+    const rs = runGates(baseInput({ action: { actionType: "remove_negatives", entityKind: "campaign", entityRef: "123", payload: { resourceNames: ["rn1"] } } }));
+    expect(rs.find(r => r.id === "ACTION_ALLOWED")?.status).toBe("pass");
+  });
   it("DRIFT blocks when live state departed from expected", () => {
     const rs = runGates(baseInput({ expected: { status: "PAUSED" } }));
     expect(blockingFailures(rs).map(r => r.id)).toContain("DRIFT");
@@ -118,7 +134,32 @@ describe("gates", () => {
     expect(g?.severity).toBe("warning");
     expect(blockingFailures(rs).map(r => r.id)).not.toContain("META_LEARNING_RESET");
   });
-  it("META_LEARNING_RESET passes on Google or small Meta deltas", () => {
-    expect(runGates(baseInput()).find(r => r.id === "META_LEARNING_RESET")?.status).toBe("pass");
+  it("META_LEARNING_RESET passes on a real small Meta budget delta (<=20%)", () => {
+    const rs = runGates(baseInput({ network: "meta_ads", validateResult: null,
+      before: baseBefore({ entityKind: "adset", dailyBudgetMicros: 10_000_000 }),
+      action: { actionType: "budget_update", entityKind: "adset", entityRef: "123", payload: { newDailyBudgetMicros: 11_000_000 } } }));
+    expect(rs.find(r => r.id === "META_LEARNING_RESET")?.status).toBe("pass");
+  });
+  it("BUDGET_DELTA passes at exactly the 30% boundary", () => {
+    const rs = runGates(baseInput({
+      action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 13_000_000 } } }));
+    expect(rs.find(r => r.id === "BUDGET_DELTA")?.status).toBe("pass");
+  });
+  it("ABS_BUDGET_CAP passes at exactly the cap", () => {
+    const settings = { ...CC_SETTINGS_DEFAULTS, maxDailyBudgetMicros: 50_000_000 };
+    const rs = runGates(baseInput({ settings,
+      action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 50_000_000 } } }));
+    expect(rs.find(r => r.id === "ABS_BUDGET_CAP")?.status).toBe("pass");
+  });
+  it("META_LEARNING_RESET passes at exactly the 20% boundary", () => {
+    const rs = runGates(baseInput({ network: "meta_ads", validateResult: null,
+      before: baseBefore({ entityKind: "adset", dailyBudgetMicros: 10_000_000 }),
+      action: { actionType: "budget_update", entityKind: "adset", entityRef: "123", payload: { newDailyBudgetMicros: 12_000_000 } } }));
+    expect(rs.find(r => r.id === "META_LEARNING_RESET")?.status).toBe("pass");
+  });
+  it("CURRENCY_SANITY passes at exactly MICROS_PER_UNIT", () => {
+    const rs = runGates(baseInput({
+      action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 1_000_000 } } }));
+    expect(rs.find(r => r.id === "CURRENCY_SANITY")?.status).toBe("pass");
   });
 });

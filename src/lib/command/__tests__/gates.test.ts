@@ -162,4 +162,35 @@ describe("gates", () => {
       action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 1_000_000 } } }));
     expect(rs.find(r => r.id === "CURRENCY_SANITY")?.status).toBe("pass");
   });
+  it("ACTION_ALLOWED permits remove_entity (internal rollback type)", () => {
+    const rs = runGates(baseInput({
+      capabilities: { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "remove_entity"] },
+      action: { actionType: "remove_entity", entityKind: "campaign", entityRef: "temp:campaign:2", payload: { resourceNames: ["rn1"] } } }));
+    expect(rs.find(r => r.id === "ACTION_ALLOWED")?.status).toBe("pass");
+  });
+  it("CURRENCY_SANITY + ABS_BUDGET_CAP apply to create_budget too", () => {
+    const settings = { ...CC_SETTINGS_DEFAULTS, maxDailyBudgetMicros: 50_000_000, allowedActionTypes: [...(CC_SETTINGS_DEFAULTS.allowedActionTypes ?? []), "create_budget" as never] };
+    const over = runGates(baseInput({
+      settings,
+      capabilities: { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_budget"] as never },
+      action: { actionType: "create_budget" as never, entityKind: "campaign", entityRef: "temp:budget:1", payload: { name: "b", newDailyBudgetMicros: undefined, amountMicros: 60_000_000 } as never } }));
+    expect(blockingFailures(over).map(r => r.id)).toContain("ABS_BUDGET_CAP");
+    const bad = runGates(baseInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: [...(CC_SETTINGS_DEFAULTS.allowedActionTypes ?? []), "create_budget" as never] },
+      capabilities: { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_budget"] as never },
+      action: { actionType: "create_budget" as never, entityKind: "campaign", entityRef: "temp:budget:1", payload: { name: "b", amountMicros: 900_000 } as never } }));
+    expect(blockingFailures(bad).map(r => r.id)).toContain("CURRENCY_SANITY");
+  });
+  it("PAUSED_ON_CREATE blocks a create_campaign not PAUSED and passes when PAUSED", () => {
+    const bad = runGates(baseInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: [...(CC_SETTINGS_DEFAULTS.allowedActionTypes ?? []), "create_campaign" as never] },
+      capabilities: { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_campaign"] as never },
+      action: { actionType: "create_campaign" as never, entityKind: "campaign", entityRef: "temp:campaign:2", payload: { name: "c", status: "ENABLED" } as never } }));
+    expect(blockingFailures(bad).map(r => r.id)).toContain("PAUSED_ON_CREATE");
+    const ok = runGates(baseInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: [...(CC_SETTINGS_DEFAULTS.allowedActionTypes ?? []), "create_campaign" as never] },
+      capabilities: { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_campaign"] as never },
+      action: { actionType: "create_campaign" as never, entityKind: "campaign", entityRef: "temp:campaign:2", payload: { name: "c", status: "PAUSED" } as never } }));
+    expect(ok.find(r => r.id === "PAUSED_ON_CREATE")?.status).toBe("pass");
+  });
 });

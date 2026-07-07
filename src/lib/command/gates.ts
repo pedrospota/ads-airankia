@@ -24,8 +24,9 @@ const gate = (
 ): GateResult => ({ id, severity, status: pass ? "pass" : "fail", evidence });
 
 function budgetMicros(input: GateInput): number | null {
-  const p = input.action.payload as { newDailyBudgetMicros?: unknown };
-  return typeof p?.newDailyBudgetMicros === "number" ? p.newDailyBudgetMicros : null;
+  const p = input.action.payload as { newDailyBudgetMicros?: unknown; amountMicros?: unknown };
+  const v = input.action.actionType === "create_budget" ? p?.amountMicros : p?.newDailyBudgetMicros;
+  return typeof v === "number" ? v : null;
 }
 
 const killSwitch: Gate = (i) =>
@@ -39,10 +40,12 @@ const capability: Gate = (i) => {
        : `Adaptador sin capacidad: ${i.capabilities.reason ?? `no soporta ${i.action.actionType}`}.`);
 };
 
+const INTERNAL_ACTION_TYPES = new Set(["remove_negatives", "remove_entity"]);
+
 const actionAllowed: Gate = (i) => {
-  // Internal rollback type is always allowed (a rollback restores prior state).
-  if (i.action.actionType === "remove_negatives") {
-    return gate("ACTION_ALLOWED", "blocking", true, "remove_negatives (rollback interno).");
+  // Internal rollback types are always allowed (a rollback restores prior state).
+  if (INTERNAL_ACTION_TYPES.has(i.action.actionType)) {
+    return gate("ACTION_ALLOWED", "blocking", true, `${i.action.actionType} (rollback interno).`);
   }
   const ok = ((i.settings.allowedActionTypes as string[] | undefined) ?? []).includes(i.action.actionType);
   return gate("ACTION_ALLOWED", "blocking", ok,
@@ -82,7 +85,8 @@ const blastRadius: Gate = (i) =>
     `${i.executedTodayForAccount}/${i.settings.maxActionsPerAccountDay} acciones ejecutadas hoy en esta cuenta.`);
 
 const currencySanity: Gate = (i) => {
-  if (i.action.actionType !== "budget_update") return gate("CURRENCY_SANITY", "blocking", true, "No aplica.");
+  const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget";
+  if (!isBudget) return gate("CURRENCY_SANITY", "blocking", true, "No aplica.");
   const next = budgetMicros(i);
   const ok = next !== null && Number.isInteger(next) && next >= MICROS_PER_UNIT;
   return gate("CURRENCY_SANITY", "blocking", ok,
@@ -115,7 +119,8 @@ const validateOnly: Gate = (i) => {
 };
 
 const absBudgetCap: Gate = (i) => {
-  if (i.action.actionType !== "budget_update" || i.settings.maxDailyBudgetMicros == null) {
+  const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget";
+  if (!isBudget || i.settings.maxDailyBudgetMicros == null) {
     return gate("ABS_BUDGET_CAP", "blocking", true, "No aplica (sin tope absoluto o no es presupuesto).");
   }
   const next = budgetMicros(i);
@@ -141,10 +146,17 @@ const metaLearningReset: Gate = (i) => {
                    : `Delta ${deltaPct.toFixed(1)}% > 20%: reiniciará la fase de aprendizaje de Meta.`);
 };
 
+const pausedOnCreate: Gate = (i) => {
+  if (i.action.actionType !== "create_campaign") return gate("PAUSED_ON_CREATE", "blocking", true, "No aplica.");
+  const status = (i.action.payload as { status?: string })?.status;
+  return gate("PAUSED_ON_CREATE", "blocking", status === "PAUSED",
+    status === "PAUSED" ? "Campaña se crea en pausa." : `Campaña de creación debe nacer PAUSED (status=${status ?? "ausente"}).`);
+};
+
 const GATES: Gate[] = [
   killSwitch, capability, actionAllowed, drift, budgetDelta,
   blastRadius, currencySanity, learningPhase, trackingSignal, validateOnly,
-  absBudgetCap, metaLearningReset,
+  absBudgetCap, metaLearningReset, pausedOnCreate,
 ];
 
 export function runGates(input: GateInput): GateResult[] {

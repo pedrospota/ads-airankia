@@ -610,3 +610,87 @@ export const benchmarkEvents = pgTable(
   },
   (table) => [index("idx_benchmark_events_run_seq").on(table.runId, table.seq)]
 );
+
+// ============================================================
+// Centro de Mando (beta) — multi-network execution rail.
+// Spec: docs/superpowers/specs/2026-07-07-command-center-beta-design.md
+// ============================================================
+
+export const ccActions = pgTable(
+  "cc_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull(),
+    createdBy: text("created_by").notNull(), // session email
+    network: text("network").notNull(), // google_ads|meta_ads
+    connectionId: uuid("connection_id"), // Supabase ads_google_connections.id (null for Meta env-token)
+    accountRef: text("account_ref").notNull(), // Google customer_id | Meta act_<id>
+    entityKind: text("entity_kind").notNull(), // campaign|ad_group|adset
+    entityRef: text("entity_ref").notNull(),
+    entityName: text("entity_name"),
+    actionType: text("action_type").notNull(), // budget_update|pause|enable|add_negatives
+    payload: jsonb("payload").notNull(),
+    expected: jsonb("expected"), // before-values captured at approve time (drift baseline)
+    source: text("source").default("manual").notNull(), // engine|manual|regla|copiloto
+    recKey: text("rec_key"), // dedup with engine proposals
+    rationale: text("rationale"),
+    evidence: jsonb("evidence"),
+    status: text("status").default("proposed").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    gateResults: jsonb("gate_results"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_cc_actions_workspace").on(table.workspaceId),
+    index("idx_cc_actions_status").on(table.status),
+    index("idx_cc_actions_account").on(table.accountRef),
+  ]
+);
+
+export const ccExecutions = pgTable(
+  "cc_executions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actionId: uuid("action_id")
+      .references(() => ccActions.id)
+      .notNull(),
+    attempt: integer("attempt").default(1).notNull(),
+    network: text("network").notNull(),
+    accountRef: text("account_ref").notNull(),
+    operation: text("operation").notNull(),
+    requestHash: text("request_hash").notNull(),
+    validateOnly: boolean("validate_only").default(false).notNull(),
+    before: jsonb("before").notNull(),
+    request: jsonb("request"),
+    response: jsonb("response"),
+    after: jsonb("after"),
+    rollbackRecipe: jsonb("rollback_recipe"),
+    status: text("status").default("pending").notNull(), // pending|done|failed|rolled_back
+    actor: text("actor").notNull(), // session email
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_cc_executions_action").on(table.actionId),
+    uniqueIndex("uq_cc_executions_attempt").on(table.actionId, table.requestHash, table.attempt),
+  ]
+);
+
+export const ccSettings = pgTable("cc_settings", {
+  workspaceId: uuid("workspace_id").primaryKey(),
+  executionsPaused: boolean("executions_paused").default(false).notNull(), // kill switch
+  maxBudgetDeltaPct: integer("max_budget_delta_pct").default(30).notNull(),
+  maxActionsPerAccountDay: integer("max_actions_per_account_day").default(20).notNull(),
+  requireTwoStep: boolean("require_two_step").default(true).notNull(),
+  allowedActionTypes: jsonb("allowed_action_types")
+    .default(["budget_update", "pause", "enable", "add_negatives"])
+    .notNull(),
+  watchHours: integer("watch_hours").default(72).notNull(),
+  maxDailyBudgetMicros: bigint("max_daily_budget_micros", { mode: "number" }),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});

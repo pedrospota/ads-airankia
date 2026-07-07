@@ -30,8 +30,19 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     });
 
     if (outcome.ok) {
-      await setBlueprintStatus(id, "executed", access.workspaceIds);
+      // Guard the success-status write: it must not be able to flip this known-success
+      // outcome to "failed" via the outer catch below if the write itself throws.
+      await setBlueprintStatus(id, "executed", access.workspaceIds).catch(() => undefined);
       return NextResponse.json(outcome);
+    }
+
+    // Blast-radius pre-check refusal (plan-runner.ts): nothing executed, so this isn't a
+    // downstream failure — it's client-actionable (409) and must not stamp the blueprint
+    // "failed". Revert the "executing" transition above back to "approved" so the plan
+    // can be retried as-is.
+    if (outcome.failedSeq === -1) {
+      await setBlueprintStatus(id, "approved", access.workspaceIds).catch(() => undefined);
+      return NextResponse.json({ ok: false, failedSeq: outcome.failedSeq, error: outcome.error }, { status: 409 });
     }
 
     // executeAction (the single-action chokepoint) only leaves `error` undefined when a

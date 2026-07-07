@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCommandAccess, commandDenied } from "@/lib/command/access";
 import { createBlueprint, listBlueprints } from "@/lib/command/blueprint/repo";
+import { createSupabaseReadClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +46,19 @@ export async function POST(request: NextRequest) {
   if (!network || !accountRef || typeof body.doc !== "object" || body.doc === null) {
     return NextResponse.json({ error: "Faltan campos: network, account_ref, doc" }, { status: 400 });
   }
-  const connectionId = typeof body.connection_id === "string" ? body.connection_id : null;
+
+  if (network === "google_ads" && typeof body.connection_id !== "string") {
+    return NextResponse.json({ error: "connection_id es obligatorio para Google Ads" }, { status: 400 });
+  }
+  let connectionId: string | null = null;
+  if (network === "google_ads" && typeof body.connection_id === "string") {
+    const db = createSupabaseReadClient(access.accessToken);
+    const { data: conn } = await db.from("ads_google_connections").select("workspace_id").eq("id", body.connection_id).maybeSingle();
+    if (!conn || String(conn.workspace_id) !== workspaceId) {
+      return NextResponse.json({ error: "connection_id no pertenece a este workspace" }, { status: 400 });
+    }
+    connectionId = body.connection_id;
+  }
 
   try {
     const blueprint = await createBlueprint({

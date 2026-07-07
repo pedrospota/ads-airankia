@@ -16,6 +16,9 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
 
   const blueprint = await getBlueprint(id, access.workspaceIds);
   if (!blueprint) return NextResponse.json({ error: "no encontrado" }, { status: 404 });
+  if (blueprint.status !== "executed" && blueprint.status !== "failed") {
+    return NextResponse.json({ error: `No se puede revertir desde estado ${blueprint.status}` }, { status: 409 });
+  }
 
   try {
     await setBlueprintStatus(id, "executing", access.workspaceIds);

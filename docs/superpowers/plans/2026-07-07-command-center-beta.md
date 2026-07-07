@@ -3799,3 +3799,26 @@ Expected: PASS.
 git add docs/knowledge docs/research src/lib/command/knowledge.ts src/lib/command/__tests__/knowledge.test.ts
 git commit -m "feat(command): knowledge pack — MIT playbooks + distilled ad thresholds (attribution recorded)"
 ```
+
+---
+
+### Task 16 (follow-up, non-blocking): Meta pre-live hardening
+
+Not required for the Google-first beta (Meta stays credential-gated until Pedro
+creates a system-user token). Do these before enabling Meta with real credentials:
+
+1. **`appsecret_proof`** — when `META_APP_SECRET` is set, add
+   `appsecret_proof = HMAC-SHA256(app_secret, access_token)` (hex) as a query param on
+   every Meta Graph call in `src/lib/command/networks/meta.ts` (`metaGet`/`metaPost`).
+   Required when the Meta app has "Require app secret proof for server API calls" on
+   (standard for system-user tokens). Add a unit test asserting the param is present
+   when the secret is set and absent when it isn't. Add `META_APP_SECRET` to the env
+   catalog (§11) and deploy notes.
+2. **Widen `CONVERSION_ACTIONS`** (meta.ts) to include at least `omni_lead`,
+   `onsite_conversion.purchase`, `offsite_conversion.fb_pixel_custom` (and review
+   Meta's current standard-event action_type list) so `conversions30d` isn't
+   undercounted on lead-gen/onsite accounts — undercounting there causes a
+   false-positive `TRACKING_SIGNAL` warning. Read-only signal; no mutation impact.
+3. Remove the dead `CcActionInput` import in meta.ts.
+
+Small, isolated; TDD each. Commit: `fix(command): Meta pre-live hardening — appsecret_proof, conversion actions, dead import`.

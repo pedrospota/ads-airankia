@@ -132,15 +132,33 @@ export async function executeAction(
   }
 
   await deps.repo.transitionAction(row, "executing", { gateResults: gates });
-  const recipe = adapter.buildRollback(input, before, { operation: "", request: null, response: null }) ?? null;
-  const result = await performWrite({ row, input, adapter, auth, before, gates, actor, deps, recipe });
+  let result: { ok: boolean; executionId?: string; error?: string };
+  try {
+    const recipe = adapter.buildRollback(input, before, { operation: "", request: null, response: null }) ?? null;
+    result = await performWrite({ row, input, adapter, auth, before, gates, actor, deps, recipe });
+  } catch (e) {
+    // Safety net: performWrite only PROPAGATES throws from its pre-network portion
+    // (the pending-ledger insert / request hashing) — a post-mutation failure is
+    // caught inside performWrite and returned. So an exception here means no live
+    // change landed; force the action out of the 'executing' limbo to 'failed'
+    // rather than stranding it (which would need manual DB repair).
+    const message = e instanceof Error ? e.message : "error antes de ejecutar la mutación";
+    await deps.repo
+      .transitionAction({ ...row, status: "executing" } as CcActionRow, "failed", { error: message })
+      .catch(() => undefined);
+    return { ok: false, error: message };
+  }
+  // The mutation decision is made; the ledger row is the source of truth. Guard the
+  // status-flag write so a post-mutation DB blip can't throw and strand the action.
   if (result.ok) {
-    await deps.repo.transitionAction({ ...row, status: "executing" } as CcActionRow, "executed", {
-      executedAt: deps.now(), error: null,
-    });
+    await deps.repo
+      .transitionAction({ ...row, status: "executing" } as CcActionRow, "executed", { executedAt: deps.now(), error: null })
+      .catch(() => undefined);
     return { ok: true, executionId: result.executionId };
   }
-  await deps.repo.transitionAction({ ...row, status: "executing" } as CcActionRow, "failed", { error: result.error });
+  await deps.repo
+    .transitionAction({ ...row, status: "executing" } as CcActionRow, "failed", { error: result.error })
+    .catch(() => undefined);
   return { ok: false, error: result.error, executionId: result.executionId };
 }
 

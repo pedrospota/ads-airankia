@@ -83,6 +83,24 @@ describe("executeAction", () => {
     expect(out.blocked?.some(g => g.id === "KILL_SWITCH")).toBe(true);
     expect(deps.log.some(l => l.startsWith("insertExec"))).toBe(false);
     expect(deps.log).not.toContain("transition:executing");
+    // Positively confirm the whole point of the approved-self-loop: gate_results IS
+    // persisted (self-transition fires) with the gates as its payload.
+    expect(deps.log).toContain("transition:approved");
+    const approvedPatch = deps.transitions.find(([to]) => to === "approved")?.[1] as { gateResults?: unknown } | undefined;
+    expect(Array.isArray(approvedPatch?.gateResults)).toBe(true);
+  });
+
+  it("safety net: a throw in the mutation window (pre-network) fails the action, never strands it in executing", async () => {
+    const deps = fakeDeps();
+    deps.repo.insertExecution = async () => { throw new Error("ledger DB blip"); };
+    let out: Awaited<ReturnType<typeof executeAction>> | undefined;
+    // Must NOT throw out of executeAction (that would leave the action stuck in 'executing').
+    await expect((async () => { out = await executeAction("a1", "op@x.com", ["w1"], deps); })()).resolves.toBeUndefined();
+    expect(out!.ok).toBe(false);
+    expect(out!.error).toContain("blip");
+    // Transitioned to executing, then force-failed out of limbo (not left hanging).
+    expect(deps.log).toContain("transition:executing");
+    expect(deps.log).toContain("transition:failed");
   });
 
   it("CC_DRY_RUN: records validate-only ledger row, action stays approved", async () => {

@@ -71,4 +71,66 @@ describe("mergeEditDoc (server-owned baseline)", () => {
     const out = mergeEditDoc(stored, incoming);
     expect(out.campaign.adGroups[0].ads[0].replacement?.tempId).toBe("t1");
   });
+  it("preserves server-owned resourceNames when incoming tampers them", () => {
+    const stored = baseDoc();
+    const incoming = baseDoc();
+
+    // Tamper with all resourceNames
+    incoming.campaign.resourceName = "customers/123/campaigns/999";
+    incoming.campaign.adGroups[0].resourceName = "customers/123/adGroups/999";
+    incoming.campaign.adGroups[0].ads[0].resourceName = "customers/123/adGroupAds/999~111";
+
+    const out = mergeEditDoc(stored, incoming);
+
+    // Verify all resourceNames are preserved from stored (incoming impostor nodes are not included)
+    expect(out.campaign.resourceName).toBe("customers/123/campaigns/5");
+    expect(out.campaign.adGroups[0].resourceName).toBe("customers/123/adGroups/7");
+    expect(out.campaign.adGroups[0].ads[0].resourceName).toBe("customers/123/adGroupAds/7~11");
+    expect(out.campaign.adGroups).toHaveLength(1);
+    expect(out.campaign.adGroups[0].ads).toHaveLength(1);
+  });
+  it("preserves server-owned accountRef, network, baseKeywords, unsupported, and base against tampering", () => {
+    const stored = baseDoc();
+    const incoming = baseDoc();
+
+    // Tamper with server-owned fields (keeping resourceNames same for matching)
+    incoming.accountRef = "999";
+    incoming.network = "google_ads";
+    incoming.campaign.adGroups[0].baseKeywords = [];
+    incoming.campaign.adGroups[0].ads[0].unsupported = true;
+    incoming.campaign.adGroups[0].ads[0].base.headlines = [{ text: "Tampered1" }, { text: "Tampered2" }];
+
+    const out = mergeEditDoc(stored, incoming);
+
+    expect(out.accountRef).toBe("123");
+    expect(out.network).toBe("google_ads");
+    expect(out.campaign.adGroups[0].baseKeywords).toHaveLength(1);
+    expect(out.campaign.adGroups[0].baseKeywords[0].text).toBe("kw");
+    expect(out.campaign.adGroups[0].ads[0].unsupported).toBe(false);
+    expect(out.campaign.adGroups[0].ads[0].base.headlines).toHaveLength(3);
+    expect(out.campaign.adGroups[0].ads[0].base.headlines[0].text).toBe("H1");
+  });
+  it("preserves client replacement while keeping server-owned base on same ad node", () => {
+    const stored = baseDoc();
+    const incoming = baseDoc();
+
+    // Set replacement (client-owned) and tamper base.headlines (server-owned) on same ad
+    incoming.campaign.adGroups[0].ads[0].replacement = {
+      tempId: "t1", finalUrl: "https://y.com",
+      headlines: [{ text: "New1" }, { text: "New2" }, { text: "New3" }],
+      descriptions: [{ text: "NewD1" }, { text: "NewD2" }]
+    };
+    incoming.campaign.adGroups[0].ads[0].base.headlines = [{ text: "Tampered1" }, { text: "Tampered2" }];
+
+    const out = mergeEditDoc(stored, incoming);
+
+    // Replacement is client-owned (taken from incoming)
+    expect(out.campaign.adGroups[0].ads[0].replacement?.tempId).toBe("t1");
+    expect(out.campaign.adGroups[0].ads[0].replacement?.finalUrl).toBe("https://y.com");
+    // base.headlines is server-owned (preserved from stored)
+    expect(out.campaign.adGroups[0].ads[0].base.headlines).toHaveLength(3);
+    expect(out.campaign.adGroups[0].ads[0].base.headlines[0].text).toBe("H1");
+    expect(out.campaign.adGroups[0].ads[0].base.headlines[1].text).toBe("H2");
+    expect(out.campaign.adGroups[0].ads[0].base.headlines[2].text).toBe("H3");
+  });
 });

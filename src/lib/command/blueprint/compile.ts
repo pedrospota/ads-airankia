@@ -21,6 +21,16 @@ export interface CompiledAction {
   recKey: string;
 }
 
+// Google Ads language constant IDs (languageConstants/<id>). Extend as the builder adds languages.
+const LANGUAGE_CONSTANTS: Record<string, string> = {
+  es: "1003",
+  en: "1000",
+  pt: "1014",
+  fr: "1002",
+  de: "1001",
+  it: "1004",
+};
+
 const tmp = (ref: string) => `tmp:${ref}`;
 function recKey(blueprintId: string, seq: number): string {
   return (
@@ -66,20 +76,26 @@ export function compile(
       amountMicros: c.budget.dailyMicros,
     } as CreateBudgetPayload
   );
-  push(
-    "create_campaign",
-    "campaign",
-    c.tempId,
-    {
-      name: c.name,
-      status: "PAUSED",
-      channel: "SEARCH",
-      budgetRef: tmp(c.budget.tempId),
-      bidding: c.bidding,
-      geoTargetIds: c.geo.countryCodes,
-      presenceOnly: c.geo.presenceOnly,
-    } as CreateCampaignPayload
-  );
+  const campaignPayload: CreateCampaignPayload = {
+    name: c.name,
+    status: "PAUSED",
+    channel: "SEARCH",
+    budgetRef: tmp(c.budget.tempId),
+    bidding: c.bidding,
+    geoTargetIds: c.geo.countryCodes,
+    presenceOnly: c.geo.presenceOnly,
+  };
+
+  // Map languageCode to Google Ads language constant ID (fail-closed)
+  if (c.languageCode) {
+    const languageId = LANGUAGE_CONSTANTS[c.languageCode];
+    if (!languageId) {
+      throw new Error(`Idioma no soportado: ${c.languageCode}`);
+    }
+    campaignPayload.languageId = languageId;
+  }
+
+  push("create_campaign", "campaign", c.tempId, campaignPayload);
   for (const g of c.adGroups) {
     push(
       "create_ad_group",

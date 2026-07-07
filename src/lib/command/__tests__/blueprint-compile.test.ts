@@ -62,13 +62,19 @@ describe("compile", () => {
     expect((kws.payload as { adGroupRef: string }).adGroupRef).toBe(
       "tmp:ad_group:3"
     );
+    const ad = a.find((x) => x.actionType === "create_ad")!;
+    expect((ad.payload as { adGroupRef: string }).adGroupRef).toBe(
+      "tmp:ad_group:3"
+    );
   });
   it("campaign create is PAUSED and carries geo + bidding", () => {
     const c = compile(doc(), "bp-1").find(
       (x) => x.actionType === "create_campaign"
     )!;
-    const p = c.payload as { status: string };
+    const p = c.payload as { status: string; geoTargetIds: string[]; bidding: unknown };
     expect(p.status).toBe("PAUSED");
+    expect(p.geoTargetIds).toEqual(["MX"]);
+    expect(p.bidding).toEqual({ strategy: "MAXIMIZE_CONVERSIONS" });
   });
   it("keywords action bundles keywords + negatives", () => {
     const k = compile(doc(), "bp-1").find(
@@ -85,5 +91,117 @@ describe("compile", () => {
     expect(compile(doc(), "bp-1")[0].recKey).not.toBe(
       compile(doc(), "bp-2")[0].recKey
     );
+  });
+  it("languageCode es maps to languageId 1003", () => {
+    const blueprint = parseBlueprint({
+      network: "google_ads",
+      campaign: {
+        nodeId: "c1",
+        tempId: "campaign:2",
+        name: "Camp",
+        channel: "SEARCH",
+        status: "PAUSED",
+        budget: { nodeId: "b1", tempId: "budget:1", dailyMicros: 350_000_000 },
+        bidding: { strategy: "MAXIMIZE_CONVERSIONS" },
+        geo: { countryCodes: ["MX"], presenceOnly: true },
+        languageCode: "es",
+        adGroups: [
+          {
+            nodeId: "g1",
+            tempId: "ad_group:3",
+            name: "AG",
+            keywords: [{ text: "kw", match: "PHRASE" }],
+            negatives: [],
+            ads: [
+              {
+                nodeId: "a1",
+                tempId: "ad:4",
+                finalUrl: "https://x.mx/a",
+                headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }],
+                descriptions: [{ text: "D1" }, { text: "D2" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const c = compile(blueprint, "bp-1").find(
+      (x) => x.actionType === "create_campaign"
+    )!;
+    const p = c.payload as { languageId?: string };
+    expect(p.languageId).toBe("1003");
+  });
+  it("unmapped languageCode throws", () => {
+    const blueprint = parseBlueprint({
+      network: "google_ads",
+      campaign: {
+        nodeId: "c1",
+        tempId: "campaign:2",
+        name: "Camp",
+        channel: "SEARCH",
+        status: "PAUSED",
+        budget: { nodeId: "b1", tempId: "budget:1", dailyMicros: 350_000_000 },
+        bidding: { strategy: "MAXIMIZE_CONVERSIONS" },
+        geo: { countryCodes: ["MX"], presenceOnly: true },
+        languageCode: "xx",
+        adGroups: [
+          {
+            nodeId: "g1",
+            tempId: "ad_group:3",
+            name: "AG",
+            keywords: [{ text: "kw", match: "PHRASE" }],
+            negatives: [],
+            ads: [
+              {
+                nodeId: "a1",
+                tempId: "ad:4",
+                finalUrl: "https://x.mx/a",
+                headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }],
+                descriptions: [{ text: "D1" }, { text: "D2" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(() => compile(blueprint, "bp-1")).toThrow("Idioma no soportado: xx");
+  });
+  it("omitted languageCode yields no languageId key", () => {
+    const blueprint = parseBlueprint({
+      network: "google_ads",
+      campaign: {
+        nodeId: "c1",
+        tempId: "campaign:2",
+        name: "Camp",
+        channel: "SEARCH",
+        status: "PAUSED",
+        budget: { nodeId: "b1", tempId: "budget:1", dailyMicros: 350_000_000 },
+        bidding: { strategy: "MAXIMIZE_CONVERSIONS" },
+        geo: { countryCodes: ["MX"], presenceOnly: true },
+        adGroups: [
+          {
+            nodeId: "g1",
+            tempId: "ad_group:3",
+            name: "AG",
+            keywords: [{ text: "kw", match: "PHRASE" }],
+            negatives: [],
+            ads: [
+              {
+                nodeId: "a1",
+                tempId: "ad:4",
+                finalUrl: "https://x.mx/a",
+                headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }],
+                descriptions: [{ text: "D1" }, { text: "D2" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const c = compile(blueprint, "bp-1").find(
+      (x) => x.actionType === "create_campaign"
+    )!;
+    const p = c.payload as { languageId?: string };
+    expect(p.languageId).toBeUndefined();
   });
 });

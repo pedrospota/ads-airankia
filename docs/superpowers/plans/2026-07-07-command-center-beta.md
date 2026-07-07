@@ -39,11 +39,15 @@
 - Create: `src/lib/command/request-hash.ts`
 - Test: `src/lib/command/__tests__/request-hash.test.ts`
 
-- [ ] **Step 1: Add test script to package.json**
+- [ ] **Step 1: Add test script + bun types**
 
 In `package.json` `"scripts"`, add after `"lint"`:
 ```json
 "test": "bun test src/lib/command"
+```
+Then add the ambient types so `tsc --noEmit` resolves `bun:test` (Bun's runtime doesn't need it, but the repo's typecheck convention does):
+```bash
+bun add -d @types/bun
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -95,7 +99,10 @@ export type CcEntityKind = "campaign" | "ad_group" | "adset";
 export type CcActionType = "budget_update" | "pause" | "enable" | "add_negatives";
 export type CcInternalActionType = CcActionType | "remove_negatives";
 
-export const CC_ACTION_TYPES: CcActionType[] = ["budget_update", "pause", "enable", "add_negatives"];
+export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_update", "pause", "enable", "add_negatives"]);
+// NOTE (deferred): CcActionInput.payload is not a discriminated union on actionType —
+// consumers cast payload at known sites. Acceptable for the beta; revisit if the cast
+// sites multiply. (Quality review 2026-07-07.)
 
 export type CcActionStatus =
   | "proposed" | "approved" | "executing" | "executed"
@@ -195,14 +202,14 @@ export interface CcSettingsValues {
   watchHours: number;
 }
 
-export const CC_SETTINGS_DEFAULTS: CcSettingsValues = {
+export const CC_SETTINGS_DEFAULTS: Readonly<CcSettingsValues> = Object.freeze({
   executionsPaused: false,
   maxBudgetDeltaPct: 30,
   maxActionsPerAccountDay: 20,
   requireTwoStep: true,
   allowedActionTypes: [...CC_ACTION_TYPES],
   watchHours: 72,
-};
+});
 
 export const MICROS_PER_UNIT = 1_000_000;
 /** Meta daily_budget is in minor units (cents). cents * 10_000 = micros. */
@@ -216,10 +223,15 @@ import { createHash } from "crypto";
 
 /** Deterministic JSON: objects get sorted keys (recursive); arrays keep order. */
 export function canonicalJson(value: unknown): string {
+  if (value === undefined) throw new Error("canonicalJson: undefined no es serializable");
   return JSON.stringify(sortValue(value));
 }
 
 function sortValue(value: unknown): unknown {
+  // Date collapses to {} under the Object.keys() branch (its fields are internal
+  // slots), which would make two requests differing only by a timestamp hash
+  // identical — normalize to ISO first. This hash backs a DB uniqueness constraint.
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(sortValue);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};

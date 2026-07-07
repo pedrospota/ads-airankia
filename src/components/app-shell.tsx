@@ -1,5 +1,7 @@
 import { AppSidebar } from "./app-sidebar";
 import { CommandPaletteMount } from "./command-palette";
+import { createSupabaseServerClient } from "@/lib/supabase-auth";
+import { isAdminEmail } from "@/lib/admin";
 
 /**
  * Global app shell: persistent left sidebar + content column.
@@ -22,7 +24,18 @@ import { CommandPaletteMount } from "./command-palette";
  * radial accent glow (globals.css `main` rule); children render inside a
  * 1150px centered column with 40px/32px padding.
  */
-export function AppShell({ children }: { children: React.ReactNode }) {
+export async function AppShell({ children }: { children: React.ReactNode }) {
+  // Centro de Mando (beta): only computed when the flag is on, and only
+  // ever true for admins — keeps the nav/palette byte-unchanged otherwise.
+  let commandCenter = false;
+  if (process.env.COMMAND_CENTER_BETA === "true") {
+    const authClient = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
+    commandCenter = Boolean(user?.email && isAdminEmail(user.email));
+  }
+
   return (
     <div
       style={{
@@ -32,9 +45,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         minHeight: "100vh",
       }}
     >
-      <AppSidebar />
+      <AppSidebar commandCenter={commandCenter} />
       {/* Global Cmd/Ctrl+K launcher. Renders an overlay only when open. */}
-      <CommandPaletteMount />
+      <CommandPaletteMount commandCenter={commandCenter} />
       <main style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{

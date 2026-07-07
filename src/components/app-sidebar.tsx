@@ -161,6 +161,12 @@ function Icon({ name }: { name: string }) {
         <line x1="12" y1="8" x2="12.01" y2="8" />
       </>
     ),
+    comando: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M19.1 4.9l-2.8 2.8M7.7 16.3l-2.8 2.8" />
+      </>
+    ),
   };
 
   return (
@@ -247,14 +253,33 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// Centro de Mando (beta): additive group, spliced in right after "Principal"
+// only when the flag+admin gate (threaded from AppShell) is on. NAV_GROUPS
+// itself stays untouched so the ungated nav is byte-identical.
+const COMMAND_GROUP: NavGroup = {
+  label: "Centro de Mando",
+  items: [
+    { href: "/command", label: "Resumen", icon: "comando" },
+    { href: "/command/acciones", label: "Acciones", icon: "comando" },
+    { href: "/command/cuentas", label: "Cuentas", icon: "comando" },
+    { href: "/command/bitacora", label: "Bitácora", icon: "comando" },
+  ],
+};
+
+function navGroups(commandCenter: boolean): NavGroup[] {
+  return commandCenter
+    ? [...NAV_GROUPS.slice(0, 1), COMMAND_GROUP, ...NAV_GROUPS.slice(1)]
+    : NAV_GROUPS;
+}
+
 /**
  * Longest-prefix active match across ALL items so e.g.
  * /performance/recomendaciones highlights "Recomendaciones" and not
  * "Cockpit" (/performance), while /performance/123 still highlights Cockpit.
  */
-function findActiveHref(pathname: string): string | null {
+function findActiveHref(pathname: string, groups: NavGroup[]): string | null {
   let active: string | null = null;
-  for (const group of NAV_GROUPS) {
+  for (const group of groups) {
     for (const item of group.items) {
       const matches =
         pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -270,10 +295,17 @@ function findActiveHref(pathname: string): string | null {
  * Sidebar
  * ------------------------------------------------------------------------- */
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({
+  onNavigate,
+  commandCenter,
+}: {
+  onNavigate?: () => void;
+  commandCenter?: boolean;
+}) {
   const pathname = usePathname();
   const { colors } = useTheme();
-  const activeHref = findActiveHref(pathname ?? "");
+  const groups = navGroups(commandCenter ?? false);
+  const activeHref = findActiveHref(pathname ?? "", groups);
   // Hover = card surface (#0E0E11 dark), active = surface2 (#131316 dark).
   const hoverBg = colors.bgCard;
   const activeBg = colors.surface2;
@@ -333,7 +365,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         aria-label="Navegación principal"
         style={{ padding: "0 12px 32px" }}
       >
-        {NAV_GROUPS.map((group) => (
+        {groups.map((group) => (
           <div key={group.label} style={{ marginTop: 24 }}>
             <div
               style={{
@@ -447,7 +479,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
  * - Desktop (md+): sticky column, always visible, ~230px wide.
  * - Mobile: hidden by default; a floating toggle opens it as an overlay.
  */
-export function AppSidebar() {
+export function AppSidebar({ commandCenter }: { commandCenter?: boolean } = {}) {
   const pathname = usePathname();
   const { colors } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -482,7 +514,7 @@ export function AppSidebar() {
           height: "100vh",
         }}
       >
-        <SidebarContent />
+        <SidebarContent commandCenter={commandCenter} />
       </aside>
 
       {/* Mobile toggle */}
@@ -580,7 +612,10 @@ export function AppSidebar() {
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
-            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent
+              onNavigate={() => setMobileOpen(false)}
+              commandCenter={commandCenter}
+            />
           </aside>
         </div>
       )}

@@ -61,11 +61,20 @@ const DESTINATIONS: Destination[] = [
   { label: "Admin", href: "/admin", section: "Cuenta" },
 ];
 
+// Centro de Mando (beta): only appended to the searchable index when
+// `commandCenter` (threaded from AppShell's flag+admin gate) is true.
+const COMMAND_DESTINATIONS: Destination[] = [
+  { label: "Centro de Mando · Resumen", href: "/command", section: "Centro de Mando" },
+  { label: "Centro de Mando · Acciones", href: "/command/acciones", section: "Centro de Mando" },
+  { label: "Centro de Mando · Cuentas", href: "/command/cuentas", section: "Centro de Mando" },
+  { label: "Centro de Mando · Bitácora", href: "/command/bitacora", section: "Centro de Mando" },
+];
+
 /** Case-insensitive substring match on label + section. */
-function filterDestinations(query: string): Destination[] {
+function filterDestinations(query: string, destinations: Destination[]): Destination[] {
   const q = query.trim().toLowerCase();
-  if (!q) return DESTINATIONS;
-  return DESTINATIONS.filter((d) =>
+  if (!q) return destinations;
+  return destinations.filter((d) =>
     `${d.label} ${d.section}`.toLowerCase().includes(q)
   );
 }
@@ -77,9 +86,11 @@ function filterDestinations(query: string): Destination[] {
 export function CommandPalette({
   open,
   onClose,
+  commandCenter,
 }: {
   open: boolean;
   onClose: () => void;
+  commandCenter?: boolean;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,7 +98,14 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
-  const results = useMemo(() => filterDestinations(query), [query]);
+  const destinations = useMemo(
+    () => (commandCenter ? [...DESTINATIONS, ...COMMAND_DESTINATIONS] : DESTINATIONS),
+    [commandCenter]
+  );
+  const results = useMemo(
+    () => filterDestinations(query, destinations),
+    [query, destinations]
+  );
 
   // Reset query + selection and autofocus the input each time we open.
   useEffect(() => {
@@ -352,7 +370,9 @@ export function CommandPalette({
  * app-shell can stay a server component and just render this.
  * ------------------------------------------------------------------------- */
 
-export function CommandPaletteMount() {
+export function CommandPaletteMount({
+  commandCenter,
+}: { commandCenter?: boolean } = {}) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -366,5 +386,11 @@ export function CommandPaletteMount() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  return <CommandPalette open={open} onClose={() => setOpen(false)} />;
+  return (
+    <CommandPalette
+      open={open}
+      onClose={() => setOpen(false)}
+      commandCenter={commandCenter}
+    />
+  );
 }

@@ -3,3 +3,4 @@ node_modules/
 .env.local
 .env
 public/file.svg\npublic/globe.svg\npublic/next.svg\npublic/vercel.svg\npublic/window.svg
+tsconfig.tsbuildinfo

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { META_THRESHOLDS, GOOGLE_THRESHOLDS, budgetStepOk, isFatigued } from "../knowledge";
+import { META_THRESHOLDS, GOOGLE_THRESHOLDS, budgetStepOk, isFatigued, RSA_SPEC } from "../knowledge";
 
 describe("knowledge constants", () => {
   it("exposes the canonical scaling + kill numbers", () => {
@@ -19,5 +19,14 @@ describe("knowledge constants", () => {
     expect(isFatigued({ campaignType: "prospecting", frequency7d: 4.5, ctrDeltaPct: -25 })).toBe(true);
     expect(isFatigued({ campaignType: "prospecting", frequency7d: 1.5, ctrDeltaPct: -5 })).toBe(false);
     expect(isFatigued({ campaignType: "retargeting", frequency7d: 5.0, ctrDeltaPct: -10 })).toBe(false);
+  });
+  it("RSA_SPEC carries Google's real RSA limits", () => {
+    expect(RSA_SPEC.headline.maxLen).toBe(30);
+    expect(RSA_SPEC.headline.min).toBe(3);
+    expect(RSA_SPEC.headline.max).toBe(15);
+    expect(RSA_SPEC.description.maxLen).toBe(90);
+    expect(RSA_SPEC.description.min).toBe(2);
+    expect(RSA_SPEC.description.max).toBe(4);
+    expect(RSA_SPEC.path.maxLen).toBe(15);
   });
 });

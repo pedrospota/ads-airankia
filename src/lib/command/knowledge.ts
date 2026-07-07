@@ -42,3 +42,10 @@ export function isFatigued(s: FatigueSignal): boolean {
     : META_THRESHOLDS.freqRetargetingCritical;
   return s.frequency7d >= freqCritical && s.ctrDeltaPct <= META_THRESHOLDS.ctrDecayPctFatigue;
 }
+
+/** Google Responsive Search Ad limits (API-enforced; validateOnly is the authoritative backstop). */
+export const RSA_SPEC = {
+  headline: { min: 3, max: 15, maxLen: 30 },
+  description: { min: 2, max: 4, maxLen: 90 },
+  path: { maxLen: 15 },
+} as const;

@@ -460,6 +460,36 @@ export const googleAdapter: NetworkAdapter = {
   },
 };
 
+// Command Center v2.3 edit-mode: raw GAQL tree for a single Search campaign,
+// consumed by the PURE mapper in edit/read-tree.ts (buildEditDoc). Kept here
+// (not in read-tree.ts) because gaql() is module-private to this file.
+export interface RawCampaignTree { campaign: GaqlRow; adGroups: GaqlRow[]; keywords: GaqlRow[]; ads: GaqlRow[] }
+
+export async function readCampaignTree(auth: AdapterAuth, accountRef: string, campaignId: string): Promise<RawCampaignTree> {
+  const id = Number(campaignId);
+  const [c] = await gaql(auth, accountRef, `
+    SELECT campaign.id, campaign.resource_name, campaign.name, campaign.status, campaign.advertising_channel_type,
+           campaign.campaign_budget, campaign_budget.amount_micros, campaign_budget.explicitly_shared, customer.currency_code
+    FROM campaign WHERE campaign.id = ${id}`);
+  if (!c) throw new Error(`Campaña ${campaignId} no encontrada.`);
+  const camp = (c as { campaign?: { advertisingChannelType?: string; status?: string } }).campaign;
+  if (camp?.advertisingChannelType !== "SEARCH") throw new Error("Solo campañas de Búsqueda se pueden editar en esta versión.");
+  if (camp?.status === "REMOVED") throw new Error("La campaña está eliminada.");
+  const adGroups = await gaql(auth, accountRef, `
+    SELECT ad_group.id, ad_group.resource_name, ad_group.name, ad_group.status
+    FROM ad_group WHERE campaign.id = ${id} AND ad_group.status != 'REMOVED' ORDER BY ad_group.name`);
+  const keywords = await gaql(auth, accountRef, `
+    SELECT ad_group_criterion.resource_name, ad_group_criterion.negative, ad_group_criterion.keyword.text,
+           ad_group_criterion.keyword.match_type, ad_group.id
+    FROM ad_group_criterion WHERE campaign.id = ${id} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`);
+  const ads = await gaql(auth, accountRef, `
+    SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.type, ad_group_ad.ad.final_urls,
+           ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions,
+           ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group.id
+    FROM ad_group_ad WHERE campaign.id = ${id} AND ad_group_ad.status != 'REMOVED'`);
+  return { campaign: c, adGroups, keywords, ads };
+}
+
 function rowToSnapshot(entityKind: CcEntityKind, row: GaqlRow): EntitySnapshot {
   const c = (row.campaign ?? {}) as Record<string, unknown>;
   const b = (row.campaignBudget ?? {}) as Record<string, unknown>;

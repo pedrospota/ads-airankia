@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { googleAdapter } from "../networks/google";
+import { googleAdapter, readCampaignTree } from "../networks/google";
 import type { CcInternalActionType, EntitySnapshot } from "../types";
 
 const AUTH = { googleRefreshToken: "rt-1", googleLoginCustomerId: "9999999999" };
@@ -297,5 +297,15 @@ describe("googleAdapter", () => {
       { operation: "adGroupAds:mutate", request: {}, response: {} });
     expect(r?.action.actionType).toBe("enable");
     expect(r?.action.entityRef).toBe("customers/123/adGroupAds/7~11");
+  });
+
+  it("readCampaignTree throws on non-SEARCH campaigns (Solo campañas de Búsqueda)", async () => {
+    responder = () => ({ results: [{
+      campaign: { id: "5", resourceName: "customers/123/campaigns/5", name: "C", status: "ENABLED",
+        advertisingChannelType: "PERFORMANCE_MAX", campaignBudget: "customers/123/campaignBudgets/9" },
+      campaignBudget: { amountMicros: "350000000", explicitlyShared: false },
+      customer: { currencyCode: "USD" },
+    }] });
+    await expect(readCampaignTree(AUTH, "123", "5")).rejects.toThrow("Solo campañas de Búsqueda");
   });
 });

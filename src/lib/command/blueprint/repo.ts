@@ -12,7 +12,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
 import { ccActions, ccBlueprints } from "@/lib/schema";
-import { createAction, listActionsByBlueprint, type CcActionRow } from "../actions-repo";
+import { createActions, listActionsByBlueprint, type CcActionRow } from "../actions-repo";
 import { compile } from "./compile";
 import { parseBlueprint } from "./schema";
 
@@ -35,9 +35,14 @@ export interface BlueprintRepoDeps {
     id: string, status: CcBlueprintStatus, workspaceIds: string[], error: string | null
   ): Promise<CcBlueprintRow | null>;
   listActionsByBlueprint(blueprintId: string): Promise<CcActionRow[]>;
-  deleteProposedActionsByBlueprint(blueprintId: string): Promise<void>;
-  insertAction(values: typeof ccActions.$inferInsert): Promise<CcActionRow>;
-  approveProposedActions(blueprintId: string, approver: string, now: Date): Promise<CcActionRow[]>;
+  /** `workspaceId` is a belt-and-braces filter alongside blueprintId — the caller always
+   * passes the already workspace-scoped blueprint's own workspaceId. */
+  deleteProposedActionsByBlueprint(blueprintId: string, workspaceId: string): Promise<void>;
+  /** Batch insert: ALL compiled rows in one call, so the write is all-or-nothing. */
+  insertActions(values: Array<typeof ccActions.$inferInsert>): Promise<CcActionRow[]>;
+  /** `workspaceId` is a belt-and-braces filter alongside blueprintId — the caller always
+   * passes the already workspace-scoped blueprint's own workspaceId. */
+  approveProposedActions(blueprintId: string, workspaceId: string, approver: string, now: Date): Promise<CcActionRow[]>;
 }
 
 const realDeps: BlueprintRepoDeps = {
@@ -70,15 +75,23 @@ const realDeps: BlueprintRepoDeps = {
     return rows[0] ?? null;
   },
   listActionsByBlueprint,
-  async deleteProposedActionsByBlueprint(blueprintId) {
+  async deleteProposedActionsByBlueprint(blueprintId, workspaceId) {
     await adsDb.delete(ccActions)
-      .where(and(eq(ccActions.blueprintId, blueprintId), eq(ccActions.status, "proposed")));
+      .where(and(
+        eq(ccActions.blueprintId, blueprintId),
+        eq(ccActions.status, "proposed"),
+        eq(ccActions.workspaceId, workspaceId),
+      ));
   },
-  insertAction: (values) => createAction(values),
-  async approveProposedActions(blueprintId, approver, now) {
+  insertActions: (values) => createActions(values),
+  async approveProposedActions(blueprintId, workspaceId, approver, now) {
     return adsDb.update(ccActions)
       .set({ status: "approved", approvedBy: approver, approvedAt: now, updatedAt: now })
-      .where(and(eq(ccActions.blueprintId, blueprintId), eq(ccActions.status, "proposed")))
+      .where(and(
+        eq(ccActions.blueprintId, blueprintId),
+        eq(ccActions.status, "proposed"),
+        eq(ccActions.workspaceId, workspaceId),
+      ))
       .returning();
   },
 };
@@ -126,7 +139,7 @@ export async function compileBlueprintToActions(
     throw new Error("El blueprint ya tiene acciones más allá de 'proposed'; no se puede recompilar.");
   }
   if (existing.length > 0) {
-    await deps.deleteProposedActionsByBlueprint(blueprintId);
+    await deps.deleteProposedActionsByBlueprint(blueprintId, blueprint.workspaceId);
   }
 
   const doc = parseBlueprint(blueprint.doc);
@@ -139,40 +152,45 @@ export async function compileBlueprintToActions(
   const rawAi = (blueprint.doc as { _ai?: unknown } | null)?._ai;
   const aiPaths = new Set(Array.isArray(rawAi) ? rawAi.filter((p): p is string => typeof p === "string") : []);
 
-  const inserted: CcActionRow[] = [];
-  for (const action of compiled) {
-    const row = await deps.insertAction({
-      blueprintId,
-      seq: action.seq,
-      localRef: action.localRef,
-      recKey: action.recKey,
-      workspaceId: blueprint.workspaceId,
-      createdBy: blueprint.createdBy,
-      network: blueprint.network,
-      accountRef: blueprint.accountRef,
-      connectionId: blueprint.connectionId,
-      entityKind: action.entityKind,
-      entityRef: action.entityRef,
-      actionType: action.actionType,
-      payload: action.payload,
-      status: "proposed",
-      source: aiPaths.has(action.localRef) ? "copiloto" : "manual",
-    });
-    inserted.push(row);
-  }
-  return inserted;
+  // Build the full row set up front, then insert it in ONE batched statement (below) —
+  // not one insert per loop iteration. That makes the write all-or-nothing: a failure
+  // mid-compile can no longer leave a partial action set. Combined with delete-first
+  // above, the worst case is now zero actions for this blueprint, which the
+  // DOUBLE-COMPILE GUARD above self-heals on the next compile attempt.
+  const rows: Array<typeof ccActions.$inferInsert> = compiled.map((action) => ({
+    blueprintId,
+    seq: action.seq,
+    localRef: action.localRef,
+    recKey: action.recKey,
+    workspaceId: blueprint.workspaceId,
+    createdBy: blueprint.createdBy,
+    network: blueprint.network,
+    accountRef: blueprint.accountRef,
+    connectionId: blueprint.connectionId,
+    entityKind: action.entityKind,
+    entityRef: action.entityRef,
+    actionType: action.actionType,
+    payload: action.payload,
+    status: "proposed",
+    source: aiPaths.has(action.localRef) ? "copiloto" : "manual",
+  }));
+  return deps.insertActions(rows);
 }
 
 /** Bulk-transitions this blueprint's 'proposed' actions → 'approved' (stamping approvedBy/
  * approvedAt), and the blueprint itself → 'approved'. Workspace-scoped. Returns null if the
  * blueprint isn't found in scope. Idempotent: a second call simply approves zero further
- * actions (none left in 'proposed') and re-sets the already-'approved' blueprint status. */
+ * actions (none left in 'proposed') and re-sets the already-'approved' blueprint status.
+ *
+ * Ordering is deliberate: the actions UPDATE runs FIRST and the blueprint status flip to
+ * 'approved' runs LAST. If a failure lands between the two writes, the blueprint is left
+ * recoverable — still not 'approved' — rather than 'approved' with unapproved actions. */
 export async function approveBlueprint(
   id: string, approver: string, workspaceIds: string[], deps: BlueprintRepoDeps = realDeps
 ): Promise<CcBlueprintRow | null> {
   const blueprint = await deps.selectBlueprint(id, workspaceIds);
   if (!blueprint) return null;
-  await deps.approveProposedActions(id, approver, new Date());
+  await deps.approveProposedActions(id, blueprint.workspaceId, approver, new Date());
   return deps.updateBlueprintStatus(id, "approved", workspaceIds, null);
 }
 

@@ -59,6 +59,9 @@ function baseAction(over: Record<string, unknown> = {}): CcActionRow {
 function makeHarness(blueprints: CcBlueprintRow[] = [], actions: CcActionRow[] = []) {
   const bpStore = new Map<string, CcBlueprintRow>(blueprints.map((b) => [b.id, { ...b }]));
   const actionStore = new Map<string, CcActionRow>(actions.map((a) => [a.id, { ...a }]));
+  // Records each insertActions() call's row count, so tests can assert the compile path
+  // does one batched insert instead of one insert per compiled row.
+  const insertActionsCalls: number[] = [];
   let nextId = 1;
 
   const deps: BlueprintRepoDeps = {
@@ -89,24 +92,27 @@ function makeHarness(blueprints: CcBlueprintRow[] = [], actions: CcActionRow[] =
     },
     listActionsByBlueprint: async (blueprintId) =>
       [...actionStore.values()].filter((a) => a.blueprintId === blueprintId),
-    deleteProposedActionsByBlueprint: async (blueprintId) => {
+    deleteProposedActionsByBlueprint: async (blueprintId, workspaceId) => {
       for (const [id, a] of actionStore) {
-        if (a.blueprintId === blueprintId && a.status === "proposed") actionStore.delete(id);
+        if (a.blueprintId === blueprintId && a.status === "proposed" && a.workspaceId === workspaceId) {
+          actionStore.delete(id);
+        }
       }
     },
-    insertAction: async (values) => {
-      const row = {
+    insertActions: async (values) => {
+      insertActionsCalls.push(values.length);
+      const rows = values.map((values_) => ({
         id: `a-${nextId++}`, entityName: null, expected: null, rationale: null, evidence: null,
         approvedBy: null, approvedAt: null, executedAt: null, gateResults: null, error: null, resultRef: null,
-        createdAt: new Date(), updatedAt: new Date(), ...values,
-      } as CcActionRow;
-      actionStore.set(row.id, row);
-      return row;
+        createdAt: new Date(), updatedAt: new Date(), ...values_,
+      } as CcActionRow));
+      for (const row of rows) actionStore.set(row.id, row);
+      return rows;
     },
-    approveProposedActions: async (blueprintId, approver, now) => {
+    approveProposedActions: async (blueprintId, workspaceId, approver, now) => {
       const out: CcActionRow[] = [];
       for (const a of actionStore.values()) {
-        if (a.blueprintId === blueprintId && a.status === "proposed") {
+        if (a.blueprintId === blueprintId && a.status === "proposed" && a.workspaceId === workspaceId) {
           Object.assign(a, { status: "approved", approvedBy: approver, approvedAt: now, updatedAt: now });
           out.push(a);
         }
@@ -115,7 +121,7 @@ function makeHarness(blueprints: CcBlueprintRow[] = [], actions: CcActionRow[] =
     },
   };
 
-  return { deps, bpStore, actionStore };
+  return { deps, bpStore, actionStore, insertActionsCalls };
 }
 
 describe("createBlueprint / getBlueprint / saveBlueprintDoc", () => {
@@ -185,6 +191,15 @@ describe("compileBlueprintToActions", () => {
     const approvedAction = baseAction({ id: "a1", status: "approved" });
     const { deps } = makeHarness([baseBlueprint()], [approvedAction]);
     await expect(compileBlueprintToActions("bp1", ["w1"], deps)).rejects.toThrow();
+  });
+
+  it("inserts all compiled rows via a single batched insert call, not one per row", async () => {
+    const { deps, insertActionsCalls } = makeHarness([baseBlueprint()]);
+    const rows = await compileBlueprintToActions("bp1", ["w1"], deps);
+
+    expect(insertActionsCalls).toEqual([5]); // one call, carrying all 5 rows
+    expect(rows.map((r) => r.seq)).toEqual([0, 1, 2, 3, 4]);
+    expect(rows.every((r) => typeof r.localRef === "string" && r.localRef.length > 0)).toBe(true);
   });
 });
 

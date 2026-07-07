@@ -12,6 +12,13 @@ export async function createAction(values: typeof ccActions.$inferInsert): Promi
   return rows[0];
 }
 
+/** Batch insert: all rows in a single INSERT statement, so a compiled action set is
+ * written all-or-nothing (no partial set if a later row fails validation mid-loop). */
+export async function createActions(values: Array<typeof ccActions.$inferInsert>): Promise<CcActionRow[]> {
+  if (values.length === 0) return [];
+  return adsDb.insert(ccActions).values(values).returning();
+}
+
 /** Insert skipping duplicates on (workspace, network, rec_key). Returns row or null if duped. */
 export async function createActionDeduped(values: typeof ccActions.$inferInsert): Promise<CcActionRow | null> {
   const rows = await adsDb.insert(ccActions).values(values)

@@ -5,6 +5,7 @@ import {
   ConexionesClient,
   type ConnectionRow,
   type BrandOption,
+  type MetaStatus,
 } from "./conexiones-client";
 
 // Auth is cookie-based per-request, so never prerender this page.
@@ -99,6 +100,19 @@ export default async function ConexionesPage({
         : "No se pudieron cargar tus conexiones. Recarga la página.";
   }
 
+  // Centro de Mando (beta): Meta status card. Only computed when the flag is
+  // on — same posture as AppShell/command/layout.tsx — so the Google
+  // connections UI above stays byte-unchanged for non-beta users.
+  let metaStatus: MetaStatus | null = null;
+  if (process.env.COMMAND_CENTER_BETA === "true") {
+    const metaConfigured = Boolean((process.env.META_SYSTEM_USER_TOKEN ?? "").trim());
+    const metaAccounts = (process.env.META_AD_ACCOUNT_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    metaStatus = { configured: metaConfigured, accounts: metaAccounts };
+  }
+
   return (
     <ConexionesClient
       connections={connections}
@@ -107,6 +121,7 @@ export default async function ConexionesPage({
       warn={warn}
       errorParam={errorParam}
       loadError={loadError}
+      metaStatus={metaStatus}
     />
   );
 }

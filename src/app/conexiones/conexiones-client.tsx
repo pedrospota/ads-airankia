@@ -44,6 +44,12 @@ export interface BrandOption {
   name: string | null;
 }
 
+/** Centro de Mando (beta): Meta status card. Null when the beta flag is off. */
+export interface MetaStatus {
+  configured: boolean;
+  accounts: string[];
+}
+
 // ---------------------------------------------------------------------------
 
 /** "123-456-7890" from "1234567890" (Google Ads display convention). */
@@ -68,6 +74,7 @@ export function ConexionesClient({
   warn,
   errorParam,
   loadError,
+  metaStatus,
 }: {
   connections: ConnectionRow[];
   brands: BrandOption[];
@@ -75,6 +82,7 @@ export function ConexionesClient({
   warn: string | null;
   errorParam: string | null;
   loadError: string | null;
+  metaStatus?: MetaStatus | null;
 }) {
   const { colors } = useTheme();
   const [connections, setConnections] = useState<ConnectionRow[]>(initialConnections);
@@ -484,6 +492,42 @@ export function ConexionesClient({
             );
           })}
         </div>
+
+        {metaStatus && (
+          <section
+            style={{
+              marginTop: 32,
+              padding: 20,
+              borderRadius: 12,
+              border: `1px solid ${colors.border}`,
+              background: colors.bgCard,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: colors.textMuted,
+                }}
+              >
+                Meta Ads · Centro de Mando (beta)
+              </span>
+              <Badge tone={metaStatus.configured ? "ok" : "muted"} dot>
+                {metaStatus.configured ? "Token de sistema configurado" : "Pendiente de credenciales"}
+              </Badge>
+            </div>
+            <p style={{ color: colors.textMuted, fontSize: 13, marginTop: 10, marginBottom: 0 }}>
+              {metaStatus.configured
+                ? `${metaStatus.accounts.length} cuenta(s) permitida(s)${
+                    metaStatus.accounts.length ? ": " + metaStatus.accounts.join(", ") : ""
+                  }.`
+                : "Configura META_SYSTEM_USER_TOKEN y META_AD_ACCOUNT_IDS en el servidor para habilitar lectura y ejecución en Meta desde el Centro de Mando."}
+            </p>
+          </section>
+        )}
       </main>
     </div>
   );

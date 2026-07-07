@@ -78,3 +78,7 @@ v2 adds a full guided UI to CREATE (and later edit) a Google Search campaign, co
 ## Verification status (this build)
 
 `bun test src/lib/command` → **130 pass / 0 fail**; `tsc --noEmit` → exit 0; `bun run build` → exit 0 (routes `/command/crear`, `/command/crear/[id]/revisar`, `/api/command/blueprint/*` all present); runtime smoke on the production build → `/command/crear` 404 (page gated), `/api/command/blueprint` + `/suggest` 403 (denied), `/login` 200. Every task adversarially reviewed; the review chain caught and fixed a feature-breaking `ACTION_ALLOWED` bug (settings stripped `create_*` on load) and two serious adapter bugs (create-rollback ref mismatch, campaign-orphan on criteria failure).
+
+## CC_DRY_RUN and multi-action blueprints
+
+`CC_DRY_RUN=true` makes `executeAction` return no `resourceNames`, so the plan runner can't resolve a child's `tmp:` ref from its parent and fails closed ("Ref temporal sin resolver"). Dry-run therefore rehearses single actions, not a full multi-action blueprint. This is safe (no live mutation, fails closed) — use `CC_DRY_RUN` for the v1 per-action rehearsal; rehearse the create flow with a throwaway campaign on a real test account (it's created PAUSED and one-click rollbackable).

@@ -691,7 +691,10 @@ export const ccSettings = pgTable("cc_settings", {
   maxActionsPerAccountDay: integer("max_actions_per_account_day").default(20).notNull(),
   requireTwoStep: boolean("require_two_step").default(true).notNull(),
   allowedActionTypes: jsonb("allowed_action_types")
-    .default(["budget_update", "pause", "enable", "add_negatives"])
+    .default([
+      "budget_update", "pause", "enable", "add_negatives",
+      "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+    ])
     .notNull(),
   watchHours: integer("watch_hours").default(72).notNull(),
   maxDailyBudgetMicros: bigint("max_daily_budget_micros", { mode: "number" }),

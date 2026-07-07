@@ -4,8 +4,15 @@
 // payload, grouped by campaign-tree node (campaign+budget, then one group per
 // ad group with its keywords/negatives and each ad), so the operator sees
 // exactly what will be sent to Google before anything touches the account.
-// "Publicar en pausa" runs approve → execute; a 409 with `blocked` renders the
-// same gate-panel pattern as acciones-client.tsx and does NOT auto-retry.
+//
+// Two gate surfaces, both spec §10:
+// - PROACTIVE: a `GatePreview` computed server-side (blueprint/preview.ts) from the SAME
+//   deterministic gates the executor runs at publish time, rendered as a summary strip near
+//   the top ("Compuertas de seguridad: N/N") BEFORE the operator ever clicks Publish. Google's
+//   validateOnly rehearsal can't run pre-creation, so it's called out separately as deferred.
+// - REACTIVE: "Publicar en pausa" runs approve → execute; a 409 with `blocked` renders the
+//   same gate-panel pattern as acciones-client.tsx. Neither this nor any other execute-stage
+//   failure (blocked or not) auto-retries — see `executeFailed` below.
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -24,6 +31,7 @@ import {
 } from "@/components/ui-kit";
 import { PausedBadge } from "../../builder-preview";
 import type { CompiledAction } from "@/lib/command/blueprint/compile";
+import type { GatePreview } from "@/lib/command/blueprint/preview";
 import type {
   GateResult,
   CreateBudgetPayload,
@@ -319,6 +327,90 @@ function ActionCard({ action }: { action: CompiledAction }) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Gate rendering — ONE table shape shared by the proactive summary (below) and
+ * the reactive 409 `blocked` panel, so the operator sees the same vocabulary
+ * whether a gate was caught before or after clicking Publish.
+ * ------------------------------------------------------------------------- */
+
+function GateTable({ rows }: { rows: GateResult[] }) {
+  return (
+    <DataTable>
+      <THead cols={[{ label: "Compuerta" }, { label: "Severidad" }, { label: "Estado" }, { label: "Evidencia" }]} />
+      <tbody>
+        {rows.map((g) => (
+          <Row key={g.id}>
+            <Cell mono>{g.id}</Cell>
+            <Cell>{g.severity}</Cell>
+            <Cell>
+              <Badge tone={g.status === "pass" ? "ok" : g.severity === "blocking" ? "danger" : "warn"}>
+                {g.status}
+              </Badge>
+            </Cell>
+            <Cell>{g.evidence}</Cell>
+          </Row>
+        ))}
+      </tbody>
+    </DataTable>
+  );
+}
+
+/** The "no-retry" next step, shown once approve has already succeeded and execute has
+ * failed — a same-screen Publish retry would only 409 again at the approve step (the
+ * blueprint is no longer 'draft'), so point the operator at the two places that ARE
+ * actionable: fix the blueprint in the builder, or check what (if anything) already landed. */
+function NextSteps() {
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <SecondaryButton href="/command/crear">Volver al constructor</SecondaryButton>
+      <SecondaryButton href="/command/bitacora">Ver Bitácora</SecondaryButton>
+    </div>
+  );
+}
+
+/** Proactive summary (spec §10): the deterministic gates, run server-side against the SAME
+ * real settings/quota the executor uses, BEFORE the operator ever clicks Publish. Google's
+ * validateOnly rehearsal can't run pre-creation (no live resourceName yet) — called out
+ * separately as deferred-to-publish rather than folded into the pass/fail count. */
+function GatesSummaryCard({ preview }: { preview: GatePreview }) {
+  const ok = preview.summary.blockingCount === 0;
+  const passing = preview.summary.gatesRun - preview.summary.blockingCount;
+  const blockedActions = preview.perAction.filter((a) => a.blocking.length > 0);
+
+  return (
+    <Card style={{ marginBottom: 16, ...(ok ? {} : { borderColor: UI.danger }) }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <SectionLabel>Compuertas de seguridad</SectionLabel>
+          <Badge tone={ok ? "ok" : "danger"} dot>
+            {passing}/{preview.summary.gatesRun} {ok ? "✓" : ""}
+          </Badge>
+        </div>
+        <span style={{ fontSize: 12, color: UI.muted, maxWidth: 420 }}>
+          La validación en vivo de Google (validateOnly) corre al publicar — no puede
+          ejecutarse antes de crear los recursos.
+        </span>
+      </div>
+      {!ok ? (
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+          <p style={{ fontSize: 13, color: UI.muted, margin: 0 }}>
+            {preview.summary.blockingCount} compuerta(s) bloqueante(s) detectadas antes de publicar.
+            Publicar quedará deshabilitado hasta que ajustes la campaña en el constructor.
+          </p>
+          {blockedActions.map((a) => (
+            <div key={a.seq}>
+              <div style={{ fontSize: 11.5, color: UI.faint, fontFamily: UI.fontMono, marginBottom: 6 }}>
+                #{a.seq + 1} · {ACTION_LABEL[a.actionType] ?? a.actionType}
+              </div>
+              <GateTable rows={a.blocking} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+/* ---------------------------------------------------------------------------
  * Root
  * ------------------------------------------------------------------------- */
 
@@ -328,17 +420,25 @@ export default function RevisarClient({
   network,
   accountRef,
   compiled,
+  gatePreview,
 }: {
   blueprintId: string;
   status: string;
   network: string;
   accountRef: string;
   compiled: CompiledAction[];
+  gatePreview: GatePreview;
 }) {
   const router = useRouter();
   const [publishing, setPublishing] = useState(false);
   const [blocked, setBlocked] = useState<GateResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set once approve has already succeeded and execute then fails — for ANY reason (gate
+  // block, quota refusal, 502/500 mutation failure). All of those leave cc_blueprints.status
+  // at 'approved' or 'failed', never back at 'draft' (see execute/route.ts), so a same-screen
+  // Publish retry would only 409 again at the approve step. This flag locks that dead end out;
+  // approve-STAGE failures (below) never set it, since those legitimately leave status='draft'.
+  const [executeFailed, setExecuteFailed] = useState(false);
 
   const groups = useMemo(() => groupByNode(compiled), [compiled]);
   // The blueprint's status the moment this page loaded. If it's already past
@@ -346,34 +446,54 @@ export default function RevisarClient({
   // just 409 at the approve step — so the button stays disabled and we point
   // the operator at the Bitácora / builder instead of letting them retry here.
   const alreadyMoved = status !== "draft";
-  const canPublish = !publishing && !blocked && !alreadyMoved;
+  const gatesPass = gatePreview.summary.blockingCount === 0;
+  const canPublish = !publishing && !blocked && !executeFailed && !alreadyMoved && gatesPass;
 
   async function publish() {
     if (!canPublish) return;
     setPublishing(true);
     setError(null);
     setBlocked(null);
+    setExecuteFailed(false);
+
+    // Stage 1 — approve. compileBlueprintToActions/approveBlueprint only run under
+    // status==='draft' and never mutate blueprint.status on failure (approve/route.ts's
+    // catch just returns 500 — no setBlueprintStatus call), so a failure here leaves the
+    // blueprint exactly where it started: 'draft'. Retrying Publish is legitimately safe.
     try {
       const approveRes = await fetch(`/api/command/blueprint/${blueprintId}/approve`, { method: "POST" });
       const approveData = await approveRes.json().catch(() => ({}) as { error?: string });
       if (!approveRes.ok) {
         throw new Error(approveData.error ?? `No se pudo aprobar (HTTP ${approveRes.status}).`);
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error aprobando la campaña.");
+      setPublishing(false);
+      return;
+    }
 
+    // Stage 2 — execute. Approve already succeeded, so the blueprint has moved past
+    // 'draft'. Any failure from here (gate-blocked 409, quota-refusal 409, or a 502/500
+    // mutation failure) leaves the blueprint 'approved' or 'failed' — never 'draft' — so a
+    // same-screen retry would only 409 again at the approve step. No retry is offered;
+    // `executeFailed` locks the button and NextSteps points at the builder or the Bitácora.
+    try {
       const execRes = await fetch(`/api/command/blueprint/${blueprintId}/execute`, { method: "POST" });
       const execData = await execRes
         .json()
         .catch(() => ({}) as { error?: string; blocked?: GateResult[]; ok?: boolean });
 
       if (execRes.status === 409 && Array.isArray(execData.blocked)) {
-        // Gate blocked an action — do NOT auto-retry. The operator must go back
-        // to the builder to fix the blueprint.
         setBlocked(execData.blocked);
+        setExecuteFailed(true);
         setPublishing(false);
         return;
       }
       if (!execRes.ok || execData.ok === false) {
-        throw new Error(execData.error ?? `No se pudo ejecutar (HTTP ${execRes.status}).`);
+        setError(execData.error ?? `No se pudo ejecutar (HTTP ${execRes.status}).`);
+        setExecuteFailed(true);
+        setPublishing(false);
+        return;
       }
 
       // Full success: redirect to the Bitácora. `publishing` stays true so the
@@ -382,12 +502,15 @@ export default function RevisarClient({
       router.replace("/command/bitacora");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error publicando la campaña.");
+      setExecuteFailed(true);
       setPublishing(false);
     }
   }
 
   return (
     <>
+      <GatesSummaryCard preview={gatePreview} />
+
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 24 }}>
@@ -420,7 +543,12 @@ export default function RevisarClient({
         />
       ) : null}
 
-      {error ? <ErrorCard message={error} style={{ marginBottom: 16 }} /> : null}
+      {error ? (
+        <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+          <ErrorCard message={error} />
+          {executeFailed ? <NextSteps /> : null}
+        </div>
+      ) : null}
 
       {blocked ? (
         <Card style={{ marginBottom: 16, borderColor: UI.danger }}>
@@ -429,23 +557,10 @@ export default function RevisarClient({
             El motor bloqueó una acción antes de tocar la cuenta. No se reintenta automáticamente — vuelve al
             constructor para ajustar la campaña.
           </p>
-          <DataTable>
-            <THead cols={[{ label: "Compuerta" }, { label: "Severidad" }, { label: "Estado" }, { label: "Evidencia" }]} />
-            <tbody>
-              {blocked.map((g) => (
-                <Row key={g.id}>
-                  <Cell mono>{g.id}</Cell>
-                  <Cell>{g.severity}</Cell>
-                  <Cell>
-                    <Badge tone={g.status === "pass" ? "ok" : g.severity === "blocking" ? "danger" : "warn"}>
-                      {g.status}
-                    </Badge>
-                  </Cell>
-                  <Cell>{g.evidence}</Cell>
-                </Row>
-              ))}
-            </tbody>
-          </DataTable>
+          <GateTable rows={blocked} />
+          <div style={{ marginTop: 12 }}>
+            <NextSteps />
+          </div>
         </Card>
       ) : null}
 

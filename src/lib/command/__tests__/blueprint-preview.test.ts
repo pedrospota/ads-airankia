@@ -1,0 +1,120 @@
+import { describe, it, expect } from "bun:test";
+import { previewBlueprintGates, type GatePreviewDeps } from "../blueprint/preview";
+import type { BlueprintRepoDeps, CcBlueprintRow } from "../blueprint/repo";
+import { CC_SETTINGS_DEFAULTS, type CcSettingsValues } from "../types";
+
+// Same node-graph shape as blueprint-compile.test.ts / blueprint-repo.test.ts's fixture
+// (already proven to satisfy blueprintDocSchema + compile()): budget → campaign → ad_group →
+// keywords → ad = 5 actions.
+function docFixture(dailyMicros = 350_000_000) {
+  return {
+    network: "google_ads",
+    campaign: {
+      nodeId: "c1", tempId: "campaign:2", name: "Camp", channel: "SEARCH", status: "PAUSED",
+      budget: { nodeId: "b1", tempId: "budget:1", dailyMicros },
+      bidding: { strategy: "MAXIMIZE_CONVERSIONS" },
+      geo: { countryCodes: ["MX"], presenceOnly: true },
+      adGroups: [
+        {
+          nodeId: "g1", tempId: "ad_group:3", name: "AG",
+          keywords: [{ text: "kw", match: "PHRASE" }],
+          negatives: [],
+          ads: [
+            {
+              nodeId: "a1", tempId: "ad:4", finalUrl: "https://x.mx/a",
+              headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }],
+              descriptions: [{ text: "D1" }, { text: "D2" }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function baseBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
+  return {
+    id: "bp1", workspaceId: "w1", createdBy: "op@x.com", network: "google_ads",
+    accountRef: "123", connectionId: null, doc: docFixture(), status: "draft", error: null,
+    createdAt: new Date(), updatedAt: new Date(), ...over,
+  } as CcBlueprintRow;
+}
+
+/** In-memory fake of BlueprintRepoDeps, backed by one blueprint — mirrors
+ * blueprint-repo.test.ts's harness. Never touches adsDb. Only `selectBlueprint` is actually
+ * exercised by previewBlueprintGates; the rest are unreachable no-ops. */
+function fakeBlueprintRepo(blueprint: CcBlueprintRow | null): BlueprintRepoDeps {
+  return {
+    insertBlueprint: async () => { throw new Error("not used"); },
+    selectBlueprint: async (id, workspaceIds) => {
+      if (!blueprint || blueprint.id !== id || !workspaceIds.includes(blueprint.workspaceId)) return null;
+      return blueprint;
+    },
+    updateBlueprintDoc: async () => { throw new Error("not used"); },
+    updateBlueprintStatus: async () => { throw new Error("not used"); },
+    listActionsByBlueprint: async () => [],
+    deleteProposedActionsByBlueprint: async () => {},
+    insertActions: async () => [],
+    approveProposedActions: async () => [],
+  };
+}
+
+// The account's real cc_settings row. allowedActionTypes must explicitly include the create
+// family — mirrors plan-runner.test.ts's fake settings (production rowToSettings() filters
+// these against CC_ACTION_TYPES, a pre-existing gap outside this task's scope; the preview
+// must reuse the SAME real settings the executor uses, gap and all).
+const ALLOWED_WITH_CREATES = [
+  "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+] as unknown as CcSettingsValues["allowedActionTypes"];
+
+function makeDeps(opts: {
+  blueprint: CcBlueprintRow | null;
+  settings?: Partial<CcSettingsValues>;
+  executedToday?: number;
+}): GatePreviewDeps {
+  return {
+    blueprintRepo: fakeBlueprintRepo(opts.blueprint),
+    settings: {
+      get: async () => ({ ...CC_SETTINGS_DEFAULTS, allowedActionTypes: ALLOWED_WITH_CREATES, ...opts.settings }),
+    },
+    repo: { countExecutedToday: async () => opts.executedToday ?? 0 },
+  };
+}
+
+describe("previewBlueprintGates", () => {
+  it("a valid blueprint (budget within cap, action types allowed) has zero blocking gates", async () => {
+    const deps = makeDeps({ blueprint: baseBlueprint() });
+
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+
+    expect(preview.summary.actions).toBe(5); // budget, campaign, ad_group, keywords, ad
+    expect(preview.summary.blockingCount).toBe(0);
+    expect(preview.validateOnlyDeferred).toBe(true);
+    expect(preview.perAction.every((a) => a.blocking.length === 0)).toBe(true);
+    // VALIDATE_ONLY is always unresolved pre-creation — present in the full gate list...
+    expect(preview.perAction.every((a) => a.gates.some((g) => g.id === "VALIDATE_ONLY"))).toBe(true);
+    // ...but never counted as a real block.
+    expect(
+      preview.perAction.every((a) => a.gates.find((g) => g.id === "VALIDATE_ONLY")?.status === "fail")
+    ).toBe(true);
+  });
+
+  it("a budget exceeding settings.maxDailyBudgetMicros blocks the budget action with ABS_BUDGET_CAP", async () => {
+    const deps = makeDeps({
+      blueprint: baseBlueprint({ doc: docFixture(900_000_000) }),
+      settings: { maxDailyBudgetMicros: 500_000_000 },
+    });
+
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+
+    const budgetAction = preview.perAction.find((a) => a.actionType === "create_budget");
+    expect(budgetAction?.blocking.map((g) => g.id)).toContain("ABS_BUDGET_CAP");
+    expect(preview.summary.blockingCount).toBeGreaterThan(0);
+  });
+
+  it("throws when the blueprint is missing or out of the caller's workspace scope", async () => {
+    const deps = makeDeps({ blueprint: baseBlueprint() });
+    await expect(previewBlueprintGates("bp1", ["other-ws"], deps)).rejects.toThrow();
+    await expect(previewBlueprintGates("missing", ["w1"], deps)).rejects.toThrow();
+  });
+});

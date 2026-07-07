@@ -5,6 +5,8 @@ import { getCommandAccess } from "@/lib/command/access";
 import { getBlueprint } from "@/lib/command/blueprint/repo";
 import { compile, type CompiledAction } from "@/lib/command/blueprint/compile";
 import { parseBlueprint } from "@/lib/command/blueprint/schema";
+import { previewBlueprintGates, type GatePreview } from "@/lib/command/blueprint/preview";
+import { buildExecutorDeps } from "@/lib/command/executor-deps";
 import RevisarClient from "./revisar-client";
 
 // Auth + DB reads (blueprint) — never prerender.
@@ -20,9 +22,19 @@ export default async function RevisarPage({ params }: { params: Promise<{ id: st
   if (!blueprint) notFound();
 
   let compiled: CompiledAction[] = [];
+  let gatePreview: GatePreview | null = null;
   let error: string | null = null;
   try {
     compiled = compile(parseBlueprint(blueprint.doc), id);
+    // Proactive gate preview (spec §10): run the SAME deterministic gates the executor runs
+    // at publish time, server-side, so the review screen can show "compuertas: N/N" BEFORE
+    // the operator clicks Publish — not only reactively, after a 409. Reuses the exact
+    // settings/countExecutedToday accessors buildExecutorDeps wires for the real execute path.
+    const execDeps = buildExecutorDeps(access.accessToken);
+    gatePreview = await previewBlueprintGates(id, access.workspaceIds, {
+      settings: execDeps.settings,
+      repo: execDeps.repo,
+    });
   } catch (e) {
     error = e instanceof Error ? e.message : "Error compilando el blueprint";
   }
@@ -42,8 +54,8 @@ export default async function RevisarPage({ params }: { params: Promise<{ id: st
           title="Revisar y publicar"
           subtitle="Cada acción que se enviará a Google Ads, agrupada por nodo de la campaña. Nada toca la cuenta hasta que confirmes abajo — todo nace en pausa."
         />
-        {error ? (
-          <ErrorCard message={error} />
+        {error || !gatePreview ? (
+          <ErrorCard message={error ?? "Error preparando la vista previa de compuertas."} />
         ) : (
           <RevisarClient
             blueprintId={id}
@@ -51,6 +63,7 @@ export default async function RevisarPage({ params }: { params: Promise<{ id: st
             network={blueprint.network}
             accountRef={blueprint.accountRef}
             compiled={compiled}
+            gatePreview={gatePreview}
           />
         )}
       </main>

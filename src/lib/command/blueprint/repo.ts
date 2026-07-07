@@ -13,6 +13,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
 import { ccActions, ccBlueprints } from "@/lib/schema";
 import { createActions, listActionsByBlueprint, type CcActionRow } from "../actions-repo";
+import { diffEditDoc } from "../edit/diff";
+import { EDIT_BASELINE_MAX_AGE_MS, parseEditDoc } from "../edit/schema";
 import { compile } from "./compile";
 import { parseBlueprint } from "./schema";
 
@@ -151,6 +153,32 @@ export async function compileBlueprintToActions(
   }
   if (existing.length > 0) {
     await deps.deleteProposedActionsByBlueprint(blueprintId, blueprint.workspaceId);
+  }
+
+  // v2.3 EDIT-DOC BRANCH (Task 5): docs saved by the edit-tree flow (Task 1/4) carry
+  // `docType: "google_search_edit_v1"` and compile through the differ (diffEditDoc), not the
+  // v2 create compiler below. Keyed on the exact literal so a malformed/foreign doc falls
+  // through to the create path's own parseBlueprint validation instead of silently matching.
+  // The baseline (`loadedAt`) must be fresh — a stale tree may no longer reflect the live
+  // account, so a re-load is required before compiling ("caducado" = "expired" in es-MX).
+  const rawDoc = blueprint.doc as { docType?: unknown };
+  if (rawDoc?.docType === "google_search_edit_v1") {
+    const ageMs = Date.now() - Date.parse((rawDoc as { loadedAt?: string }).loadedAt ?? "");
+    if (!Number.isFinite(ageMs) || ageMs > EDIT_BASELINE_MAX_AGE_MS) {
+      throw new Error("Baseline caducado; recarga el árbol de la campaña antes de compilar.");
+    }
+    const doc = parseEditDoc(blueprint.doc);
+    const compiled = diffEditDoc(doc, blueprintId);
+    if (compiled.length === 0) throw new Error("No hay cambios que aplicar.");
+    const rows = compiled.map((a) => ({
+      workspaceId: blueprint.workspaceId, createdBy: blueprint.createdBy, network: blueprint.network,
+      connectionId: blueprint.connectionId, accountRef: blueprint.accountRef,
+      entityKind: a.entityKind, entityRef: a.entityRef, entityName: a.entityName,
+      actionType: a.actionType, payload: a.payload as never, expected: a.expected as never,
+      source: "manual" as const, recKey: a.recKey, rationale: a.note,
+      status: "proposed" as const, blueprintId, seq: a.seq, localRef: a.localRef,
+    }));
+    return deps.insertActions(rows);
   }
 
   const doc = parseBlueprint(blueprint.doc);

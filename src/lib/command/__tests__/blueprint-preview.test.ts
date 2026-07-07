@@ -81,6 +81,38 @@ function makeDeps(opts: {
   };
 }
 
+// Edit-doc fixture (Task 5): same shape as edit-diff.test.ts's baseDoc(), with the campaign's
+// desired.dailyBudgetMicros parameterized so tests can drive an over-cap vs. compliant change.
+function editDocFixture(desiredDailyBudgetMicros: number) {
+  return {
+    docType: "google_search_edit_v1", network: "google_ads", accountRef: "123",
+    loadedAt: "2026-07-07T12:00:00.000Z",
+    campaign: {
+      resourceName: "customers/123/campaigns/5", id: "5",
+      base: {
+        name: "C", status: "ENABLED", dailyBudgetMicros: 350_000_000,
+        budgetResourceName: "customers/123/campaignBudgets/9", budgetShared: false, currency: "USD",
+      },
+      desired: { status: "ENABLED", dailyBudgetMicros: desiredDailyBudgetMicros },
+      newNegatives: [],
+      adGroups: [{
+        resourceName: "customers/123/adGroups/7", id: "7",
+        base: { name: "G", status: "ENABLED" }, desired: { status: "ENABLED" },
+        baseKeywords: [{ text: "kw", match: "PHRASE", negative: false, resourceName: "customers/123/adGroupCriteria/7~1" }],
+        newKeywords: [], newAds: [],
+        ads: [{
+          resourceName: "customers/123/adGroupAds/7~11", unsupported: false,
+          base: {
+            status: "ENABLED", finalUrl: "https://x.com",
+            headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }], descriptions: [{ text: "D1" }, { text: "D2" }],
+          },
+          replacement: null,
+        }],
+      }],
+    },
+  };
+}
+
 describe("previewBlueprintGates", () => {
   it("a valid blueprint (budget within cap, action types allowed) has zero blocking gates", async () => {
     const deps = makeDeps({ blueprint: baseBlueprint() });
@@ -116,5 +148,37 @@ describe("previewBlueprintGates", () => {
     const deps = makeDeps({ blueprint: baseBlueprint() });
     await expect(previewBlueprintGates("bp1", ["other-ws"], deps)).rejects.toThrow();
     await expect(previewBlueprintGates("missing", ["w1"], deps)).rejects.toThrow();
+  });
+});
+
+describe("previewBlueprintGates — edit-doc branch (Task 5)", () => {
+  // allowedActionTypes must explicitly include budget_update — ALLOWED_WITH_CREATES (this
+  // file's default override, above) only lists the v2 create_* family, so edit-branch actions
+  // need their own allow-list override or ACTION_ALLOWED would block them regardless of the
+  // scenario under test.
+  const ALLOWED_WITH_EDITS = CC_SETTINGS_DEFAULTS.allowedActionTypes;
+
+  it("an edit blueprint's over-cap budget change blocks with ABS_BUDGET_CAP", async () => {
+    const deps = makeDeps({
+      blueprint: baseBlueprint({ doc: editDocFixture(500_000_000) }),
+      settings: { maxDailyBudgetMicros: 400_000_000, allowedActionTypes: ALLOWED_WITH_EDITS },
+    });
+
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+
+    const budgetAction = preview.perAction.find((a) => a.actionType === "budget_update");
+    expect(budgetAction?.blocking.map((g) => g.id)).toContain("ABS_BUDGET_CAP");
+  });
+
+  it("an edit blueprint's compliant budget change (within cap and delta) has zero blocking gates", async () => {
+    const deps = makeDeps({
+      blueprint: baseBlueprint({ doc: editDocFixture(380_000_000) }),
+      settings: { maxDailyBudgetMicros: 400_000_000, allowedActionTypes: ALLOWED_WITH_EDITS },
+    });
+
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+
+    expect(preview.summary.actions).toBe(1); // only the budget change diffs
+    expect(preview.summary.blockingCount).toBe(0);
   });
 });

@@ -5,6 +5,40 @@ import {
 } from "../blueprint/repo";
 import type { CcActionRow } from "../actions-repo";
 
+// Edit-doc fixture (Task 5): same shape as edit-schema.test.ts/edit-diff.test.ts's baseDoc(),
+// with the campaign's desired.dailyBudgetMicros bumped so it diffs to exactly one
+// budget_update action. Kept as raw `unknown` (not run through parseEditDoc here) since
+// blueprint.doc is untyped jsonb — compileBlueprintToActions itself is what must parse it.
+function editDocWithBudgetChange(loadedAt = new Date().toISOString()) {
+  return {
+    docType: "google_search_edit_v1", network: "google_ads", accountRef: "123",
+    loadedAt,
+    campaign: {
+      resourceName: "customers/123/campaigns/5", id: "5",
+      base: {
+        name: "C", status: "ENABLED", dailyBudgetMicros: 350_000_000,
+        budgetResourceName: "customers/123/campaignBudgets/9", budgetShared: false, currency: "USD",
+      },
+      desired: { status: "ENABLED", dailyBudgetMicros: 500_000_000 },
+      newNegatives: [],
+      adGroups: [{
+        resourceName: "customers/123/adGroups/7", id: "7",
+        base: { name: "G", status: "ENABLED" }, desired: { status: "ENABLED" },
+        baseKeywords: [{ text: "kw", match: "PHRASE", negative: false, resourceName: "customers/123/adGroupCriteria/7~1" }],
+        newKeywords: [], newAds: [],
+        ads: [{
+          resourceName: "customers/123/adGroupAds/7~11", unsupported: false,
+          base: {
+            status: "ENABLED", finalUrl: "https://x.com",
+            headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }], descriptions: [{ text: "D1" }, { text: "D2" }],
+          },
+          replacement: null,
+        }],
+      }],
+    },
+  };
+}
+
 // Same node-graph shape as blueprint-compile.test.ts's fixture (already proven to satisfy
 // blueprintDocSchema + compile()): budget → campaign → ad_group → keywords → ad = 5 actions.
 function docFixture(ai?: string[]) {
@@ -200,6 +234,35 @@ describe("compileBlueprintToActions", () => {
     expect(insertActionsCalls).toEqual([5]); // one call, carrying all 5 rows
     expect(rows.map((r) => r.seq)).toEqual([0, 1, 2, 3, 4]);
     expect(rows.every((r) => typeof r.localRef === "string" && r.localRef.length > 0)).toBe(true);
+  });
+});
+
+describe("compileBlueprintToActions — edit-doc branch (Task 5)", () => {
+  const WS = "w1";
+
+  it("edit doc compiles via diffEditDoc and rows carry expected + entityName", async () => {
+    const { deps } = makeHarness([baseBlueprint({ doc: editDocWithBudgetChange() })]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actionType).toBe("budget_update");
+    expect(rows[0].expected).toEqual({ dailyBudgetMicros: 350_000_000 });
+    expect(rows[0].entityName).toBeTruthy();
+    expect(rows[0].recKey?.startsWith("ed-")).toBe(true);
+  });
+
+  it("edit doc with a stale baseline (>60 min) refuses to compile", async () => {
+    const staleLoadedAt = new Date(Date.now() - 61 * 60_000).toISOString();
+    const { deps } = makeHarness([baseBlueprint({ doc: editDocWithBudgetChange(staleLoadedAt) })]);
+
+    await expect(compileBlueprintToActions("bp1", [WS], deps)).rejects.toThrow(/caducado/);
+  });
+
+  it("create docs still compile through the v2 path (branch mis-detection guard)", async () => {
+    const { deps } = makeHarness([baseBlueprint({ doc: docFixture() })]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows[0].recKey?.startsWith("bp-")).toBe(true); // create compiler, not the edit one
   });
 });
 

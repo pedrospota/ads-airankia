@@ -23,9 +23,12 @@
 //    `validateOnlyDeferred: true` on the returned GatePreview is how the review screen tells
 //    the operator "this one gate still runs for real at publish."
 import { blockingFailures, runGates, type GateInput } from "../gates";
+import { diffEditDoc } from "../edit/diff";
+import { parseEditDoc } from "../edit/schema";
 import { getBlueprint, type BlueprintRepoDeps } from "./repo";
 import { parseBlueprint } from "./schema";
 import { compile } from "./compile";
+import { CC_ACTION_TYPES } from "../types";
 import type { AdapterCapabilities, CcSettingsValues, EntitySnapshot, GateResult } from "../types";
 
 export interface GatePreviewDeps {
@@ -69,6 +72,17 @@ const SYNTHETIC_CAPABILITIES: AdapterCapabilities = {
   ],
 };
 
+/** v2.3 EDIT-DOC BRANCH (Task 5): diffEditDoc (edit/diff.ts) only ever emits the v1 action
+ * types (budget_update|pause|enable|add_negatives) plus create_keywords/create_ad — never the
+ * other create_* types. A DISTINCT constant from SYNTHETIC_CAPABILITIES above (not a shared,
+ * widened one) so the v2 create path's capabilities list — and therefore its CAPABILITY gate
+ * results — stays byte-for-byte unchanged. */
+const SYNTHETIC_CAPABILITIES_EDIT: AdapterCapabilities = {
+  read: true,
+  write: true,
+  actionTypes: [...CC_ACTION_TYPES, "create_keywords", "create_ad"],
+};
+
 /**
  * Loads `blueprintId` (workspace-scoped), parses + compiles its doc, and runs the
  * deterministic gates for every compiled action against the account's real settings and
@@ -86,6 +100,49 @@ export async function previewBlueprintGates(
     ? await getBlueprint(blueprintId, workspaceIds, deps.blueprintRepo)
     : await getBlueprint(blueprintId, workspaceIds);
   if (!blueprint) throw new Error(`Blueprint no encontrado: ${blueprintId}`);
+
+  // v2.3 EDIT-DOC BRANCH (Task 5): mirrors compileBlueprintToActions's docType check in
+  // repo.ts, same exact literal — edit docs preview through diffEditDoc, never the create
+  // schema/compiler below. Self-contained (own settings/executedToday reads, own perAction/
+  // summary build, own return) so the create path underneath is untouched by this branch.
+  const rawDoc = blueprint.doc as { docType?: unknown };
+  if (rawDoc?.docType === "google_search_edit_v1") {
+    const compiled = diffEditDoc(parseEditDoc(blueprint.doc), blueprintId);
+
+    const settings = await deps.settings.get(blueprint.workspaceId);
+    const executedTodayForAccount = await deps.repo.countExecutedToday(blueprint.accountRef);
+
+    const perAction: GatePreviewAction[] = compiled.map((action) => {
+      // Field-scoped `expected` baseline captured when the tree was loaded (edit/diff.ts),
+      // merged onto the synthetic snapshot so baseline-dependent gates (e.g. BUDGET_DELTA's
+      // prior-budget read) see real numbers for edit docs instead of undefined.
+      const before: EntitySnapshot = {
+        entityKind: action.entityKind, entityRef: action.entityRef, status: "UNKNOWN",
+        ...(action.expected ?? {}),
+      };
+      const input: GateInput = {
+        settings,
+        network: "google_ads",
+        action: { actionType: action.actionType, entityKind: action.entityKind, entityRef: action.entityRef, payload: action.payload },
+        capabilities: SYNTHETIC_CAPABILITIES_EDIT,
+        before,
+        expected: null,
+        executedTodayForAccount,
+        validateResult: null,
+      };
+      const gates = runGates(input);
+      const blocking = blockingFailures(gates).filter((g) => g.id !== "VALIDATE_ONLY");
+      return { seq: action.seq, actionType: action.actionType, entityKind: action.entityKind, gates, blocking };
+    });
+
+    const summary = {
+      actions: perAction.length,
+      gatesRun: perAction.reduce((sum, a) => sum + a.gates.length, 0),
+      blockingCount: perAction.reduce((sum, a) => sum + a.blocking.length, 0),
+    };
+
+    return { perAction, summary, validateOnlyDeferred: true };
+  }
 
   const doc = parseBlueprint(blueprint.doc);
   const compiled = compile(doc, blueprintId);

@@ -45,7 +45,7 @@ describe("canTransition (exhaustive adjacency)", () => {
   // Mirrors the TRANSITIONS table in ../state.ts exactly.
   const EXPECTED: Record<CcActionStatus, CcActionStatus[]> = {
     proposed: ["approved", "rejected", "expired"],
-    approved: ["executing", "rejected", "expired"],
+    approved: ["executing", "rejected", "expired", "approved"],
     executing: ["executed", "failed"],
     executed: ["verified", "rolled_back"],
     verified: ["rolled_back"],

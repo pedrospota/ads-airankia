@@ -315,7 +315,7 @@ import type { CcActionStatus } from "./types";
 
 const TRANSITIONS: Record<CcActionStatus, CcActionStatus[]> = {
   proposed: ["approved", "rejected", "expired"],
-  approved: ["executing", "rejected", "expired"],
+  approved: ["executing", "rejected", "expired", "approved"], // self-loop: re-record gate_results while staying approved
   executing: ["executed", "failed"],
   executed: ["verified", "rolled_back"],
   verified: ["rolled_back"],

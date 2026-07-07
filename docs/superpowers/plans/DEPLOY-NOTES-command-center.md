@@ -44,3 +44,37 @@ These are tracked and safe to defer, but do them before Meta goes live / before 
 ## Sacred invariants (do not regress)
 
 Read-only gads-sentinel + Copiloto candado de escritura untouched; campaign-creation paths untouched; command-center Google writes use per-workspace connected-account tokens (never the platform's own `GOOGLE_ADS_REFRESH_TOKEN`); tenancy = airankia Supabase RLS; the `/api/command/actions/[id]/execute` route is the single mutation chokepoint.
+
+---
+
+# Command Center v2 — Guided Google Search Builder (create flow)
+
+v2 adds a full guided UI to CREATE (and later edit) a Google Search campaign, compiled onto the **untouched v1 rail** (gates → single `executeAction` chokepoint → ledger → rollback). Every created entity is born **PAUSED**.
+
+## Migration (run once, after deploy)
+
+`POST /api/migrate` (admin-gated) picks up **`008_command_center_v2`**: creates `cc_blueprints`; adds `blueprint_id/seq/local_ref/result_ref` to `cc_actions`; and appends the 5 `create_*` types to existing `cc_settings.allowed_action_types`. Idempotent (`IF NOT EXISTS` / `ON CONFLICT`). Verify: `select count(*) from cc_blueprints;` succeeds and `select allowed_action_types from cc_settings limit 1;` includes `create_campaign`.
+
+## How the create flow runs
+
+1. Operator builds a blueprint at **`/command/crear`** (manual + per-field ✨ AI via `/api/command/blueprint/suggest`). Draft persists via `POST/PUT /api/command/blueprint`.
+2. **`/command/crear/[id]/revisar`** shows every compiled action grouped by tree node + a **proactive deterministic gate preview** (validateOnly is deferred — it needs real resourceNames, so it runs at publish).
+3. "Publicar en pausa" → `approve` (compiles blueprint → `cc_actions` status `proposed`→`approved`) → `execute` (the plan runner loops over the single per-action `executeAction` chokepoint, resolving `tmp:` refs to real resourceNames between actions, stop-on-first-failure). Success → Bitácora. A gate block → 409 with the blocked gates.
+4. Rollback: reverse-seq `remove_entity` per created entity (create_campaign rollback removes the campaign; its criteria cascade).
+
+## Preconditions to actually publish
+
+- `COMMAND_CENTER_BETA=true` + admin email (same gate as v1 `/command/*`).
+- A **connected Google account** with an **ENABLED conversion action** — the builder's automated bidding (MAXIMIZE_CONVERSIONS / TARGET_CPA / TARGET_ROAS) needs conversion tracking; a no-conversion account will surface it at the validateOnly step on publish.
+- `connection_id` must belong to the caller's workspace (the create route enforces this, mirroring v1).
+- The campaign is created **PAUSED**. Nothing serves until the operator **enables it in the Google Ads UI** after reviewing the built campaign there. (There is no auto-enable; the existing Acciones/enable path can flip it later.)
+
+## Known limitations (safe to ship internal beta; address before broad exposure)
+
+- **No DB transaction** wrapping the repo's compile (delete-then-insert) and approve (two writes). Bounded/self-healing: the action insert is a single atomic batched statement; approve sets blueprint status LAST; partial states recover on retry. First transaction usage in the codebase would close it fully.
+- **Gate preview is deterministic-only** (validateOnly runs at publish). `create_campaign` geo/language are applied as a second `campaignCriteria:mutate` after the campaign create — an unmapped country code is caught at the validate gate (pre-mutation), and a transient step-2 failure triggers a compensating delete of the just-created campaign (atomic create).
+- **Settings allow-list:** `create_*` types are permitted via `CC_SETTINGS_ACTION_TYPES` (load + save). The v1 manual-action route still rejects `create_*` — creates ONLY come through the blueprint flow.
+
+## Verification status (this build)
+
+`bun test src/lib/command` → **130 pass / 0 fail**; `tsc --noEmit` → exit 0; `bun run build` → exit 0 (routes `/command/crear`, `/command/crear/[id]/revisar`, `/api/command/blueprint/*` all present); runtime smoke on the production build → `/command/crear` 404 (page gated), `/api/command/blueprint` + `/suggest` 403 (denied), `/login` 200. Every task adversarially reviewed; the review chain caught and fixed a feature-breaking `ACTION_ALLOWED` bug (settings stripped `create_*` on load) and two serious adapter bugs (create-rollback ref mismatch, campaign-orphan on criteria failure).

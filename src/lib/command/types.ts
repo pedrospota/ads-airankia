@@ -107,6 +107,8 @@ export interface CcSettingsValues {
   maxActionsPerAccountDay: number;
   requireTwoStep: boolean;
   allowedActionTypes: CcActionType[];
+  /** Absolute per-entity daily-budget ceiling in micros; null = disabled. */
+  maxDailyBudgetMicros: number | null;
   watchHours: number;
 }
 
@@ -116,6 +118,7 @@ export const CC_SETTINGS_DEFAULTS: Readonly<CcSettingsValues> = Object.freeze({
   maxActionsPerAccountDay: 20,
   requireTwoStep: true,
   allowedActionTypes: [...CC_ACTION_TYPES],
+  maxDailyBudgetMicros: null,
   watchHours: 72,
 });
 

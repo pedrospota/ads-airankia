@@ -38,7 +38,6 @@ export interface BuilderState {
   groupName: string;
   keywords: KeywordEntry[];
   negatives: KeywordEntry[];
-  cpcBidAmount: string; // currency units, optional
   finalUrl: string;
   headlines: string[];
   descriptions: string[];
@@ -131,7 +130,6 @@ export function initialBuilderState(accountRef: string | null): BuilderState {
     groupName: "",
     keywords: [],
     negatives: [],
-    cpcBidAmount: "",
     finalUrl: "",
     headlines: ["", "", ""], // RSA_SPEC.headline.min
     descriptions: ["", ""], // RSA_SPEC.description.min
@@ -170,8 +168,6 @@ export function buildDoc(state: BuilderState, ids: BuilderIds): CcBlueprintDoc {
         ? { strategy: "TARGET_ROAS", targetRoas: Number(state.targetRoas) || 0 }
         : { strategy: "MAXIMIZE_CONVERSIONS" };
 
-  const cpcMicros = state.cpcBidAmount.trim() ? unitsToMicros(state.cpcBidAmount) : undefined;
-
   return {
     network: "google_ads",
     campaign: {
@@ -193,7 +189,6 @@ export function buildDoc(state: BuilderState, ids: BuilderIds): CcBlueprintDoc {
           nodeId: ids.adGroupNodeId,
           tempId: ids.adGroupTempId,
           name: state.groupName.trim(),
-          cpcMicros,
           keywords: state.keywords
             .filter((k) => k.text.trim())
             .map((k) => ({ text: k.text.trim(), match: k.match })),
@@ -222,7 +217,7 @@ export function missingSteps(state: BuilderState): string[] {
   const out: string[] = [];
   if (!state.accountRef) out.push("Selecciona una cuenta de Google Ads.");
   if (!state.campaignName.trim()) out.push("Escribe el nombre de la campaña.");
-  if (unitsToMicros(state.dailyAmount) <= 0) out.push("Define un presupuesto diario mayor a cero.");
+  if (unitsToMicros(state.dailyAmount) < MICROS_PER_UNIT) out.push("Define un presupuesto diario de al menos 1 unidad.");
   if (state.bidding === "TARGET_CPA" && unitsToMicros(state.targetCpaAmount) <= 0)
     out.push("Define un CPA objetivo mayor a cero.");
   if (state.countryCodes.length === 0) out.push("Elige al menos un país.");

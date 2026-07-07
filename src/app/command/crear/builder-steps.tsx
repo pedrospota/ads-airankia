@@ -618,7 +618,7 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
         </label>
         {state.headlines.map((h, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <input type="text" style={inputStyle} value={h} onChange={(e) => updateHeadline(i, e.target.value)} placeholder={`Título ${i + 1}`} />
+            <input type="text" style={inputStyle} maxLength={RSA_SPEC.headline.maxLen} value={h} onChange={(e) => updateHeadline(i, e.target.value)} placeholder={`Título ${i + 1}`} />
             <CharCount length={h.length} max={RSA_SPEC.headline.maxLen} />
             <SparkleButton title="Sugerir título" busy={busyField === `headline-${i}`} onClick={() => suggest("headline", headlineCtx(i), `headline-${i}`, (v) => updateHeadline(i, v as string))} />
             <button type="button" onClick={() => removeHeadline(i)} disabled={state.headlines.length <= RSA_SPEC.headline.min} aria-label="Quitar título" style={{ ...removeBtnStyle, opacity: state.headlines.length <= RSA_SPEC.headline.min ? 0.3 : 1 }}>
@@ -637,7 +637,7 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
         </label>
         {state.descriptions.map((d, i) => (
           <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-            <textarea style={{ ...inputStyle, minHeight: 56, resize: "vertical" }} value={d} onChange={(e) => updateDescription(i, e.target.value)} placeholder={`Descripción ${i + 1}`} />
+            <textarea style={{ ...inputStyle, minHeight: 56, resize: "vertical" }} maxLength={RSA_SPEC.description.maxLen} value={d} onChange={(e) => updateDescription(i, e.target.value)} placeholder={`Descripción ${i + 1}`} />
             <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
               <CharCount length={d.length} max={RSA_SPEC.description.maxLen} />
               <SparkleButton title="Sugerir descripción" busy={busyField === `description-${i}`} onClick={() => suggest("description", descriptionCtx(i), `description-${i}`, (v) => updateDescription(i, v as string))} />

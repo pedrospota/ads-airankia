@@ -544,32 +544,25 @@ git commit -m "feat(command): cc_actions/cc_executions/cc_settings schema + 007 
 > settings field, one migration column (apply in Task 3), and two gate functions +
 > tests below. The base-10 code in Steps 1/3 stays verbatim; apply these deltas too.
 
-- [ ] **Step 0: Add the `maxDailyBudgetMicros` settings field (amends committed Task 1 files)**
+- [ ] **Step 0: Add the `maxDailyBudgetMicros` settings field to types (amends committed Task 1 `types.ts`)**
 
 In `src/lib/command/types.ts`, in `CcSettingsValues` add after `allowedActionTypes`:
 ```ts
   /** Absolute per-entity daily-budget ceiling in micros; null = disabled. */
   maxDailyBudgetMicros: number | null;
 ```
-and in `CC_SETTINGS_DEFAULTS` add:
+and in the frozen `CC_SETTINGS_DEFAULTS` object add:
 ```ts
   maxDailyBudgetMicros: null,
 ```
-In `src/lib/command/settings.ts` (created in Task 7) `rowToSettings`, add to the returned object:
-```ts
-    maxDailyBudgetMicros: row.maxDailyBudgetMicros == null ? null : Number(row.maxDailyBudgetMicros),
-```
-and thread it through `saveCcSettings` insert/update like the other fields.
-In `src/lib/schema.ts` `ccSettings` (Task 3) add:
-```ts
-  maxDailyBudgetMicros: bigint("max_daily_budget_micros", { mode: "number" }),
-```
-and in the `/api/migrate` 007 block add inside `cc_settings`:
-```sql
-      max_daily_budget_micros BIGINT,
-```
-Run `bun test src/lib/command` to confirm the existing settings test still passes
-(null default is covered by `CC_SETTINGS_DEFAULTS`).
+Run `bun test src/lib/command` to confirm the existing settings/type tests still pass
+(the null default is covered by `CC_SETTINGS_DEFAULTS`).
+
+> **Already handled elsewhere — do NOT touch in Task 4:** the `cc_settings` DB column
+> (`max_daily_budget_micros BIGINT`) and Drizzle field landed in **Task 3**. The
+> `settings.ts` threading (`rowToSettings`/`saveCcSettings`) is done in **Task 7**,
+> where that file is created (its plan code already reads/writes this field). Task 4
+> only edits `types.ts` (above) + `gates.ts`/its test (below).
 
 - [ ] **Step 0b: Add the two gate tests** (append inside the `describe("gates", ...)` block)
 
@@ -1606,6 +1599,7 @@ import { CC_ACTION_TYPES, CC_SETTINGS_DEFAULTS, type CcActionType, type CcSettin
 interface SettingsRowShape {
   executionsPaused?: unknown; maxBudgetDeltaPct?: unknown; maxActionsPerAccountDay?: unknown;
   requireTwoStep?: unknown; allowedActionTypes?: unknown; watchHours?: unknown;
+  maxDailyBudgetMicros?: unknown;
 }
 
 export function rowToSettings(row: SettingsRowShape | null | undefined): CcSettingsValues {
@@ -1620,6 +1614,7 @@ export function rowToSettings(row: SettingsRowShape | null | undefined): CcSetti
     requireTwoStep: row.requireTwoStep === undefined ? true : Boolean(row.requireTwoStep),
     allowedActionTypes: allowed,
     watchHours: Number(row.watchHours ?? CC_SETTINGS_DEFAULTS.watchHours),
+    maxDailyBudgetMicros: row.maxDailyBudgetMicros == null ? null : Number(row.maxDailyBudgetMicros),
   };
 }
 
@@ -1641,6 +1636,7 @@ export async function saveCcSettings(workspaceId: string, values: Partial<CcSett
       requireTwoStep: next.requireTwoStep,
       allowedActionTypes: next.allowedActionTypes,
       watchHours: next.watchHours,
+      maxDailyBudgetMicros: next.maxDailyBudgetMicros,
       updatedBy,
       updatedAt: new Date(),
     })
@@ -1653,6 +1649,7 @@ export async function saveCcSettings(workspaceId: string, values: Partial<CcSett
         requireTwoStep: next.requireTwoStep,
         allowedActionTypes: next.allowedActionTypes,
         watchHours: next.watchHours,
+        maxDailyBudgetMicros: next.maxDailyBudgetMicros,
         updatedBy,
         updatedAt: new Date(),
       },

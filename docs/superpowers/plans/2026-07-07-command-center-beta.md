@@ -522,6 +522,102 @@ git commit -m "feat(command): cc_actions/cc_executions/cc_settings schema + 007 
 **Files:**
 - Create: `src/lib/command/gates.ts`
 - Test: `src/lib/command/__tests__/gates.test.ts`
+- Modify: `src/lib/command/types.ts` (add one settings field — see Step 0)
+
+> **AMENDMENT (2026-07-07 post-harvest).** Two gates are added on top of the base 10:
+> **`ABS_BUDGET_CAP`** (blocking — absolute per-entity daily-budget ceiling, adopted
+> from attainmentlabs `MAX_DAILY_BUDGET` + FGRibreau `GOOGLE_ADS_MAX_DAILY_BUDGET`)
+> and **`META_LEARNING_RESET`** (warning — Meta budget delta >20% resets the learning
+> phase; source: marketingskills/NotFair "significant edit" threshold). This adds one
+> settings field, one migration column (apply in Task 3), and two gate functions +
+> tests below. The base-10 code in Steps 1/3 stays verbatim; apply these deltas too.
+
+- [ ] **Step 0: Add the `maxDailyBudgetMicros` settings field (amends committed Task 1 files)**
+
+In `src/lib/command/types.ts`, in `CcSettingsValues` add after `allowedActionTypes`:
+```ts
+  /** Absolute per-entity daily-budget ceiling in micros; null = disabled. */
+  maxDailyBudgetMicros: number | null;
+```
+and in `CC_SETTINGS_DEFAULTS` add:
+```ts
+  maxDailyBudgetMicros: null,
+```
+In `src/lib/command/settings.ts` (created in Task 7) `rowToSettings`, add to the returned object:
+```ts
+    maxDailyBudgetMicros: row.maxDailyBudgetMicros == null ? null : Number(row.maxDailyBudgetMicros),
+```
+and thread it through `saveCcSettings` insert/update like the other fields.
+In `src/lib/schema.ts` `ccSettings` (Task 3) add:
+```ts
+  maxDailyBudgetMicros: bigint("max_daily_budget_micros", { mode: "number" }),
+```
+and in the `/api/migrate` 007 block add inside `cc_settings`:
+```sql
+      max_daily_budget_micros BIGINT,
+```
+Run `bun test src/lib/command` to confirm the existing settings test still passes
+(null default is covered by `CC_SETTINGS_DEFAULTS`).
+
+- [ ] **Step 0b: Add the two gate tests** (append inside the `describe("gates", ...)` block)
+
+```ts
+  it("ABS_BUDGET_CAP blocks budgets over the absolute ceiling", () => {
+    const settings = { ...CC_SETTINGS_DEFAULTS, maxDailyBudgetMicros: 50_000_000 };
+    const over = runGates(baseInput({ settings,
+      action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 60_000_000 } } }));
+    expect(blockingFailures(over).map(r => r.id)).toContain("ABS_BUDGET_CAP");
+    const under = runGates(baseInput({ settings,
+      action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 12_000_000 } } }));
+    expect(under.filter(r => r.status === "fail").map(r => r.id)).not.toContain("ABS_BUDGET_CAP");
+  });
+  it("ABS_BUDGET_CAP passes when no ceiling configured", () => {
+    const rs = runGates(baseInput({
+      action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: 999_000_000 } } }));
+    expect(rs.find(r => r.id === "ABS_BUDGET_CAP")?.status).toBe("pass");
+  });
+  it("META_LEARNING_RESET warns on Meta budget delta over 20%", () => {
+    const rs = runGates(baseInput({ network: "meta_ads", validateResult: null,
+      before: baseBefore({ entityKind: "adset", dailyBudgetMicros: 10_000_000 }),
+      action: { actionType: "budget_update", entityKind: "adset", entityRef: "123", payload: { newDailyBudgetMicros: 12_500_000 } } }));
+    const g = rs.find(r => r.id === "META_LEARNING_RESET");
+    expect(g?.status).toBe("fail");
+    expect(g?.severity).toBe("warning");
+    expect(blockingFailures(rs).map(r => r.id)).not.toContain("META_LEARNING_RESET");
+  });
+  it("META_LEARNING_RESET passes on Google or small Meta deltas", () => {
+    expect(runGates(baseInput()).find(r => r.id === "META_LEARNING_RESET")?.status).toBe("pass");
+  });
+```
+
+- [ ] **Step 0c: Add the two gate functions + registration to `src/lib/command/gates.ts`** (defined in Step 3; add these alongside the others and append both to the `GATES` array before `runGates`)
+
+```ts
+const absBudgetCap: Gate = (i) => {
+  if (i.action.actionType !== "budget_update" || i.settings.maxDailyBudgetMicros == null) {
+    return gate("ABS_BUDGET_CAP", "blocking", true, "No aplica (sin tope absoluto o no es presupuesto).");
+  }
+  const next = budgetMicros(i);
+  const ok = next !== null && next <= i.settings.maxDailyBudgetMicros;
+  return gate("ABS_BUDGET_CAP", "blocking", ok,
+    ok ? `Presupuesto ${next} ≤ tope ${i.settings.maxDailyBudgetMicros} micros.`
+       : `Presupuesto ${next} supera el tope absoluto ${i.settings.maxDailyBudgetMicros} micros.`);
+};
+
+const metaLearningReset: Gate = (i) => {
+  if (i.network !== "meta_ads" || i.action.actionType !== "budget_update") {
+    return gate("META_LEARNING_RESET", "warning", true, "No aplica.");
+  }
+  const next = budgetMicros(i);
+  const prev = i.before.dailyBudgetMicros ?? null;
+  if (next === null || prev === null || prev <= 0) return gate("META_LEARNING_RESET", "warning", true, "Sin base para evaluar reinicio de aprendizaje.");
+  const deltaPct = Math.abs(next - prev) / prev * 100;
+  return gate("META_LEARNING_RESET", "warning", deltaPct <= 20,
+    deltaPct <= 20 ? `Delta ${deltaPct.toFixed(1)}% ≤ 20% (no reinicia aprendizaje).`
+                   : `Delta ${deltaPct.toFixed(1)}% > 20%: reiniciará la fase de aprendizaje de Meta.`);
+};
+```
+Register by changing the `GATES` array to include both: append `absBudgetCap, metaLearningReset` after `validateOnly`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1155,7 +1251,9 @@ git commit -m "feat(command): Google Ads adapter — GAQL snapshots, validateOnl
 - Create: `src/lib/command/networks/meta.ts`
 - Test: `src/lib/command/__tests__/meta-adapter.test.ts`
 
-**IMPORTANT sub-step 0:** verify the current Meta Marketing API version with the context7 MCP (`resolve-library-id` → "Meta Marketing API" → `query-docs` for "current Graph API version") or https://developers.facebook.com/docs/graph-api/changelog — set the code default accordingly (the code below defaults to `v23.0`; update the default string if the docs say newer, and note it in the commit message).
+**IMPORTANT sub-step 0:** the code below pins `v25.0` (validated floor from the mikusnuz/pipeboard reference servers, 2026-07). Verify the current Meta Marketing API version with the context7 MCP (`resolve-library-id` → "Meta Marketing API" → `query-docs` for "current Graph API version") or https://developers.facebook.com/docs/graph-api/changelog — if the docs say newer, bump the single default string and note it in the commit message. Do NOT downgrade below v25.0.
+
+**Meta budget/format facts (baked into the adapter):** budgets go to Meta as **integer minor units (cents) as strings** — `metaMinorUnits` already rounds micros→cents; when serializing, send `String(cents)`. When `META_APP_SECRET` is set, add `appsecret_proof = HMAC-SHA256(app_secret, token)` as a query param on every call (required practice for system-user tokens). These are additive to the code below; if the implementer adds the appsecret_proof helper, cover it with a test.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1266,7 +1364,7 @@ import type {
 } from "../types";
 import { MICROS_PER_MINOR_UNIT, MICROS_PER_UNIT } from "../types";
 
-const apiVersion = () => process.env.META_API_VERSION || "v23.0";
+const apiVersion = () => process.env.META_API_VERSION || "v25.0";
 const token = () => (process.env.META_SYSTEM_USER_TOKEN ?? "").trim();
 const graph = () => `https://graph.facebook.com/${apiVersion()}`;
 
@@ -3528,3 +3626,157 @@ Report: list of commits, test count, and any pre-existing issues encountered.
 - Spec coverage: §6 tables→Task 3; §7 adapters→Tasks 5–6; §8 gates→Task 4; §9 chokepoint/lifecycle/routes→Tasks 8–9; §10 UI→Tasks 10–13; §11 env/deploy→Task 14; §13 testing→Tasks 1–9. Settings UI (kill switch + caps display) lives in Resumen (Task 11).
 - Types cross-checked: `CcActionInput`/`EntitySnapshot`/`GateResult`/`ExecutorDeps` names consistent across Tasks 1, 4, 5, 6, 8, 9.
 - Known adaptation points (NOT placeholders — the implementer must read the named file and mirror its real shape): ui-kit prop shapes, AppShell/AppSidebar/CommandPalette prop threading, conexiones page composition, Header import path. Each task names the exact file to read first.
+
+---
+
+### Task 15: Knowledge pack — MIT playbooks + distilled threshold constants
+
+**Files:**
+- Create: `docs/knowledge/ads/ATTRIBUTION.md`
+- Create: `docs/knowledge/ads/meta-decision-system.md` (copied, MIT)
+- Create: `docs/knowledge/ads/google-search-playbook.md` (copied, MIT)
+- Create: `docs/knowledge/ads/safe-executor.md` (copied, MIT)
+- Create: `src/lib/command/knowledge.ts` (distilled numeric constants)
+- Test: `src/lib/command/__tests__/knowledge.test.ts`
+
+Context: `docs/research/2026-07-07-oss-harvest-verdict.md` records the sources/licenses.
+The three copied markdown files come from the session harvest clones (all MIT):
+`marketingskills/skills/ads/references/{meta-decision-system,google-search-playbook}.md`
+and `NotFair/google-ads/manage/references/safe-executor.md`. These are Copiloto
+grounding docs (not executed). `knowledge.ts` distills the numbers the gate engine and
+`source='regla'` suggestions will use. Numbers are facts (not copyrightable); the prose
+files carry MIT notices via ATTRIBUTION.md.
+
+- [ ] **Step 1: Copy the three MIT playbook files**
+
+Copy verbatim from the harvest clones into `docs/knowledge/ads/` (keep any in-file
+lineage footers). If the clones are gone, re-clone shallowly:
+```bash
+cd /tmp && rm -rf _kh && mkdir _kh && cd _kh
+git clone --depth 1 https://github.com/coreyhaines31/marketingskills.git
+git clone --depth 1 https://github.com/nowork-studio/notfair.git
+cp marketingskills/skills/ads/references/meta-decision-system.md /home/coder/projects/ads-airankia/docs/knowledge/ads/
+cp marketingskills/skills/ads/references/google-search-playbook.md /home/coder/projects/ads-airankia/docs/knowledge/ads/
+cp notfair/google-ads/manage/references/safe-executor.md /home/coder/projects/ads-airankia/docs/knowledge/ads/
+```
+(Adjust the safe-executor path if the repo layout differs — find it with `find notfair -name safe-executor.md`.)
+
+- [ ] **Step 2: Write `docs/knowledge/ads/ATTRIBUTION.md`**
+
+```markdown
+# Attribution — third-party knowledge in this directory
+
+The playbook markdown here is copied under MIT and used as AI grounding (not executed).
+Numeric thresholds distilled into `src/lib/command/knowledge.ts` are facts (not
+copyrightable) and carry courtesy source comments.
+
+- `meta-decision-system.md`, `google-search-playbook.md` — from
+  coreyhaines31/marketingskills, MIT License, Copyright (c) 2025 Corey Haines.
+  Lineage (per the files' own footers): adapted from practitioner operating systems,
+  notably Ivan Falco's ads-skills. Thresholds are starting points — recalibrate per account.
+- `safe-executor.md` — from nowork-studio/NotFair, MIT License,
+  Copyright (c) 2026 Toprank Contributors.
+- Check-registry thresholds referenced in code comments — from AgriciDaniel/claude-ads,
+  MIT License, Copyright (c) 2026 agricidaniel.
+
+MIT permission notice (applies to the copied files above):
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this
+> software and associated documentation files... The above copyright notice and this
+> permission notice shall be included in all copies or substantial portions of the Software.
+
+NOT included from research: pipeboard-co/meta-ads-mcp (BSL 1.1, non-compete — study only).
+```
+
+- [ ] **Step 3: Write the failing test** `src/lib/command/__tests__/knowledge.test.ts`
+
+```ts
+import { describe, it, expect } from "bun:test";
+import { META_THRESHOLDS, GOOGLE_THRESHOLDS, budgetStepOk, isFatigued } from "../knowledge";
+
+describe("knowledge constants", () => {
+  it("exposes the canonical scaling + kill numbers", () => {
+    expect(META_THRESHOLDS.scaleStepPct).toBe(20);
+    expect(META_THRESHOLDS.scaleCadenceDays).toBe(5);
+    expect(META_THRESHOLDS.killCpaMultiple).toBe(3);
+    expect(META_THRESHOLDS.learningConversionsPerWeek).toBe(50);
+    expect(GOOGLE_THRESHOLDS.smartBiddingMinConv30d).toBe(30);
+    expect(GOOGLE_THRESHOLDS.budgetSpendMultiplierPerDay).toBe(2);
+  });
+  it("budgetStepOk enforces +20%/5d style single-step ceiling", () => {
+    expect(budgetStepOk(10_000_000, 12_000_000)).toBe(true);   // +20%
+    expect(budgetStepOk(10_000_000, 13_000_000)).toBe(false);  // +30%
+    expect(budgetStepOk(10_000_000, 9_000_000)).toBe(true);    // decrease always ok
+  });
+  it("isFatigued flags frequency+CTR-decay on prospecting", () => {
+    expect(isFatigued({ campaignType: "prospecting", frequency7d: 4.5, ctrDeltaPct: -25 })).toBe(true);
+    expect(isFatigued({ campaignType: "prospecting", frequency7d: 1.5, ctrDeltaPct: -5 })).toBe(false);
+    expect(isFatigued({ campaignType: "retargeting", frequency7d: 5.0, ctrDeltaPct: -10 })).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 4: Run to verify it fails**
+
+Run: `bun test src/lib/command`
+Expected: FAIL (cannot resolve `../knowledge`).
+
+- [ ] **Step 5: Create `src/lib/command/knowledge.ts`**
+
+```ts
+// Distilled paid-media thresholds (facts) powering source='regla' suggestions and
+// future gate tuning. Sources (MIT): coreyhaines31/marketingskills, AgriciDaniel/
+// claude-ads, nowork-studio/NotFair — see docs/knowledge/ads/ATTRIBUTION.md.
+// All budgets in micros. Thresholds are starting points; recalibrate per account.
+
+export const META_THRESHOLDS = {
+  scaleStepPct: 20,               // +20% per scale move (never >=30% — resets learning)
+  scaleCadenceDays: 5,            // wait 5 days between scale steps
+  killCpaMultiple: 3,             // spend > 3x target CPA with 0 conv -> pause
+  learningConversionsPerWeek: 50, // learning-phase exit ("50 in 7")
+  learningResetBudgetDeltaPct: 20,// budget delta >20% resets learning
+  freqProspectingWarn: 3.0,       // ad-set frequency/7d warn
+  freqProspectingCritical: 4.0,
+  freqRetargetingCritical: 6.0,
+  ctrDecayPctFatigue: -20,        // CTR down >=20% over 7d = fatigue
+  budgetSufficiencyCpaMultiple: 5,// daily budget >= 5x target CPA per ad set
+} as const;
+
+export const GOOGLE_THRESHOLDS = {
+  smartBiddingMinConv30d: 30,     // >=30 conv/30d before Target CPA/ROAS
+  broadMatchMinConv30d: 30,       // broad match only with smart bidding + 30 conv + negatives
+  tcpaStepPct: 15,                // move tCPA in +/-10-15% steps
+  budgetSpendMultiplierPerDay: 2, // campaigns can spend up to 2x daily budget in a day
+  wastedSpendClickFloor: 3,       // search terms with >=3 clicks and 0 conv -> negative candidate
+  qualityScoreFloor: 7,           // avg QS >= 7 healthy
+} as const;
+
+/** A single budget step must not raise spend by >= META scaleStepPct. Decreases always ok. */
+export function budgetStepOk(prevMicros: number, nextMicros: number): boolean {
+  if (prevMicros <= 0) return false;
+  if (nextMicros <= prevMicros) return true;
+  const pct = (nextMicros - prevMicros) / prevMicros * 100;
+  return pct < META_THRESHOLDS.scaleStepPct + 0.0001 ? pct <= META_THRESHOLDS.scaleStepPct : false;
+}
+
+export interface FatigueSignal { campaignType: "prospecting" | "retargeting"; frequency7d: number; ctrDeltaPct: number }
+
+/** Prospecting fatigue = frequency over critical AND CTR decayed past the fatigue floor. */
+export function isFatigued(s: FatigueSignal): boolean {
+  const freqCritical = s.campaignType === "prospecting"
+    ? META_THRESHOLDS.freqProspectingCritical
+    : META_THRESHOLDS.freqRetargetingCritical;
+  return s.frequency7d >= freqCritical && s.ctrDeltaPct <= META_THRESHOLDS.ctrDecayPctFatigue;
+}
+```
+
+- [ ] **Step 6: Run tests**
+
+Run: `bun test src/lib/command`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add docs/knowledge docs/research src/lib/command/knowledge.ts src/lib/command/__tests__/knowledge.test.ts
+git commit -m "feat(command): knowledge pack — MIT playbooks + distilled ad thresholds (attribution recorded)"
+```

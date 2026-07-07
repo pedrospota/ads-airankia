@@ -48,4 +48,19 @@ describe("blueprintDocSchema", () => {
     const d = validDoc(); d.campaign.adGroups[0].keywords = [];
     expect(() => parseBlueprint(d)).toThrow();
   });
+  it("rejects TARGET_CPA without targetCpaMicros", () => {
+    const d = validDoc();
+    d.campaign.bidding = { strategy: "TARGET_CPA" } as any;
+    expect(() => parseBlueprint(d)).toThrow();
+  });
+  it("rejects TARGET_ROAS without targetRoas", () => {
+    const d = validDoc();
+    d.campaign.bidding = { strategy: "TARGET_ROAS" } as any;
+    expect(() => parseBlueprint(d)).toThrow();
+  });
+  it("accepts TARGET_CPA with positive targetCpaMicros", () => {
+    const d = validDoc();
+    d.campaign.bidding = { strategy: "TARGET_CPA", targetCpaMicros: 500_000 } as any;
+    expect(() => parseBlueprint(d)).not.toThrow();
+  });
 });

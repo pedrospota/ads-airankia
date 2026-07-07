@@ -31,6 +31,24 @@ export const blueprintDocSchema = z.object({
     bidding: z.object({
       strategy: z.enum(["MAXIMIZE_CONVERSIONS", "TARGET_CPA", "TARGET_ROAS"]),
       targetCpaMicros: z.number().int().optional(), targetRoas: z.number().optional(),
+    }).superRefine((data, ctx) => {
+      if (data.strategy === "TARGET_CPA") {
+        if (data.targetCpaMicros === undefined || data.targetCpaMicros <= 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "TARGET_CPA requiere targetCpaMicros > 0",
+            path: ["targetCpaMicros"],
+          });
+        }
+      } else if (data.strategy === "TARGET_ROAS") {
+        if (data.targetRoas === undefined || data.targetRoas <= 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "TARGET_ROAS requiere targetRoas > 0",
+            path: ["targetRoas"],
+          });
+        }
+      }
     }),
     geo: z.object({ countryCodes: z.array(z.string().min(2)).min(1), presenceOnly: z.boolean() }),
     languageCode: z.string().optional(),

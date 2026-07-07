@@ -65,6 +65,7 @@ const DESTINATIONS: Destination[] = [
 // `commandCenter` (threaded from AppShell's flag+admin gate) is true.
 const COMMAND_DESTINATIONS: Destination[] = [
   { label: "Centro de Mando · Resumen", href: "/command", section: "Centro de Mando" },
+  { label: "Centro de Mando · Constructor", href: "/command/crear", section: "Centro de Mando" },
   { label: "Centro de Mando · Acciones", href: "/command/acciones", section: "Centro de Mando" },
   { label: "Centro de Mando · Cuentas", href: "/command/cuentas", section: "Centro de Mando" },
   { label: "Centro de Mando · Bitácora", href: "/command/bitacora", section: "Centro de Mando" },

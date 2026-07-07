@@ -260,6 +260,7 @@ const COMMAND_GROUP: NavGroup = {
   label: "Centro de Mando",
   items: [
     { href: "/command", label: "Resumen", icon: "comando" },
+    { href: "/command/crear", label: "Constructor", icon: "comando" },
     { href: "/command/acciones", label: "Acciones", icon: "comando" },
     { href: "/command/cuentas", label: "Cuentas", icon: "comando" },
     { href: "/command/bitacora", label: "Bitácora", icon: "comando" },

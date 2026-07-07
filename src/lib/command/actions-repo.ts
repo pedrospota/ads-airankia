@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
 import { ccActions, ccExecutions } from "@/lib/schema";
 import { assertTransition } from "./state";
-import type { CcActionStatus, CcNetwork } from "./types";
+import type { CcActionStatus, CcNetwork, CcPayload } from "./types";
 
 export type CcActionRow = typeof ccActions.$inferSelect;
 export type CcExecutionRow = typeof ccExecutions.$inferSelect;
@@ -37,6 +37,33 @@ export async function listActions(workspaceIds: string[], opts: { status?: CcAct
   if (opts.network) conditions.push(eq(ccActions.network, opts.network));
   return adsDb.select().from(ccActions).where(and(...conditions))
     .orderBy(desc(ccActions.createdAt)).limit(opts.limit ?? 100);
+}
+
+/** Blueprint plan runner: this blueprint's actions, ordered by seq. */
+export async function listActionsByBlueprint(blueprintId: string): Promise<CcActionRow[]> {
+  return adsDb.select().from(ccActions)
+    .where(eq(ccActions.blueprintId, blueprintId))
+    .orderBy(ccActions.seq);
+}
+
+/**
+ * Persist a resolved payload for a blueprint action, optionally stamping result_ref.
+ * Without `resultRef`: guarded by the optimistic status check (only while the row is
+ * still 'approved') — the plan runner uses this before calling executeAction. With
+ * `resultRef`: unconditional on id — the plan runner uses this right after executeAction
+ * has succeeded and already moved the row past 'approved'.
+ */
+export async function updateActionResolved(
+  id: string, payload: CcPayload, resultRef?: string
+): Promise<void> {
+  const patch: Partial<typeof ccActions.$inferInsert> = { payload, updatedAt: new Date() };
+  if (resultRef === undefined) {
+    await adsDb.update(ccActions).set(patch)
+      .where(and(eq(ccActions.id, id), eq(ccActions.status, "approved")));
+    return;
+  }
+  patch.resultRef = resultRef;
+  await adsDb.update(ccActions).set(patch).where(eq(ccActions.id, id));
 }
 
 export async function transitionAction(

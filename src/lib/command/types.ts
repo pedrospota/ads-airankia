@@ -2,13 +2,15 @@
 // No env access, no side effects. See docs/superpowers/specs/2026-07-07-command-center-beta-design.md
 
 export type CcNetwork = "google_ads" | "meta_ads";
-export type CcEntityKind = "campaign" | "ad_group" | "adset";
+export type CcEntityKind = "campaign" | "ad_group" | "adset" | "ad";
 
 // User-selectable action types. "remove_negatives" is INTERNAL-ONLY: it exists
 // so rollbacks of add_negatives can be expressed as an action; it is never
 // user-proposable and never allowed by cc_settings.allowed_action_types.
 export type CcActionType = "budget_update" | "pause" | "enable" | "add_negatives";
-export type CcInternalActionType = CcActionType | "remove_negatives";
+export type CcCreateActionType =
+  | "create_budget" | "create_campaign" | "create_ad_group" | "create_keywords" | "create_ad";
+export type CcInternalActionType = CcActionType | CcCreateActionType | "remove_negatives" | "remove_entity";
 
 export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_update", "pause", "enable", "add_negatives"]);
 
@@ -24,8 +26,31 @@ export interface NegativesPayload {
 }
 /** pause/enable carry an empty payload. remove_negatives carries resourceNames. */
 export interface RemoveNegativesPayload { resourceNames: string[] }
+export type BiddingStrategy = "MAXIMIZE_CONVERSIONS" | "TARGET_CPA" | "TARGET_ROAS";
+/** A parent reference: either a live Google resourceName or a `tmp:<localRef>` placeholder. */
+export type CcRef = string;
+export interface CreateBudgetPayload { name: string; amountMicros: number }
+export interface CreateCampaignPayload {
+  name: string; status: "PAUSED"; channel: "SEARCH"; budgetRef: CcRef;
+  bidding: { strategy: BiddingStrategy; targetCpaMicros?: number; targetRoas?: number };
+  geoTargetIds: string[]; languageId?: string; presenceOnly: boolean;
+}
+export interface CreateAdGroupPayload { name: string; campaignRef: CcRef; cpcBidMicros?: number }
+export interface CreateKeywordsPayload {
+  adGroupRef: CcRef;
+  keywords: Array<{ text: string; match: "EXACT" | "PHRASE" | "BROAD"; negative?: boolean }>;
+}
+export interface CreateAdPayload {
+  adGroupRef: CcRef; finalUrl: string;
+  headlines: Array<{ text: string; pinnedField?: string }>;
+  descriptions: Array<{ text: string }>; path1?: string; path2?: string;
+}
+export interface RemoveEntityPayload { resourceNames: string[] }
 export type CcPayload =
-  | BudgetUpdatePayload | NegativesPayload | RemoveNegativesPayload | Record<string, never>;
+  | BudgetUpdatePayload | NegativesPayload | RemoveNegativesPayload
+  | CreateBudgetPayload | CreateCampaignPayload | CreateAdGroupPayload
+  | CreateKeywordsPayload | CreateAdPayload | RemoveEntityPayload
+  | Record<string, never>;
 
 /** What the executor hands to an adapter. */
 export interface CcActionInput {

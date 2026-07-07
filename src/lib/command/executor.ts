@@ -35,6 +35,7 @@ export interface ExecOutcome {
   dryRun?: boolean;
   error?: string;
   executionId?: string;
+  resourceNames?: string[];
 }
 
 function toInput(row: CcActionRow, override?: CcActionInput): CcActionInput {
@@ -77,7 +78,7 @@ async function performWrite(opts: {
   row: CcActionRow; input: CcActionInput; adapter: NetworkAdapter; auth: AdapterAuth;
   before: EntitySnapshot; gates: GateResult[]; actor: string; deps: ExecutorDeps;
   recipe: RollbackRecipe | null;
-}): Promise<{ ok: boolean; executionId?: string; error?: string }> {
+}): Promise<{ ok: boolean; executionId?: string; error?: string; resourceNames?: string[] }> {
   const { row, input, adapter, auth, before, gates, actor, deps, recipe } = opts;
   const hash = requestHash({ network: row.network, accountRef: row.accountRef, input });
   const ledger = await deps.repo.insertExecution({
@@ -95,7 +96,7 @@ async function performWrite(opts: {
       operation: exec.operation, request: exec.request, response: exec.response,
       after, rollbackRecipe: finalRecipe, status: "done",
     });
-    return { ok: true, executionId: ledger.id };
+    return { ok: true, executionId: ledger.id, resourceNames: exec.resourceNames };
   } catch (e) {
     const message = e instanceof Error ? e.message : "error de red desconocido";
     await deps.repo.updateExecution(ledger.id, { status: "failed", response: { error: message } });
@@ -132,7 +133,7 @@ export async function executeAction(
   }
 
   await deps.repo.transitionAction(row, "executing", { gateResults: gates });
-  let result: { ok: boolean; executionId?: string; error?: string };
+  let result: { ok: boolean; executionId?: string; error?: string; resourceNames?: string[] };
   try {
     const recipe = adapter.buildRollback(input, before, { operation: "", request: null, response: null }) ?? null;
     result = await performWrite({ row, input, adapter, auth, before, gates, actor, deps, recipe });
@@ -154,7 +155,7 @@ export async function executeAction(
     await deps.repo
       .transitionAction({ ...row, status: "executing" } as CcActionRow, "executed", { executedAt: deps.now(), error: null })
       .catch(() => undefined);
-    return { ok: true, executionId: result.executionId };
+    return { ok: true, executionId: result.executionId, resourceNames: result.resourceNames };
   }
   await deps.repo
     .transitionAction({ ...row, status: "executing" } as CcActionRow, "failed", { error: result.error })

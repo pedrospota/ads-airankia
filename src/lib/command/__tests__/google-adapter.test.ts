@@ -260,4 +260,42 @@ describe("googleAdapter", () => {
     const compensatingBody = JSON.parse(String(campaignCalls[1]?.init?.body));
     expect(compensatingBody.operations[0].remove).toBe("customers/123/campaigns/5");
   });
+
+  it("pause on entityKind ad → adGroupAds:mutate with the FULL resourceName", async () => {
+    responder = () => ({ results: [{ resourceName: "customers/123/adGroupAds/7~11" }] });
+    await googleAdapter.execute(AUTH, "123",
+      { actionType: "pause", entityKind: "ad", entityRef: "customers/123/adGroupAds/7~11", payload: {} },
+      { entityKind: "ad", entityRef: "customers/123/adGroupAds/7~11", status: "ENABLED" });
+    const body = JSON.parse(String(calls.find((c) => c.url.endsWith("adGroupAds:mutate"))?.init?.body));
+    expect(body.operations[0].update.resourceName).toBe("customers/123/adGroupAds/7~11");
+    expect(body.operations[0].update.status).toBe("PAUSED");
+    expect(body.operations[0].updateMask).toBe("status");
+  });
+
+  it("snapshot on entityKind ad queries by resource_name and returns status", async () => {
+    responder = (url) => String(url).includes("googleAds:search")
+      ? { results: [{ adGroupAd: { status: "ENABLED", resourceName: "customers/123/adGroupAds/7~11" } }] }
+      : {};
+    const snap = await googleAdapter.snapshot(AUTH, "123", "ad", "customers/123/adGroupAds/7~11");
+    expect(snap.status).toBe("ENABLED");
+    const q = String(calls.find((c) => String(c.url).includes("googleAds:search"))?.init?.body);
+    expect(q).toContain("ad_group_ad.resource_name");
+  });
+
+  it("validate() handles pause on an ad (validateOnly of adGroupAds:mutate)", async () => {
+    responder = () => ({});
+    const res = await googleAdapter.validate!(AUTH, "123",
+      { actionType: "pause", entityKind: "ad", entityRef: "customers/123/adGroupAds/7~11", payload: {} },
+      { entityKind: "ad", entityRef: "customers/123/adGroupAds/7~11", status: "ENABLED" });
+    expect(res.ok).toBe(true);
+  });
+
+  it("buildRollback of pause(ad) → enable with the same FULL resourceName", () => {
+    const r = googleAdapter.buildRollback(
+      { actionType: "pause", entityKind: "ad", entityRef: "customers/123/adGroupAds/7~11", payload: {} },
+      { entityKind: "ad", entityRef: "customers/123/adGroupAds/7~11", status: "ENABLED" },
+      { operation: "adGroupAds:mutate", request: {}, response: {} });
+    expect(r?.action.actionType).toBe("enable");
+    expect(r?.action.entityRef).toBe("customers/123/adGroupAds/7~11");
+  });
 });

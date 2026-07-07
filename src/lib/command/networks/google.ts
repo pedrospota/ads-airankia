@@ -147,6 +147,10 @@ function buildMutation(accountRef: string, action: CcActionInput, before: Entity
     case "pause":
     case "enable": {
       const status = action.actionType === "pause" ? "PAUSED" : "ENABLED";
+      if (action.entityKind === "ad") {
+        // entityRef is the FULL adGroupAds resourceName (customers/x/adGroupAds/g~a).
+        return { endpoint: "adGroupAds:mutate", body: { operations: [{ updateMask: "status", update: { resourceName: action.entityRef, status } }] } };
+      }
       if (action.entityKind === "ad_group") {
         return { endpoint: "adGroups:mutate", body: { operations: [{ updateMask: "status", update: { resourceName: adGroupRes, status } }] } };
       }
@@ -325,6 +329,15 @@ export const googleAdapter: NetworkAdapter = {
   },
 
   async snapshot(auth, accountRef, entityKind, entityRef) {
+    if (entityKind === "ad") {
+      // entityRef is the FULL adGroupAds resourceName (not a numeric id).
+      const rows = await gaql(auth, accountRef, `
+        SELECT ad_group_ad.status, ad_group_ad.resource_name
+        FROM ad_group_ad WHERE ad_group_ad.resource_name = '${entityRef}'`);
+      if (!rows.length) throw new Error(`Anuncio ${entityRef} no encontrado.`);
+      const s = (rows[0] as { adGroupAd?: { status?: string } }).adGroupAd;
+      return { entityKind, entityRef, status: (s?.status as EntitySnapshot["status"]) ?? "UNKNOWN", learningPhase: "UNKNOWN", raw: rows[0] };
+    }
     if (entityKind === "ad_group") {
       const rows = await gaql(auth, accountRef, `
         SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE ad_group.id = ${Number(entityRef)}`);

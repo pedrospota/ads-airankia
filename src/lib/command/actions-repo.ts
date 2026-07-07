@@ -15,7 +15,12 @@ export async function createAction(values: typeof ccActions.$inferInsert): Promi
 /** Insert skipping duplicates on (workspace, network, rec_key). Returns row or null if duped. */
 export async function createActionDeduped(values: typeof ccActions.$inferInsert): Promise<CcActionRow | null> {
   const rows = await adsDb.insert(ccActions).values(values)
-    .onConflictDoNothing({ target: [ccActions.workspaceId, ccActions.network, ccActions.recKey] })
+    // The backing unique index is partial (WHERE rec_key IS NOT NULL), so ON CONFLICT
+    // must carry the matching predicate or Postgres throws 42P10 at runtime.
+    .onConflictDoNothing({
+      target: [ccActions.workspaceId, ccActions.network, ccActions.recKey],
+      where: sql`${ccActions.recKey} is not null`,
+    })
     .returning();
   return rows[0] ?? null;
 }

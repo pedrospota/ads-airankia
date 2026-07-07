@@ -1685,7 +1685,10 @@ export async function createAction(values: typeof ccActions.$inferInsert): Promi
 /** Insert skipping duplicates on (workspace, network, rec_key). Returns row or null if duped. */
 export async function createActionDeduped(values: typeof ccActions.$inferInsert): Promise<CcActionRow | null> {
   const rows = await adsDb.insert(ccActions).values(values)
-    .onConflictDoNothing({ target: [ccActions.workspaceId, ccActions.network, ccActions.recKey] })
+    .onConflictDoNothing({
+      target: [ccActions.workspaceId, ccActions.network, ccActions.recKey],
+      where: sql`${ccActions.recKey} is not null`, // matches the partial unique index
+    })
     .returning();
   return rows[0] ?? null;
 }

@@ -641,6 +641,10 @@ export const ccActions = pgTable(
     executedAt: timestamp("executed_at", { withTimezone: true }),
     gateResults: jsonb("gate_results"),
     error: text("error"),
+    blueprintId: uuid("blueprint_id"),
+    seq: integer("seq"),
+    localRef: text("local_ref"),
+    resultRef: text("result_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -694,3 +698,21 @@ export const ccSettings = pgTable("cc_settings", {
   updatedBy: text("updated_by"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+export const ccBlueprints = pgTable(
+  "cc_blueprints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull(),
+    createdBy: text("created_by").notNull(),
+    network: text("network").notNull(),
+    accountRef: text("account_ref").notNull(),
+    connectionId: uuid("connection_id"),
+    doc: jsonb("doc").notNull(),
+    status: text("status").default("draft").notNull(), // draft|approved|executing|executed|failed
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("idx_cc_blueprints_workspace").on(table.workspaceId)]
+);

@@ -588,6 +588,31 @@ export async function POST() {
       updated_at TIMESTAMPTZ DEFAULT now()
     )`,
     sql`INSERT INTO schema_migrations (version) VALUES ('007_command_center') ON CONFLICT (version) DO NOTHING`,
+
+    // 008_command_center_v2 — guided builder: blueprints + action threading columns.
+    sql`ALTER TABLE cc_actions ADD COLUMN IF NOT EXISTS blueprint_id UUID`,
+    sql`ALTER TABLE cc_actions ADD COLUMN IF NOT EXISTS seq INT`,
+    sql`ALTER TABLE cc_actions ADD COLUMN IF NOT EXISTS local_ref TEXT`,
+    sql`ALTER TABLE cc_actions ADD COLUMN IF NOT EXISTS result_ref TEXT`,
+    sql`CREATE INDEX IF NOT EXISTS idx_cc_actions_blueprint ON cc_actions(blueprint_id, seq)`,
+    sql`CREATE TABLE IF NOT EXISTS cc_blueprints (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      workspace_id UUID NOT NULL,
+      created_by TEXT NOT NULL,
+      network TEXT NOT NULL,
+      account_ref TEXT NOT NULL,
+      connection_id UUID,
+      doc JSONB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      error TEXT,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`,
+    sql`CREATE INDEX IF NOT EXISTS idx_cc_blueprints_workspace ON cc_blueprints(workspace_id)`,
+    sql`UPDATE cc_settings SET allowed_action_types =
+      '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad"]'::jsonb
+      WHERE NOT (allowed_action_types ? 'create_campaign')`,
+    sql`INSERT INTO schema_migrations (version) VALUES ('008_command_center_v2') ON CONFLICT (version) DO NOTHING`,
   ];
 
   const results = [];

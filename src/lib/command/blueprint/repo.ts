@@ -9,7 +9,7 @@
 // Workspace scoping: every read/mutate that targets an existing row filters
 // workspaceId against the caller's workspaceIds, mirroring actions-repo.ts/settings.ts
 // (e.g. `inArray(ccBlueprints.workspaceId, workspaceIds)`).
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
 import { ccActions, ccBlueprints } from "@/lib/schema";
 import { createActions, listActionsByBlueprint, type CcActionRow } from "../actions-repo";
@@ -106,6 +106,17 @@ export async function getBlueprint(
   id: string, workspaceIds: string[], deps: BlueprintRepoDeps = realDeps
 ): Promise<CcBlueprintRow | null> {
   return deps.selectBlueprint(id, workspaceIds);
+}
+
+/** Lists this workspace's blueprints, most recent first. A plain scoped read (like
+ * `listActions`/`listActionsByBlueprint` in actions-repo.ts) — deliberately NOT part of the
+ * injectable `BlueprintRepoDeps` surface above, so adding it doesn't touch the interface
+ * blueprint-repo.test.ts's in-memory fake implements. Used by the Task 11 GET list route. */
+export async function listBlueprints(workspaceIds: string[], limit = 100): Promise<CcBlueprintRow[]> {
+  return adsDb.select().from(ccBlueprints)
+    .where(inArray(ccBlueprints.workspaceId, workspaceIds))
+    .orderBy(desc(ccBlueprints.createdAt))
+    .limit(limit);
 }
 
 /** Updates `doc` (+ updatedAt), workspace-scoped, only while status is 'draft'. Returns

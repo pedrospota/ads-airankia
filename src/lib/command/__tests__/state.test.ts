@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { canTransition, assertTransition } from "../state";
+import type { CcActionStatus } from "../types";
 
 describe("canTransition", () => {
   it("allows the happy path", () => {
@@ -25,5 +26,46 @@ describe("canTransition", () => {
   });
   it("assertTransition throws in Spanish", () => {
     expect(() => assertTransition("proposed", "executed")).toThrow(/Transición inválida/);
+  });
+});
+
+describe("canTransition (exhaustive adjacency)", () => {
+  const ALL_STATUSES: CcActionStatus[] = [
+    "proposed",
+    "approved",
+    "executing",
+    "executed",
+    "verified",
+    "failed",
+    "rolled_back",
+    "rejected",
+    "expired",
+  ];
+
+  // Mirrors the TRANSITIONS table in ../state.ts exactly.
+  const EXPECTED: Record<CcActionStatus, CcActionStatus[]> = {
+    proposed: ["approved", "rejected", "expired"],
+    approved: ["executing", "rejected", "expired"],
+    executing: ["executed", "failed"],
+    executed: ["verified", "rolled_back"],
+    verified: ["rolled_back"],
+    failed: ["approved", "rejected"],
+    rolled_back: [],
+    rejected: [],
+    expired: [],
+  };
+
+  it("matches the expected adjacency map for all 81 (from, to) pairs", () => {
+    const mismatches: string[] = [];
+    for (const from of ALL_STATUSES) {
+      for (const to of ALL_STATUSES) {
+        const expected = EXPECTED[from].includes(to);
+        const actual = canTransition(from, to);
+        if (actual !== expected) {
+          mismatches.push(`${from} -> ${to}: expected ${expected}, got ${actual}`);
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
   });
 });

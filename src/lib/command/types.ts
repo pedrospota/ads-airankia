@@ -10,7 +10,7 @@ export type CcEntityKind = "campaign" | "ad_group" | "adset";
 export type CcActionType = "budget_update" | "pause" | "enable" | "add_negatives";
 export type CcInternalActionType = CcActionType | "remove_negatives";
 
-export const CC_ACTION_TYPES: CcActionType[] = ["budget_update", "pause", "enable", "add_negatives"];
+export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_update", "pause", "enable", "add_negatives"]);
 
 export type CcActionStatus =
   | "proposed" | "approved" | "executing" | "executed"
@@ -110,14 +110,14 @@ export interface CcSettingsValues {
   watchHours: number;
 }
 
-export const CC_SETTINGS_DEFAULTS: CcSettingsValues = {
+export const CC_SETTINGS_DEFAULTS: Readonly<CcSettingsValues> = Object.freeze({
   executionsPaused: false,
   maxBudgetDeltaPct: 30,
   maxActionsPerAccountDay: 20,
   requireTwoStep: true,
   allowedActionTypes: [...CC_ACTION_TYPES],
   watchHours: 72,
-};
+});
 
 export const MICROS_PER_UNIT = 1_000_000;
 /** Meta daily_budget is in minor units (cents). cents * 10_000 = micros. */

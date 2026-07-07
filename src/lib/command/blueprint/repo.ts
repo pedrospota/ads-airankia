@@ -147,6 +147,23 @@ export async function compileBlueprintToActions(
   const blueprint = await deps.selectBlueprint(blueprintId, workspaceIds);
   if (!blueprint) throw new Error("Blueprint no encontrado.");
 
+  // v2.3 EDIT-DOC BRANCH (Task 5): docs saved by the edit-tree flow (Task 1/4) carry
+  // `docType: "google_search_edit_v1"` and compile through the differ (diffEditDoc), not the
+  // v2 create compiler below. Keyed on the exact literal so a malformed/foreign doc falls
+  // through to the create path's own parseBlueprint validation instead of silently matching.
+  // The baseline (`loadedAt`) must be fresh — a stale tree may no longer reflect the live
+  // account, so a re-load is required before compiling ("caducado" = "expired" in es-MX).
+  // TTL is validated BEFORE the delete-first block: a doomed recompile must never wipe the
+  // blueprint's existing proposed actions on its way to failing.
+  const rawDoc = blueprint.doc as { docType?: unknown };
+  const isEditDoc = rawDoc?.docType === "google_search_edit_v1";
+  if (isEditDoc) {
+    const ageMs = Date.now() - Date.parse((rawDoc as { loadedAt?: string }).loadedAt ?? "");
+    if (!Number.isFinite(ageMs) || ageMs > EDIT_BASELINE_MAX_AGE_MS) {
+      throw new Error("Baseline caducado; recarga el árbol de la campaña antes de compilar.");
+    }
+  }
+
   const existing = await deps.listActionsByBlueprint(blueprintId);
   if (existing.some((a) => a.status !== "proposed")) {
     throw new Error("El blueprint ya tiene acciones más allá de 'proposed'; no se puede recompilar.");
@@ -155,18 +172,7 @@ export async function compileBlueprintToActions(
     await deps.deleteProposedActionsByBlueprint(blueprintId, blueprint.workspaceId);
   }
 
-  // v2.3 EDIT-DOC BRANCH (Task 5): docs saved by the edit-tree flow (Task 1/4) carry
-  // `docType: "google_search_edit_v1"` and compile through the differ (diffEditDoc), not the
-  // v2 create compiler below. Keyed on the exact literal so a malformed/foreign doc falls
-  // through to the create path's own parseBlueprint validation instead of silently matching.
-  // The baseline (`loadedAt`) must be fresh — a stale tree may no longer reflect the live
-  // account, so a re-load is required before compiling ("caducado" = "expired" in es-MX).
-  const rawDoc = blueprint.doc as { docType?: unknown };
-  if (rawDoc?.docType === "google_search_edit_v1") {
-    const ageMs = Date.now() - Date.parse((rawDoc as { loadedAt?: string }).loadedAt ?? "");
-    if (!Number.isFinite(ageMs) || ageMs > EDIT_BASELINE_MAX_AGE_MS) {
-      throw new Error("Baseline caducado; recarga el árbol de la campaña antes de compilar.");
-    }
+  if (isEditDoc) {
     const doc = parseEditDoc(blueprint.doc);
     const compiled = diffEditDoc(doc, blueprintId);
     if (compiled.length === 0) throw new Error("No hay cambios que aplicar.");

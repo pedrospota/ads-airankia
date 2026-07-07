@@ -72,20 +72,36 @@ function biddingFields(bidding: CreateCampaignPayload["bidding"]): Record<string
 }
 
 /**
+ * Resolves blueprint country codes to Google geoTargetConstant ids. Fail-closed:
+ * throws on a missing/empty list or an unmapped code. Called from BOTH
+ * buildMutation's create_campaign case (so validate()/validateOnly catches a bad
+ * code before any live mutation) and buildCampaignCriteriaMutation (execute-time,
+ * step 2) — a single source of truth so the two can never disagree.
+ */
+function resolveCountryGeoIds(codes: string[] | undefined): string[] {
+  if (!codes?.length) {
+    throw new Error("create_campaign requiere al menos un geoTargetId (evita orientación mundial).");
+  }
+  return codes.map((code) => {
+    const geoId = COUNTRY_GEO[code];
+    if (!geoId) throw new Error(`País no soportado: ${code}`);
+    return geoId;
+  });
+}
+
+/**
  * create_campaign step 2 — geo + language CampaignCriterion mutate, built AT
  * EXECUTE TIME from the just-created campaign's resourceName. Cannot be
  * validateOnly'd pre-create (the campaign doesn't exist yet), so this is
- * intentionally NOT routed through buildMutation/validate().
+ * intentionally NOT routed through buildMutation/validate(). Geo-code
+ * resolution is fail-closed and shared with buildMutation (see
+ * resolveCountryGeoIds) so an unmapped code is caught at validate() time too.
  */
 function buildCampaignCriteriaMutation(campaignResourceName: string, payload: CreateCampaignPayload): Mutation {
-  if (!payload.geoTargetIds?.length) {
-    throw new Error("create_campaign requiere al menos un geoTargetId (evita orientación mundial).");
-  }
-  const geoOps = payload.geoTargetIds.map((code) => {
-    const geoId = COUNTRY_GEO[code];
-    if (!geoId) throw new Error(`País no soportado: ${code}`);
-    return { create: { campaign: campaignResourceName, location: { geoTargetConstant: `geoTargetConstants/${geoId}` } } };
-  });
+  const geoIds = resolveCountryGeoIds(payload.geoTargetIds);
+  const geoOps = geoIds.map((geoId) => (
+    { create: { campaign: campaignResourceName, location: { geoTargetConstant: `geoTargetConstants/${geoId}` } } }
+  ));
   const langOps = payload.languageId
     ? [{ create: { campaign: campaignResourceName, language: { languageConstant: `languageConstants/${payload.languageId}` } } }]
     : [];
@@ -170,6 +186,14 @@ function buildMutation(accountRef: string, action: CcActionInput, before: Entity
       // this step, which is correct: the criteria step references a campaign
       // that doesn't exist yet and cannot be validateOnly'd pre-create.
       const payload = action.payload as CreateCampaignPayload;
+      // Fail-closed: resolve geo codes NOW (throws on an unmapped code or a
+      // missing geoTargetIds list) so validate()'s validateOnly rehearsal
+      // rejects a bad blueprint before ANY live mutation. Step 2 (the
+      // campaignCriteria mutate) can't itself be validateOnly'd pre-create —
+      // this is the only pre-execution gate for its geo codes. The campaign
+      // body below is unchanged; resolveCountryGeoIds is called purely for
+      // its throw.
+      resolveCountryGeoIds(payload.geoTargetIds);
       return {
         endpoint: "campaigns:mutate",
         body: {
@@ -345,7 +369,25 @@ export const googleAdapter: NetworkAdapter = {
       const campaignResourceName = resourceNames[0];
       if (!campaignResourceName) throw new Error("Google Ads no devolvió el resourceName de la campaña creada.");
       const criteriaMutation = buildCampaignCriteriaMutation(campaignResourceName, action.payload as CreateCampaignPayload);
-      const criteriaResponse = await postMutate(auth, accountRef, criteriaMutation);
+      let criteriaResponse: Record<string, unknown>;
+      try {
+        criteriaResponse = await postMutate(auth, accountRef, criteriaMutation);
+      } catch (e) {
+        // Atomicity: step 2 failed (unmapped geo slipping past validate(), a
+        // transient API error, etc.) — the campaign from step 1 is now live and
+        // has no rollback recipe (buildRollback never ran). Compensate with a
+        // best-effort delete so it doesn't orphan, then rethrow naming the
+        // campaign so the caller/ops can verify. The compensating delete's own
+        // failure must never mask the original error.
+        const message = e instanceof Error ? e.message : "error desconocido";
+        try {
+          await postMutate(auth, accountRef, {
+            endpoint: "campaigns:mutate",
+            body: { operations: [{ remove: campaignResourceName }] },
+          });
+        } catch { /* best-effort compensation; original error below is authoritative */ }
+        throw new Error(`create_campaign falló al aplicar segmentación; campaña ${campaignResourceName} revertida: ${message}`);
+      }
       const criteriaResults = (criteriaResponse.results as Array<{ resourceName?: string }> | undefined) ?? [];
       const criteriaResourceNames = criteriaResults.map((r) => r.resourceName).filter((r): r is string => Boolean(r));
       return {
@@ -379,16 +421,24 @@ export const googleAdapter: NetworkAdapter = {
         // Only the campaign — its criteria cascade-delete with it. Removing a
         // criterion after its parent campaign is gone errors, so never list
         // exec.resourceNames[1..] (the criteria) here.
+        // entityRef MUST be the real created resourceName, never action.entityRef
+        // (a create's entityRef is the tmp: placeholder) — otherwise the rollback's
+        // own prepare() either rejects it (tmp:-guard) or tries to snapshot() a
+        // non-numeric ref and throws.
         if (!exec.resourceNames?.length) return null;
-        return { action: { ...common, actionType: "remove_entity", payload: { resourceNames: [exec.resourceNames[0]] } },
+        return { action: { ...common, entityRef: exec.resourceNames[0], actionType: "remove_entity", payload: { resourceNames: [exec.resourceNames[0]] } },
                  note: "Eliminar recurso creado." };
       }
       case "create_budget":
       case "create_ad_group":
       case "create_keywords":
       case "create_ad": {
+        // Same reasoning as create_campaign: entityRef must be a real resourceName.
+        // payload keeps ALL created resourceNames (e.g. create_keywords can create
+        // many criteria in one action) — only entityRef takes the first as a
+        // representative single value.
         if (!exec.resourceNames?.length) return null;
-        return { action: { ...common, actionType: "remove_entity", payload: { resourceNames: exec.resourceNames } },
+        return { action: { ...common, entityRef: exec.resourceNames[0], actionType: "remove_entity", payload: { resourceNames: exec.resourceNames } },
                  note: "Eliminar recurso creado." };
       }
       default:

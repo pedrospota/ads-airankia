@@ -133,6 +133,17 @@ describe("executeAction", () => {
     expect(out.error).toContain("aprobada");
   });
 
+  it("rejects a non-create action whose entityRef still carries a tmp: placeholder (BUG 1a regression)", async () => {
+    // compile.ts (the real blueprint compiler) stamps refs as `tmp:<localRef>` —
+    // four chars, no "e". The executor's guard must match that prefix, or it's
+    // inert against every real ref that could reach a non-create action.
+    const deps = fakeDeps();
+    deps.repo.getAction = async () => baseAction({ actionType: "pause", entityRef: "tmp:campaign:2" }) as never;
+    await expect(executeAction("a1", "op@x.com", ["w1"], deps)).rejects.toThrow(
+      "Ref temporal en acción no-create: pause tmp:campaign:2"
+    );
+  });
+
   it("create actions use a synthetic before (no snapshot call) and still gate", async () => {
     const deps = fakeDeps();
     deps.repo.getAction = async () => baseAction({ status: "approved", actionType: "create_budget", entityRef: "temp:budget:1", payload: { name: "b", amountMicros: 5_000_000 } }) as never;
@@ -142,6 +153,28 @@ describe("executeAction", () => {
       snapshot: async () => { snapCalled = true; throw new Error("should not snapshot a temp entity"); }
     }) };
     deps.settings = { get: async () => ({ ...CC_SETTINGS_DEFAULTS, allowedActionTypes: ["create_budget"] as CcInternalActionType[] } as CcSettingsValues) };
+    const out = await executeAction("a1", "op@x.com", ["w1"], deps);
+    expect(snapCalled).toBe(false);
+    expect(out.ok).toBe(true);
+  });
+
+  it("remove_entity (create-rollback) uses a synthetic before, never snapshot() on the live resourceName", async () => {
+    // remove_entity's entityRef is a full resourceName (customers/x/campaigns/y),
+    // not a numeric id — snapshot() expects a numeric id and would throw.
+    const deps = fakeDeps();
+    deps.repo.getAction = async () =>
+      baseAction({
+        status: "approved", actionType: "remove_entity",
+        entityRef: "customers/123/campaigns/5",
+        payload: { resourceNames: ["customers/123/campaigns/5"] },
+      }) as never;
+    let snapCalled = false;
+    deps.adapters = {
+      for: () => fakeAdapter({
+        capabilities: () => ({ read: true, write: true, actionTypes: ["remove_entity"] }),
+        snapshot: async () => { snapCalled = true; throw new Error("should not snapshot a live resourceName as if it were numeric"); },
+      }),
+    };
     const out = await executeAction("a1", "op@x.com", ["w1"], deps);
     expect(snapCalled).toBe(false);
     expect(out.ok).toBe(true);

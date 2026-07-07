@@ -199,4 +199,65 @@ describe("googleAdapter", () => {
     expect(r?.action.actionType).toBe("remove_entity");
     expect((r?.action.payload as { resourceNames: string[] }).resourceNames).toEqual(["customers/123/campaigns/5"]);
   });
+
+  it("BUG 1b regression: buildRollback for a create sets entityRef to the REAL resourceName, never the tmp: placeholder", () => {
+    const r = googleAdapter.buildRollback(
+      { actionType: "create_campaign", entityKind: "campaign", entityRef: "tmp:campaign:2", payload: {} as never },
+      synthBefore(), { operation: "campaigns:mutate", request: {}, response: {}, resourceNames: ["customers/123/campaigns/5"] });
+    // If entityRef stayed "tmp:campaign:2" (action.entityRef), the rollback's own
+    // prepare() would either hit the tmp:-rejection guard or try to snapshot() a
+    // non-numeric ref and throw.
+    expect(r?.action.entityRef).toBe("customers/123/campaigns/5");
+    expect(r?.action.entityRef.startsWith("tmp:")).toBe(false);
+  });
+
+  it("accepted deviation: create_keywords with multiple resourceNames includes ALL of them in the remove_entity payload", () => {
+    const created = [
+      "customers/123/adGroupCriteria/10~111",
+      "customers/123/adGroupCriteria/10~112",
+      "customers/123/adGroupCriteria/10~113",
+    ];
+    const r = googleAdapter.buildRollback(
+      { actionType: "create_keywords", entityKind: "ad_group", entityRef: "tmp:ag1:kw", payload: {} as never },
+      synthBefore(), { operation: "adGroupCriteria:mutate", request: {}, response: {}, resourceNames: created });
+    expect(r?.action.actionType).toBe("remove_entity");
+    expect((r?.action.payload as { resourceNames: string[] }).resourceNames).toEqual(created);
+    // entityRef is a representative real resourceName (first), never the tmp: placeholder.
+    expect(r?.action.entityRef).toBe(created[0]);
+  });
+
+  it("BUG 2a regression: validate() rejects create_campaign with an unmapped country code BEFORE any live mutation", async () => {
+    responder = () => ({ results: [{ resourceName: "customers/123/campaigns/5" }] });
+    const res = await googleAdapter.validate!(AUTH, "123", {
+      actionType: "create_campaign", entityKind: "campaign", entityRef: "tmp:campaign:3",
+      payload: {
+        name: "C", status: "PAUSED", channel: "SEARCH", budgetRef: "customers/123/campaignBudgets/9",
+        bidding: { strategy: "MAXIMIZE_CONVERSIONS" }, geoTargetIds: ["ZZ"], presenceOnly: true,
+      },
+    }, synthBefore());
+    expect(res.ok).toBe(false);
+    expect(res.detail).toContain("País no soportado");
+    // Fail-closed BEFORE execution: no campaigns:mutate call (or any fetch at all) was made.
+    expect(calls.find((c) => c.url.endsWith("campaigns:mutate"))).toBeUndefined();
+  });
+
+  it("BUG 2b regression: execute() compensates (deletes the just-created campaign) and rethrows when campaignCriteria:mutate fails", async () => {
+    responder = (url) => {
+      if (url.endsWith("campaigns:mutate")) return { results: [{ resourceName: "customers/123/campaigns/5" }] };
+      if (url.endsWith("campaignCriteria:mutate")) throw new Error("Google Ads campaignCriteria:mutate 400: geo boom");
+      return {};
+    };
+    await expect(googleAdapter.execute(AUTH, "123", {
+      actionType: "create_campaign", entityKind: "campaign", entityRef: "tmp:campaign:4",
+      payload: {
+        name: "C", status: "PAUSED", channel: "SEARCH", budgetRef: "customers/123/campaignBudgets/9",
+        bidding: { strategy: "MAXIMIZE_CONVERSIONS" }, geoTargetIds: ["MX"], presenceOnly: true,
+      },
+    }, synthBefore())).rejects.toThrow(/customers\/123\/campaigns\/5/);
+
+    const campaignCalls = calls.filter((c) => c.url.endsWith("campaigns:mutate"));
+    expect(campaignCalls).toHaveLength(2); // step 1 create + compensating delete
+    const compensatingBody = JSON.parse(String(campaignCalls[1]?.init?.body));
+    expect(compensatingBody.operations[0].remove).toBe("customers/123/campaigns/5");
+  });
 });

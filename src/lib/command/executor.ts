@@ -55,10 +55,16 @@ async function prepare(row: CcActionRow, input: CcActionInput, deps: ExecutorDep
   const auth = await deps.auth.resolve(row);
   const capabilities = adapter.capabilities(auth);
   const isCreate = CREATE_ACTION_TYPES.has(input.actionType);
-  if (!isCreate && input.entityRef.startsWith("temp:")) {
+  if (!isCreate && input.entityRef.startsWith("tmp:")) {
     throw new Error(`Ref temporal en acción no-create: ${input.actionType} ${input.entityRef}`);
   }
-  const before = isCreate
+  // remove_entity targets a full resourceName (e.g. customers/x/campaigns/y), not a
+  // numeric id — snapshot() expects a numeric id and would throw. Treat it like a
+  // create for before/after snapshotting purposes; the tmp:-rejection guard above
+  // still applies to it (keyed on isCreate, not this), so a bogus tmp: ref on a
+  // remove_entity still throws as it should.
+  const useSyntheticBefore = isCreate || input.actionType === "remove_entity";
+  const before = useSyntheticBefore
     ? ({ entityKind: input.entityKind, entityRef: input.entityRef, status: "UNKNOWN" } as EntitySnapshot)
     : capabilities.read
       ? await adapter.snapshot(auth, row.accountRef, input.entityKind, input.entityRef)
@@ -99,7 +105,8 @@ async function performWrite(opts: {
     const exec = await adapter.execute(auth, row.accountRef, input, before);
     let after: EntitySnapshot | null = null;
     const isCreate = CREATE_ACTION_TYPES.has(input.actionType);
-    if (!isCreate) {
+    const useSyntheticBefore = isCreate || input.actionType === "remove_entity";
+    if (!useSyntheticBefore) {
       try { after = await adapter.snapshot(auth, row.accountRef, input.entityKind, input.entityRef); } catch { /* verificación opcional */ }
     }
     const finalRecipe = adapter.buildRollback(input, before, exec) ?? recipe;

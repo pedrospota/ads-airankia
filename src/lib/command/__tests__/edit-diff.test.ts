@@ -121,4 +121,53 @@ describe("diffEditDoc — fail-closed throws", () => {
     for (const a of diffEditDoc(d, "bp1"))
       if (!a.actionType.startsWith("create_")) expect(a.entityRef.startsWith("tmp:")).toBe(false);
   });
+
+  it("throws when ad replacement.tempId equals group's kw:id namespace", () => {
+    const d = mk();
+    d.campaign.adGroups[0].newKeywords = [{ text: "k", match: "PHRASE", negative: false }];
+    d.campaign.adGroups[0].ads[0].replacement = { ...REPL, tempId: "kw:7" };
+    expect(() => diffEditDoc(d, "bp1")).toThrow(/tempId/);
+  });
+});
+
+describe("diffEditDoc — regression (enables-last ordering)", () => {
+  it("campaign + ad group enable → order is [create_keywords, enable, enable] with ad_group first, campaign last", () => {
+    const d = mk();
+    d.campaign.base.status = "PAUSED";
+    d.campaign.desired.status = "ENABLED";
+    d.campaign.adGroups[0].base.status = "PAUSED";
+    d.campaign.adGroups[0].desired.status = "ENABLED";
+    d.campaign.adGroups[0].newKeywords = [{ text: "k", match: "PHRASE", negative: false }];
+
+    const acts = diffEditDoc(d, "bp1");
+    const actionTypes = acts.map(a => a.actionType);
+    expect(actionTypes).toEqual(["create_keywords", "enable", "enable"]);
+
+    const enableActions = acts.filter(a => a.actionType === "enable");
+    expect(enableActions[0].entityKind).toBe("ad_group");
+    expect(enableActions[1].entityKind).toBe("campaign");
+  });
+});
+
+describe("diffEditDoc — regression (multi-replacement interleave)", () => {
+  it("two ads with replacements → interleaved [create_ad, pause, create_ad, pause] paired by entityRef", () => {
+    const d = mk();
+    d.campaign.adGroups[0].ads.push({
+      resourceName: "customers/123/adGroupAds/7~12",
+      unsupported: false,
+      base: { status: "ENABLED", finalUrl: "https://y.com", headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }], descriptions: [{ text: "D1" }, { text: "D2" }] },
+      replacement: null,
+    });
+
+    d.campaign.adGroups[0].ads[0].replacement = { tempId: "t1", finalUrl: "https://x.com", headlines: [{ text: "A" }, { text: "B" }, { text: "C" }], descriptions: [{ text: "d1" }, { text: "d2" }] };
+    d.campaign.adGroups[0].ads[1].replacement = { tempId: "t2", finalUrl: "https://y.com", headlines: [{ text: "A" }, { text: "B" }, { text: "C" }], descriptions: [{ text: "d1" }, { text: "d2" }] };
+
+    const acts = diffEditDoc(d, "bp1");
+    const actionTypes = acts.map(a => a.actionType);
+    expect(actionTypes).toEqual(["create_ad", "pause", "create_ad", "pause"]);
+
+    const pauseActions = acts.filter(a => a.actionType === "pause" && a.entityKind === "ad");
+    expect(pauseActions[0].entityRef).toBe("customers/123/adGroupAds/7~11");
+    expect(pauseActions[1].entityRef).toBe("customers/123/adGroupAds/7~12");
+  });
 });

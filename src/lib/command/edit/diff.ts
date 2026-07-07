@@ -129,6 +129,9 @@ export function diffEditDoc(doc: GoogleSearchEditDoc, blueprintId: string): Edit
 
   // --- Phase D: per ad group in doc order ---
   for (const g of c.adGroups) {
+    // Seed guard with this group's kw: ref namespace to prevent collision with user tempIds
+    seenTempIds.add(`kw:${g.id}`);
+
     // D1: create_keywords
     if (g.newKeywords.length > 0) {
       push({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCommandAccess, commandDenied } from "@/lib/command/access";
 import { getCcSettings, saveCcSettings } from "@/lib/command/settings";
-import { CC_ACTION_TYPES, type CcActionType } from "@/lib/command/types";
+import { CC_SETTINGS_ACTION_TYPES, type CcActionType, type CcCreateActionType } from "@/lib/command/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +31,9 @@ export async function POST(request: NextRequest) {
   if (typeof body.max_budget_delta_pct === "number") patch.maxBudgetDeltaPct = Math.max(1, Math.min(100, body.max_budget_delta_pct));
   if (typeof body.max_actions_per_account_day === "number") patch.maxActionsPerAccountDay = Math.max(1, Math.min(200, body.max_actions_per_account_day));
   if (Array.isArray(body.allowed_action_types)) {
-    patch.allowedActionTypes = body.allowed_action_types.filter((t): t is CcActionType => CC_ACTION_TYPES.includes(t as CcActionType));
+    patch.allowedActionTypes = body.allowed_action_types.filter(
+      (t): t is CcActionType | CcCreateActionType => CC_SETTINGS_ACTION_TYPES.includes(t as CcActionType | CcCreateActionType)
+    );
   }
   try {
     const settings = await saveCcSettings(workspaceId, patch, access.email);

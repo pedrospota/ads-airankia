@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
 import { ccSettings } from "@/lib/schema";
-import { CC_ACTION_TYPES, CC_SETTINGS_DEFAULTS, type CcActionType, type CcSettingsValues } from "./types";
+import { CC_SETTINGS_ACTION_TYPES, CC_SETTINGS_DEFAULTS, type CcActionType, type CcCreateActionType, type CcSettingsValues } from "./types";
 
 interface SettingsRowShape {
   executionsPaused?: unknown; maxBudgetDeltaPct?: unknown; maxActionsPerAccountDay?: unknown;
@@ -12,7 +12,9 @@ interface SettingsRowShape {
 export function rowToSettings(row: SettingsRowShape | null | undefined): CcSettingsValues {
   if (!row) return { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: [...CC_SETTINGS_DEFAULTS.allowedActionTypes] };
   const allowed = Array.isArray(row.allowedActionTypes)
-    ? (row.allowedActionTypes as unknown[]).filter((t): t is CcActionType => CC_ACTION_TYPES.includes(t as CcActionType))
+    ? (row.allowedActionTypes as unknown[]).filter(
+        (t): t is CcActionType | CcCreateActionType => CC_SETTINGS_ACTION_TYPES.includes(t as CcActionType | CcCreateActionType)
+      )
     : [...CC_SETTINGS_DEFAULTS.allowedActionTypes];
   return {
     executionsPaused: Boolean(row.executionsPaused),

@@ -14,6 +14,19 @@ export type CcInternalActionType = CcActionType | CcCreateActionType | "remove_n
 
 export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_update", "pause", "enable", "add_negatives"]);
 
+/**
+ * Settings-permitted action types: the v1 CC_ACTION_TYPES plus the 5 user-proposable
+ * create_* types emitted by the v2 blueprint flow. Deliberately excludes
+ * "remove_negatives"/"remove_entity" (internal-only rollback types, never
+ * user-proposable, always allowed by gates regardless of cc_settings).
+ * Used for the cc_settings.allowed_action_types allow-list (load + save), NOT for
+ * validating manual/v1 action creation (that still uses CC_ACTION_TYPES).
+ */
+export const CC_SETTINGS_ACTION_TYPES: readonly (CcActionType | CcCreateActionType)[] = Object.freeze([
+  ...CC_ACTION_TYPES,
+  "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+]);
+
 export type CcActionStatus =
   | "proposed" | "approved" | "executing" | "executed"
   | "verified" | "failed" | "rolled_back" | "rejected" | "expired";
@@ -131,7 +144,7 @@ export interface CcSettingsValues {
   maxBudgetDeltaPct: number;
   maxActionsPerAccountDay: number;
   requireTwoStep: boolean;
-  allowedActionTypes: CcActionType[];
+  allowedActionTypes: (CcActionType | CcCreateActionType)[];
   /** Absolute per-entity daily-budget ceiling in micros; null = disabled. */
   maxDailyBudgetMicros: number | null;
   watchHours: number;
@@ -142,7 +155,7 @@ export const CC_SETTINGS_DEFAULTS: Readonly<CcSettingsValues> = Object.freeze({
   maxBudgetDeltaPct: 30,
   maxActionsPerAccountDay: 20,
   requireTwoStep: true,
-  allowedActionTypes: [...CC_ACTION_TYPES],
+  allowedActionTypes: [...CC_SETTINGS_ACTION_TYPES],
   maxDailyBudgetMicros: null,
   watchHours: 72,
 });

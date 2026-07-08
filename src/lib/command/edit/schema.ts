@@ -13,15 +13,20 @@ export const EDIT_BASELINE_MAX_AGE_MS = 60 * 60_000; // 60 min
 export const EDIT_BATCH_MAX = 100;
 
 const match = z.enum(["EXACT", "PHRASE", "BROAD"]);
-const cpcFloorMicros = 10_000; // US$0.01 — mirrors gates.ts CURRENCY_SANITY's update_cpc floor
+// Exported for the patch chokepoint (src/lib/command/patch/schema.ts) — the mergeEditDoc-
+// lifted client-writable set's own floor, not a re-typed duplicate. Pre-v2.4 this was a
+// bare local const; only `export` + the name are new.
+export const cpcFloorMicros = 10_000; // US$0.01 — mirrors gates.ts CURRENCY_SANITY's update_cpc floor
+export const entityStatusSchema = z.enum(["ENABLED", "PAUSED"]);
 
 // Define headline and description shapes identical to blueprint/schema.ts lines 6-7
 const headline = z.object({ text: z.string().min(1).max(RSA_SPEC.headline.maxLen), pinnedField: z.string().optional() });
 const description = z.object({ text: z.string().min(1).max(RSA_SPEC.description.maxLen) });
 
-const kw = z.object({ text: z.string().min(1), match });
+// Exported (patch chokepoint reuse — see cpcFloorMicros comment above).
+export const kw = z.object({ text: z.string().min(1), match });
 
-const newAd = z.object({
+export const newAd = z.object({
   tempId: z.string(),
   finalUrl: z.string().url(),
   headlines: z.array(headline).min(RSA_SPEC.headline.min).max(RSA_SPEC.headline.max),

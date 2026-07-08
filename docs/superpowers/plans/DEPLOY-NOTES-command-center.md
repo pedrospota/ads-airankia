@@ -103,3 +103,38 @@ RSA replace has a create-succeeds/pause-fails window = transient double-serving 
 
 ## Verification (this build)
 170 tests / 0 fail · tsc exit 0 · build exit 0 (`/command/editar/[id]`, `/revisar`, `/api/command/edit` present) · smoke: login 200, editar 404-gated, edit API 403-denied. Every task adversarially reviewed; the differ's two safety properties (enabled-ad-count never decreases from a failure; field-scoped DRIFT baselines) held under adversarial probing.
+
+
+---
+
+# Command Center v2.2 — Meta Create Flow (slice 1)
+
+Create a full Meta campaign (campaign → ad set → link ads) on the same rail, **born PAUSED at two levels** (campaign AND ad set, both gate-enforced). Built entirely with mocked credentials — **creation is IMPOSSIBLE in production until the env vars below exist** (capabilities switchboard withholds the create verbs; VALIDATE_ONLY additionally fails closed without a rehearsal).
+
+## Activation (in order)
+1. Run `POST /api/migrate` → applies **`009_command_center_v2_2`** (adds `create_adset` to `cc_settings.allowed_action_types` + column default; idempotent).
+2. Set in Coolify: `META_SYSTEM_USER_TOKEN` (system user, ads_management), `META_APP_SECRET`, `META_PAGE_ID` (the page ads publish under), `META_AD_ACCOUNT_IDS` (comma-separated `act_...` allowlist). Redeploy.
+3. `/command/crear-meta` (entry card on /command) — until step 2, it shows "pendiente de credenciales".
+
+## Slice-1 shape
+OUTCOME_TRAFFIC only · ABO (budget on the ad set) · geo = country enum MX/US/AR/CO/CL/PE + age 18-65 (advantage_audience off) · single-image-less link ads (inline creative; imageUrl optional → link_data.picture) · special_ad_categories always `[]`. Money: the rail is MICROS end-to-end; cents exist only inside `meta.ts` (`microsToCents` throws on any non-whole-cent value; CURRENCY_SANITY catches a cents-as-micros 100x slip).
+
+## Rollback
+Reverse-seq `remove_entity` → `DELETE /<id>` (ad → adset → campaign). Inline-created AdCreatives are NOT deleted (inert, account-level).
+
+## First-live-run checklist for Pedro (mocked assumptions to verify on the first credentialed run)
+1. **Access tier:** the app needs Ads Management **Standard Access** (`ads_management`); Development tier throttles hard and only reaches admin-owned ad accounts.
+2. **Creative image:** confirm `object_story_spec.link_data.picture` accepts a raw https URL for `OUTCOME_TRAFFIC` link ads AND that an imageless link ad (og:image scrape) is accepted — else make `imageUrl` required in the schema.
+3. **validate_only:** confirm `execution_options=["validate_only"]` is honored on `POST /campaigns`, `/adsets`, `/ads` and returns actionable errors (not a silent pass).
+4. **Delete:** confirm `DELETE /<id>` works for campaign/adset/ad — else switch rollback to `POST status=DELETED`.
+5. **Delivery gate:** confirm a PAUSED campaign delivers nothing, and that enabling the campaign while the adset is PAUSED does NOT deliver; confirm the intended enable order (campaign → adset).
+6. **special_ad_categories:** confirm `[]` is correct for the target campaigns (none are HOUSING/EMPLOYMENT/CREDIT/FINANCIAL) — else a policy violation.
+7. **targeting_automation.advantage_audience:0** is accepted and disables audience expansion (reviewed geo/age is exactly what runs).
+8. **app-secret-proof:** if the Meta app enforces "Require app secret proof for server API calls", `META_APP_SECRET` MUST be set or every call 401s. This design gates create capability on `META_APP_SECRET`; relax that gate if proof is not enforced.
+9. **Non-EU / DSA:** confirm targeting the slice-1 countries `{MX,US,AR,CO,CL,PE}` needs no `dsa_beneficiary`/`dsa_payor` fields.
+10. **Budget floor:** confirm the ≥1-unit (`MICROS_PER_UNIT` = 100 cents) schema floor clears Meta's per-currency/per-account `daily_budget` minimum for the target account.
+11. **Inline creatives** created via `object_story_spec` are NOT deleted on rollback (inert, account-level) — confirm acceptable / no clutter accrual.
+12. **API version:** `META_API_VERSION=v25.0` is still GA (do not go below).
+
+## Verification (this build)
+240 tests / 0 fail · tsc exit 0 · build exit 0 (`/command/crear-meta` present) · smoke 200/404/403. Every task adversarially reviewed; the review chain also closed a pre-existing cross-compiler smuggling hole (blueprint POST now rejects docs carrying a docType) and caught a review-page dispatch gap that would have blocked every Meta publish.

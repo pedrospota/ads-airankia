@@ -227,3 +227,41 @@ Fields set by an accepted proposal (or an accepted ✨ suggestion) carry an **IA
 ## Verification (this build)
 
 524 tests / 0 fail · tsc 0 · build 0 (`/command/equipo`, `/api/command/equipo` present). Adversarial reviews caught and fixed: a one-shot NextResponse body reused across requests in the equipo 501 path (now built per-request), and a stale-response race in the Equipo client on rapid workspace switching. Bonus fix shipped with this release: the `/admin` nav item was unconditionally visible to EVERY logged-in user (route itself always 401'd) — now rendered only for platform admins.
+
+---
+
+# Command Center — Meta Edit Mode (última fase del full-POC)
+
+**ZERO migrations.** `/api/migrate` and `src/lib/schema.ts` are untouched: the three edit verbs (`budget_update`, `pause`, `enable`) have been in every `cc_settings.allowed_action_types` default since 007, re-affirmed by 008/009/010 — pinned by the "zero-migration guard" test so a future default change can't silently brick meta edit. Built entirely with mocked credentials — **editing is IMPOSSIBLE in production until the Meta envs exist** (session create answers 409 with the credential reason; no blueprint row, never mocked baselines).
+
+## Activation
+
+Only the EXISTING Meta env vars — nothing new to provision:
+- `META_SYSTEM_USER_TOKEN` (system user, ads_management) — read+write switchboard; without it, Cuentas shows "pendiente de credenciales" and POST /api/command/edit answers 409.
+- `META_AD_ACCOUNT_IDS` (comma-separated `act_...` allow-list) — the edit route 400s any account_ref outside it.
+- `META_APP_SECRET` — appsecret_proof on every call (required if the app enforces it).
+- `META_API_VERSION=v25.0` (default).
+- `META_PAGE_ID` is NOT needed for edit mode (creates only).
+
+After setting them: Cuentas → Meta row → Ver campañas → **Editar** (button appears once `capabilities().write` is true) → `/command/editar-meta/<id>` → Revisar → Aplicar cambios.
+
+## What's editable (slice 1)
+
+Pause/enable at campaign + adset + ad; daily `budget_update` at campaign (CBO) or adset (ABO) — whichever level the live account exposes (base non-null). Deferred (fail-closed, spec §f): creative/copy/targeting/name edits, lifetime-budget editing (status still editable on those nodes), CBO↔ABO moves, bid changes, creating adsets/ads inside the edit doc, copiloto `meta_edit` docKind, pagination past one `paging.next`.
+
+## Rollback semantics (verified — zero adapter rollback changes)
+
+The chokepoint already covers slice-1: `pause` ↔ `enable` are self-inverse (configured status, exactly what snapshot() records); `budget_update` rolls back to the before-snapshot budget (minor-units × 10_000 → always cent-aligned → round-trips the adapter's write exactly). Meta v1 verbs pass VALIDATE_ONLY as "No aplica", so rollback is never stranded on the rehearsal hard-blocker. The verify sweep works unchanged (`metaBudgetRoundMicros` comparison; null actual → "unverificable", never drift). Precondition already shipped: the per-entityKind snapshot fields fix — without it, every ad-level action died in prepare() before gates.
+
+## First-live-run checklist
+
+The v2.2 12-item checklist above still applies (access tier, validate_only, app-secret proof, API version…). Edit-mode additions to verify on the first credentialed run:
+1. `POST /<node-id> {status: PAUSED|ACTIVE}` flips configured status at all 3 levels (campaign/adset/ad) and `effective_status` follows.
+2. `POST /<node-id> {daily_budget: <minor units>}` is accepted at BOTH campaign (CBO) and adset (ABO) level; confirm the account's minimum daily budget clears the schema's 1-unit floor.
+3. `GET /<campaign-id>?fields=...account_id` returns bare digits (the tenant bind compares against `act_`-stripped ref).
+4. A campaign with >200 adsets / >500 ads per page follows ONE `paging.next` then refuses with "Campaña demasiado grande para el editor." — confirm acceptable for the target accounts.
+5. LEARNING adsets: budget/enable will hard-block at publish (gate) even when the review screen showed N/N — expected, documented divergence (risk #12).
+
+## Deactivation / rollback of the feature
+
+Unset `META_SYSTEM_USER_TOKEN` → capabilities read/write false → new edit sessions 409 at create; existing meta-edit drafts stay readable but can never publish (CAPABILITY gate fails closed at execute). No DB cleanup needed — draft blueprints are inert rows.

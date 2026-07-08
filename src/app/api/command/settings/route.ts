@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCommandAccess, commandDenied } from "@/lib/command/access";
+import { getCommandAccess, commandDenied, requireAdmin } from "@/lib/command/access";
 import { getCcSettings, saveCcSettings } from "@/lib/command/settings";
 import { CC_SETTINGS_ACTION_TYPES, type CcActionType, type CcCreateActionType } from "@/lib/command/types";
 
@@ -19,6 +19,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const access = await getCommandAccess();
   if (!access) return commandDenied();
+  // v3.0: settings (kill switch, límites, allowed verbs) are platform-admin
+  // territory — a flat deny for operators has zero smuggling surface (the
+  // handler applies whatever fields arrive together, so a pause-only
+  // carve-out would need exact-body-shape checks; spec §b rejects it).
+  const denied = requireAdmin(access);
+  if (denied) return denied;
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; }
   catch { return NextResponse.json({ error: "JSON inválido" }, { status: 400 }); }

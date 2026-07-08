@@ -703,6 +703,22 @@ export const ccSettings = pgTable("cc_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// v3.0 — dedup ledger for external (Telegram) Novedades notifications. The
+// unique index IS the dedup mechanism (insert-if-new); rows are never updated.
+export const ccNotifications = pgTable(
+  "cc_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull(),
+    kind: text("kind").notNull(),
+    itemId: uuid("item_id").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_cc_notifications_item").on(table.workspaceId, table.kind, table.itemId),
+  ]
+);
+
 export const ccBlueprints = pgTable(
   "cc_blueprints",
   {

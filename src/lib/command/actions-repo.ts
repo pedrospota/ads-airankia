@@ -220,6 +220,8 @@ export const NOVEDADES_APPROVED_SCAN_LIMIT = 200;
 
 export interface NovedadItemRef {
   id: string;
+  /** v3.0: notify.ts keys cc_notifications dedup rows on (workspace, kind, id). */
+  workspaceId: string;
 }
 
 export interface NovedadesCounts {
@@ -285,7 +287,7 @@ export async function listNovedades(workspaceIds: string[]): Promise<NovedadesRe
 
   const [failedBlueprints, failedActions, driftedActions, expiredActions, approvedCandidates] = await Promise.all([
     // (a) Plan falló mid-execution → cc_blueprints.status='failed'.
-    adsDb.select({ id: ccBlueprints.id }).from(ccBlueprints)
+    adsDb.select({ id: ccBlueprints.id, workspaceId: ccBlueprints.workspaceId }).from(ccBlueprints)
       .where(and(
         inArray(ccBlueprints.workspaceId, workspaceIds),
         eq(ccBlueprints.status, "failed"),
@@ -294,7 +296,7 @@ export async function listNovedades(workspaceIds: string[]): Promise<NovedadesRe
       .orderBy(desc(ccBlueprints.updatedAt))
       .limit(NOVEDADES_ITEM_LIMIT),
     // (b) Acción falló → cc_actions.status='failed'.
-    adsDb.select({ id: ccActions.id }).from(ccActions)
+    adsDb.select({ id: ccActions.id, workspaceId: ccActions.workspaceId }).from(ccActions)
       .where(and(
         inArray(ccActions.workspaceId, workspaceIds),
         eq(ccActions.status, "failed"),
@@ -307,7 +309,7 @@ export async function listNovedades(workspaceIds: string[]): Promise<NovedadesRe
     // exactly the set that predicate excludes — recordVerificationDrift is
     // the sole writer of `error` on an 'executed' row (see its header
     // comment), so error≠null here unambiguously means drift.
-    adsDb.select({ id: ccActions.id }).from(ccActions)
+    adsDb.select({ id: ccActions.id, workspaceId: ccActions.workspaceId }).from(ccActions)
       .where(and(
         inArray(ccActions.workspaceId, workspaceIds),
         eq(ccActions.status, "executed"),
@@ -317,7 +319,7 @@ export async function listNovedades(workspaceIds: string[]): Promise<NovedadesRe
       .orderBy(desc(ccActions.updatedAt))
       .limit(NOVEDADES_ITEM_LIMIT),
     // (e) Caducada → cc_actions.status='expired'.
-    adsDb.select({ id: ccActions.id }).from(ccActions)
+    adsDb.select({ id: ccActions.id, workspaceId: ccActions.workspaceId }).from(ccActions)
       .where(and(
         inArray(ccActions.workspaceId, workspaceIds),
         eq(ccActions.status, "expired"),
@@ -328,7 +330,7 @@ export async function listNovedades(workspaceIds: string[]): Promise<NovedadesRe
     // (d) Bloqueada por compuertas en execute → status='approved' AND
     // gate_results contains a blocking fail (JS-filtered below via
     // hasBlockingGateFailure over this bounded scan).
-    adsDb.select({ id: ccActions.id, gateResults: ccActions.gateResults }).from(ccActions)
+    adsDb.select({ id: ccActions.id, workspaceId: ccActions.workspaceId, gateResults: ccActions.gateResults }).from(ccActions)
       .where(and(
         inArray(ccActions.workspaceId, workspaceIds),
         eq(ccActions.status, "approved"),
@@ -341,7 +343,7 @@ export async function listNovedades(workspaceIds: string[]): Promise<NovedadesRe
   const blockedActions = approvedCandidates
     .filter((a) => hasBlockingGateFailure(a.gateResults))
     .slice(0, NOVEDADES_ITEM_LIMIT)
-    .map((a) => ({ id: a.id }));
+    .map((a) => ({ id: a.id, workspaceId: a.workspaceId }));
 
   const counts: NovedadesCounts = {
     planesFallidos: failedBlueprints.length,

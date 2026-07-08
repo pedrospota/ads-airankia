@@ -637,6 +637,22 @@ export async function POST() {
     sql`ALTER TABLE cc_settings ALTER COLUMN allowed_action_types SET DEFAULT
       '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset","update_keyword_status","update_cpc","remove_negatives"]'::jsonb`,
     sql`INSERT INTO schema_migrations (version) VALUES ('010_command_center_v2_7') ON CONFLICT (version) DO NOTHING`,
+
+    // ── 011 · v3.0 SaaS-lite: notificaciones externas (Telegram) ──
+    // Dedup ledger for Novedades notifications. The UNIQUE index is the
+    // concurrency lock: notify.ts does INSERT … ON CONFLICT DO NOTHING and
+    // only newly-inserted rows go into the message, so concurrent sweeps can
+    // never double-send the same item (design spec §c).
+    sql`CREATE TABLE IF NOT EXISTS cc_notifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      workspace_id UUID NOT NULL,
+      kind TEXT NOT NULL,
+      item_id UUID NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_cc_notifications_item
+      ON cc_notifications(workspace_id, kind, item_id)`,
+    sql`INSERT INTO schema_migrations (version) VALUES ('011_command_center_v3_0') ON CONFLICT (version) DO NOTHING`,
   ];
 
   const results = [];

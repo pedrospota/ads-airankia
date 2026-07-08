@@ -160,28 +160,34 @@ export default function CuentasClient({
     }
   }
 
-  // Loads a live Google Search campaign into a v2.3 edit-mode draft blueprint and
-  // navigates to the workbench. The campaigns DTO (EntitySnapshot) doesn't carry
-  // advertising_channel_type, so we can't gate this to SEARCH-only rows client-side —
-  // the route itself refuses non-SEARCH campaigns with a 409, surfaced here inline.
+  // Loads a live campaign into an edit-mode draft blueprint and navigates to the
+  // matching workbench. Google: v2.3 flow (connection_id required; non-SEARCH
+  // campaigns 409 server-side). Meta: meta-edit flow (no connection; no-token /
+  // cross-account / archived campaigns 409 server-side). Both surface inline.
   async function startEdit(campaign: CampaignRow) {
-    if (!selected || selected.network !== "google_ads" || !selected.connectionId) return;
+    if (!selected) return;
+    const isMeta = selected.network === "meta_ads";
+    if (!isMeta && !selected.connectionId) return;
     setEditingRef(campaign.entityRef);
     setEditErrors((prev) => ({ ...prev, [campaign.entityRef]: "" }));
     try {
       const res = await fetch("/api/command/edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          network: "google_ads",
-          connection_id: selected.connectionId,
-          account_ref: selected.accountRef,
-          campaign_id: campaign.entityRef,
-        }),
+        body: JSON.stringify(
+          isMeta
+            ? { network: "meta_ads", account_ref: selected.accountRef, campaign_id: campaign.entityRef }
+            : {
+                network: "google_ads",
+                connection_id: selected.connectionId,
+                account_ref: selected.accountRef,
+                campaign_id: campaign.entityRef,
+              }
+        ),
       });
       const data = await res.json();
       if (!res.ok || !data.id) throw new Error(data.error ?? `HTTP ${res.status}`);
-      router.push(`/command/editar/${data.id}`);
+      router.push(isMeta ? `/command/editar-meta/${data.id}` : `/command/editar/${data.id}`);
     } catch (e) {
       setEditErrors((prev) => ({ ...prev, [campaign.entityRef]: e instanceof Error ? e.message : "Error abriendo el editor" }));
     } finally {
@@ -292,7 +298,7 @@ export default function CuentasClient({
                               Proponer activación
                             </PrimaryButton>
                           ) : null}
-                          {selected.network === "google_ads" ? (
+                          {selected.network === "google_ads" || (selected.network === "meta_ads" && metaWritable) ? (
                             <SecondaryButton disabled={editingRef === c.entityRef} onClick={() => void startEdit(c)}>
                               {editingRef === c.entityRef ? "Abriendo…" : "Editar"}
                             </SecondaryButton>

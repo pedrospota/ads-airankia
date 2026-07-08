@@ -14,18 +14,22 @@ import { isAdminEmail } from "@/lib/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const NO_SERVICE_KEY = NextResponse.json(
-  { error: "Falta configurar SUPABASE_SERVICE_ROLE_KEY en el servidor." },
-  { status: 501 }
-);
-
 async function requireAdminAndClient() {
   const access = await getCommandAccess();
   if (!access) return { error: commandDenied() } as const;
   const denied = requireAdmin(access);
   if (denied) return { error: denied } as const;
   const admin = createSupabaseAdminClient();
-  if (!admin) return { error: NO_SERVICE_KEY } as const;
+  // NOTE: Response must be constructed per-request because NextResponse body
+  // is a one-shot ReadableStream. Module-level constant would be reused across
+  // requests, causing "Body already used" on the second call.
+  if (!admin)
+    return {
+      error: NextResponse.json(
+        { error: "Falta configurar SUPABASE_SERVICE_ROLE_KEY en el servidor." },
+        { status: 501 }
+      ),
+    } as const;
   return { access, admin } as const;
 }
 

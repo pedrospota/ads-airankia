@@ -157,3 +157,18 @@ The /command resumen shows a needs-attention card (pure query, no new tables): P
 
 ## Verification (this build)
 285 tests / 0 fail · tsc exit 0 · build exit 0 (`/api/command/verify` present) · smoke 200/403. Adversarial reviews caught and fixed: a false-drift bug on null budget snapshots (would have stickily flagged healthy CBO campaigns), a poison-pill auth failure that could livelock the sweep, a zero-defaults display contract violation, a range-toggle race, and a stale-props table after refresh.
+
+---
+
+# Command Center v2.7 — Weekly Loop Completo
+
+**Migration 010 required** (`POST /api/migrate`, settings-only, idempotent): adds `update_keyword_status`, `update_cpc`, `remove_negatives` to `allowed_action_types` + column default. Zero structural DB change.
+
+## What's new
+- **Podar desde el workbench:** live keywords get Pausar/Reactivar (reversible — pause-over-remove by design); campaign negatives get Quitar (rollback re-creates them via the recorded text/match). New blocking gate **CPC_DELTA** (reuses `maxBudgetDeltaPct`); `update_cpc` per ad group with «puja automática» lock when no manual bid exists.
+- **Promotion note:** `remove_negatives` is now user-proposable (faces ACTION_ALLOWED normally); `remove_entity` remains the ONLY internal verb. The rollback-of-add_negatives path is unaffected (pinned by test).
+- **Reporte a cliente:** Bitácora gains «Exportar CSV» (200 rows, BOM/RFC-4180) + `/command/bitacora/reporte` — the printable weekly «qué cambiamos y por qué» grouped Cuenta→Campaña.
+- **Scheduling (run_at) DEFERRED** — no invariant-clean unattended trigger exists (the verify sweep is READ-only by contract; page-load mutation rejected; external cron needs a service-role auth story). Escape hatch: a future background executor.
+
+## Verification (this build)
+372 tests / 0 fail · tsc 0 · build 0 (`/command/bitacora/reporte` present) · smoke 200/404. Reviews caught+fixed a HIGH blast-bound bypass (spoofed keyword status could over-cap a batch then brick the draft — mergeEditDoc now re-validates the merged doc against server truth).

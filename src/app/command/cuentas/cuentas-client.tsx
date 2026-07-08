@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Card, DataTable, THead, Row, Cell, Badge, EmptyState, SecondaryButton, PrimaryButton, UI } from "@/components/ui-kit";
@@ -26,7 +26,7 @@ const NET_LABEL = { google_ads: "Google Ads", meta_ads: "Meta Ads" } as const;
 
 // v2.6 — 7d/30d segmented range toggle for the campaign metrics columns.
 // Same segmented-control styling as editar/editor-panels.tsx's StatusToggle.
-function RangeToggle({ value, onChange }: { value: CcMetricsRange; onChange: (r: CcMetricsRange) => void }) {
+function RangeToggle({ value, onChange, disabled }: { value: CcMetricsRange; onChange: (r: CcMetricsRange) => void; disabled?: boolean }) {
   const segStyle = (active: boolean): CSSProperties => ({
     border: `1px solid ${active ? UI.accent : UI.borderStrong}`,
     background: active ? UI.accentSoft : "none",
@@ -35,14 +35,15 @@ function RangeToggle({ value, onChange }: { value: CcMetricsRange; onChange: (r:
     padding: "6px 14px",
     fontSize: 12.5,
     fontWeight: 600,
-    cursor: "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.6 : 1,
   });
   return (
     <div style={{ display: "flex", gap: 6 }}>
-      <button type="button" style={segStyle(value === "7d")} onClick={() => onChange("7d")}>
+      <button type="button" disabled={disabled} style={segStyle(value === "7d")} onClick={() => onChange("7d")}>
         7 días
       </button>
-      <button type="button" style={segStyle(value === "30d")} onClick={() => onChange("30d")}>
+      <button type="button" disabled={disabled} style={segStyle(value === "30d")} onClick={() => onChange("30d")}>
         30 días
       </button>
     </div>
@@ -76,9 +77,15 @@ export default function CuentasClient({
   const [editingRef, setEditingRef] = useState<string | null>(null);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
+  // Race guard: increment on each loadCampaigns call, discard stale responses.
+  const requestId = useRef(0);
+
   // Fetch stays gated behind an explicit trigger (the "Ver campañas" click, or
   // the range toggle once an account is already selected) — never on render.
   async function loadCampaigns(account: UnifiedAccount, r: CcMetricsRange = range) {
+    requestId.current += 1;
+    const currentId = requestId.current;
+
     setSelected(account);
     setCampaigns(null);
     setMetrics(null);
@@ -90,14 +97,24 @@ export default function CuentasClient({
       if (account.connectionId) qs.set("connection", account.connectionId);
       const res = await fetch(`/api/command/campaigns?${qs}`);
       const data = await res.json();
+
+      // Race guard: discard if a newer request was issued.
+      if (currentId !== requestId.current) return;
+
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setCampaigns(data.campaigns ?? []);
       setMetrics(data.metrics ?? []);
       setMetricsError(data.metricsError ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando campañas");
+      // Only update error state if this is still the latest request.
+      if (currentId === requestId.current) {
+        setError(e instanceof Error ? e.message : "Error cargando campañas");
+      }
     } finally {
-      setBusy(false);
+      // Only clear busy flag if this is still the latest request.
+      if (currentId === requestId.current) {
+        setBusy(false);
+      }
     }
   }
 
@@ -106,11 +123,10 @@ export default function CuentasClient({
     if (selected) void loadCampaigns(selected, r);
   }
 
-  // Zero-impression campaigns are never dropped from `campaigns` (the entity
-  // list is the untouched source of truth — see types.ts CampaignMetrics doc),
-  // but a campaign absent from `metrics` (or the whole read failing/missing)
-  // has no known spend/clicks/conv for the range: the cells render "—", never
-  // a fabricated 0.
+  // Zero-impression campaigns are absent from the `metrics` read (by contract —
+  // see types.ts CampaignMetrics doc). If the read succeeded, a missing campaign
+  // renders zero spend/clicks/conv + "—" for CPA (uncomputable). If the read
+  // failed (metricsError is set) or hasn't started (metrics is null), render "—".
   const metricsByRef = new Map((metrics ?? []).map((m) => [m.entityRef, m]));
 
   async function propose(campaign: CampaignRow, actionType: "pause" | "enable") {
@@ -213,7 +229,7 @@ export default function CuentasClient({
         <Card style={{ marginTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontWeight: 600 }}>Campañas · {selected.name}</h3>
-            <RangeToggle value={range} onChange={changeRange} />
+            <RangeToggle value={range} onChange={changeRange} disabled={busy} />
           </div>
           {error ? <p style={{ color: UI.danger }}>{error}</p> : null}
           {notice ? <p style={{ color: UI.accent }}>{notice}</p> : null}
@@ -251,11 +267,17 @@ export default function CuentasClient({
                     <Cell align="right" mono>
                       {c.dailyBudgetMicros != null ? (c.dailyBudgetMicros / 1_000_000).toFixed(2) : "—"}
                     </Cell>
-                    <Cell align="right" mono>{m ? fmtMicros(m.spendMicros) : "—"}</Cell>
-                    <Cell align="right" mono>{m ? m.clicks : "—"}</Cell>
-                    <Cell align="right" mono>{m ? m.conversions.toFixed(2) : "—"}</Cell>
                     <Cell align="right" mono>
-                      {m && m.conversions !== 0 ? fmtMicros(m.spendMicros / m.conversions) : "—"}
+                      {metricsError || metrics === null ? "—" : m ? fmtMicros(m.spendMicros) : "0.00"}
+                    </Cell>
+                    <Cell align="right" mono>
+                      {metricsError || metrics === null ? "—" : m ? m.clicks : "0"}
+                    </Cell>
+                    <Cell align="right" mono>
+                      {metricsError || metrics === null ? "—" : m ? m.conversions.toFixed(2) : "0.00"}
+                    </Cell>
+                    <Cell align="right" mono>
+                      {metricsError || metrics === null ? "—" : m && m.conversions !== 0 ? fmtMicros(m.spendMicros / m.conversions) : "—"}
                     </Cell>
                     <Cell>{c.learningPhase ?? "—"}</Cell>
                     <Cell>

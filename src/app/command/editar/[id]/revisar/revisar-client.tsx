@@ -37,6 +37,7 @@ import {
 import type { EditCompiledAction } from "@/lib/command/edit/diff";
 import type { GoogleSearchEditDoc } from "@/lib/command/edit/schema";
 import type { GatePreview } from "@/lib/command/blueprint/preview";
+import { ProvBadge } from "@/components/command/prov-badge";
 import type {
   GateResult,
   BudgetUpdatePayload,
@@ -380,7 +381,7 @@ function PayloadView({ action }: { action: EditCompiledAction }) {
   }
 }
 
-function ActionCard({ action }: { action: EditCompiledAction }) {
+function ActionCard({ action, isIa }: { action: EditCompiledAction; isIa: boolean }) {
   return (
     <div style={{ border: `1px solid ${UI.border}`, borderRadius: UI.radiusSm, padding: 16, marginTop: 12 }}>
       <div
@@ -398,6 +399,7 @@ function ActionCard({ action }: { action: EditCompiledAction }) {
           <span style={{ fontWeight: 600, fontSize: 13.5, color: UI.text }}>
             {ACTION_LABEL[action.actionType] ?? action.actionType}
           </span>
+          {isIa ? <ProvBadge kind="ia" /> : null}
         </div>
         <span style={{ fontSize: 11.5, color: UI.faint, fontFamily: UI.fontMono }}>
           {action.entityKind} · {action.localRef ?? action.entityRef}
@@ -417,10 +419,12 @@ function ReplacePairCard({
   create,
   pause,
   oldAd,
+  isIa,
 }: {
   create: EditCompiledAction;
   pause: EditCompiledAction;
   oldAd: EditAdDoc | undefined;
+  isIa: boolean;
 }) {
   const p = create.payload as CreateAdPayload;
   return (
@@ -430,6 +434,7 @@ function ReplacePairCard({
           #{create.seq + 1}–{pause.seq + 1}
         </Badge>
         <span style={{ fontWeight: 600, fontSize: 13.5, color: UI.text }}>Reemplazo de anuncio (RSA)</span>
+        {isIa ? <ProvBadge kind="ia" /> : null}
       </div>
       <p style={{ fontSize: 12.5, color: UI.muted, marginTop: 0, marginBottom: 14 }}>
         Google no permite editar anuncios publicados: se creará uno nuevo y se pausará el anterior.
@@ -613,6 +618,7 @@ export default function RevisarClient({
   gatePreview,
   baselineAgeMs,
   baselineStale,
+  aiMarkers,
 }: {
   blueprintId: string;
   status: string;
@@ -622,6 +628,10 @@ export default function RevisarClient({
   gatePreview: GatePreview;
   baselineAgeMs: number;
   baselineStale: boolean;
+  /** v2.4 Copiloto — deriveAiMarkers(doc, prov) computed server-side (page.tsx); matched
+   * against each EditCompiledAction's own `entityRef`, the SAME identity repo.ts's edit
+   * branch uses to stamp `cc_actions.source`. Optional so any other caller keeps compiling. */
+  aiMarkers?: string[];
 }) {
   const router = useRouter();
   const [publishing, setPublishing] = useState(false);
@@ -642,6 +652,7 @@ export default function RevisarClient({
   const [rollbackError, setRollbackError] = useState<string | null>(null);
 
   const groups = useMemo(() => groupByNode(compiled, doc), [compiled, doc]);
+  const aiPaths = useMemo(() => new Set(aiMarkers ?? []), [aiMarkers]);
   const adByResourceName = useMemo(() => {
     const m = new Map<string, EditAdDoc>();
     for (const g of doc.campaign.adGroups) for (const ad of g.ads) m.set(ad.resourceName, ad);
@@ -837,23 +848,34 @@ export default function RevisarClient({
         </Card>
       ) : null}
 
-      {groups.map((g) => (
-        <Card key={g.key} style={{ marginBottom: 16 }}>
-          <SectionLabel>{g.title}</SectionLabel>
-          {toDisplayRows(g.actions).map((row) =>
-            row.kind === "pair" ? (
-              <ReplacePairCard
-                key={`pair-${row.create.seq}`}
-                create={row.create}
-                pause={row.pause}
-                oldAd={adByResourceName.get(row.pause.entityRef)}
-              />
-            ) : (
-              <ActionCard key={row.action.seq} action={row.action} />
-            )
-          )}
-        </Card>
-      ))}
+      {groups.map((g) => {
+        const iaCount = g.actions.filter((a) => aiPaths.has(a.entityRef)).length;
+        return (
+          <Card key={g.key} style={{ marginBottom: 16 }}>
+            <SectionLabel style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {g.title}
+              {iaCount > 0 ? (
+                <span style={{ color: UI.accent, fontWeight: 500, textTransform: "none", letterSpacing: "normal" }}>
+                  ✦ {iaCount} campo{iaCount === 1 ? "" : "s"} de IA
+                </span>
+              ) : null}
+            </SectionLabel>
+            {toDisplayRows(g.actions).map((row) =>
+              row.kind === "pair" ? (
+                <ReplacePairCard
+                  key={`pair-${row.create.seq}`}
+                  create={row.create}
+                  pause={row.pause}
+                  oldAd={adByResourceName.get(row.pause.entityRef)}
+                  isIa={aiPaths.has(row.create.entityRef) || aiPaths.has(row.pause.entityRef)}
+                />
+              ) : (
+                <ActionCard key={row.action.seq} action={row.action} isIa={aiPaths.has(row.action.entityRef)} />
+              )
+            )}
+          </Card>
+        );
+      })}
     </>
   );
 }

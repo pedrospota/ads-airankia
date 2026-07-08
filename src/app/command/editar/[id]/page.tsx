@@ -4,6 +4,7 @@ import { UI } from "@/components/ui-kit";
 import { getCommandAccess } from "@/lib/command/access";
 import { getBlueprint } from "@/lib/command/blueprint/repo";
 import { parseEditDoc } from "@/lib/command/edit/schema";
+import { readProv } from "@/lib/command/patch/schema";
 import EditorClient from "./editor-client";
 
 // Auth + DB reads (blueprint) — never prerender.
@@ -49,6 +50,9 @@ export default async function EditarCampanaPage({ params }: { params: Promise<{ 
           status={blueprint.status}
           connectionId={blueprint.connectionId}
           accountRef={blueprint.accountRef}
+          // v2.4 Copiloto — the RAW `_prov` sibling (parseEditDoc strips it, same convention
+          // as `_ai`) so accepted-AI badges survive a reload, not just the in-session state.
+          initialProv={readProv(blueprint.doc)}
         />
       </main>
     </div>

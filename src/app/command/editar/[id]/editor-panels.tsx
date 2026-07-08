@@ -13,6 +13,8 @@ import { formatMoney } from "../../crear/builder-types";
 import { RSA_SPEC } from "@/lib/command/knowledge";
 import { MICROS_PER_UNIT } from "@/lib/command/types";
 import type { GoogleSearchEditDoc } from "@/lib/command/edit/schema";
+import type { ProvenanceMap } from "@/lib/command/patch/schema";
+import { IaBadgeFor, ProvBadge } from "@/components/command/prov-badge";
 import {
   blankNewAd,
   queueRemoveNegative,
@@ -316,7 +318,9 @@ function BaseAdPreview({ ad }: { ad: EditAd["base"] }) {
         opacity: 0.65,
       }}
     >
-      <SectionLabel style={{ marginBottom: 8 }}>Anuncio en vivo (no editable)</SectionLabel>
+      <SectionLabel style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+        Anuncio en vivo (no editable) <ProvBadge kind="dato" />
+      </SectionLabel>
       <p style={{ fontSize: 13, color: UI.muted, margin: "0 0 6px" }}>{ad.finalUrl || "sin URL"}</p>
       <p style={{ fontSize: 13.5, color: UI.text, margin: "0 0 6px" }}>{ad.headlines.map((h) => h.text).join(" | ")}</p>
       <p style={{ fontSize: 12.5, color: UI.muted, margin: 0 }}>{ad.descriptions.map((d) => d.text).join(" · ")}</p>
@@ -328,7 +332,7 @@ function BaseAdPreview({ ad }: { ad: EditAd["base"] }) {
  * Campaign panel — budget (shared-budget locked), status, campaign negatives.
  * ------------------------------------------------------------------------- */
 
-function CampaignPanel({ doc, onChange }: { doc: GoogleSearchEditDoc; onChange: DocUpdater }) {
+function CampaignPanel({ doc, onChange, prov }: { doc: GoogleSearchEditDoc; onChange: DocUpdater; prov: ProvenanceMap }) {
   const c = doc.campaign;
   const [budgetInput, setBudgetInput] = useState(String(c.desired.dailyBudgetMicros / MICROS_PER_UNIT));
   const [negDraft, setNegDraft] = useState("");
@@ -362,7 +366,7 @@ function CampaignPanel({ doc, onChange }: { doc: GoogleSearchEditDoc; onChange: 
       <PanelHead>Campaña · Google Ads</PanelHead>
       <NodeTitle>{c.base.name}</NodeTitle>
 
-      <Field label="Presupuesto diario">
+      <Field label="Presupuesto diario" cnt={<IaBadgeFor prov={prov} nodeId={c.resourceName} field="desired.dailyBudgetMicros" />}>
         {c.base.budgetShared ? (
           <p style={{ fontSize: 13, color: UI.muted, margin: 0 }}>
             <b style={{ color: UI.text }}>Presupuesto compartido — no editable.</b> Actual en vivo:{" "}
@@ -380,18 +384,26 @@ function CampaignPanel({ doc, onChange }: { doc: GoogleSearchEditDoc; onChange: 
               />
               <span style={{ color: UI.faint, fontSize: 13 }}>{c.base.currency ?? "MXN"} / día</span>
             </div>
-            <span style={{ display: "block", fontSize: 11.5, color: UI.faint, marginTop: 6 }}>
-              Actual en vivo: {formatMoney(c.base.dailyBudgetMicros / MICROS_PER_UNIT, c.base.currency)}/día
+            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: UI.faint, marginTop: 6 }}>
+              <ProvBadge kind="dato" /> Actual en vivo: {formatMoney(c.base.dailyBudgetMicros / MICROS_PER_UNIT, c.base.currency)}/día
             </span>
           </>
         )}
       </Field>
 
-      <Field label="Estado">
+      <Field label="Estado" cnt={<IaBadgeFor prov={prov} nodeId={c.resourceName} field="desired.status" />}>
         <StatusToggle value={c.desired.status} base={c.base.status} onChange={setStatus} />
       </Field>
 
-      <Field label="Agregar negativas de campaña" cnt={<span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{c.newNegatives.length} agregadas</span>}>
+      <Field
+        label="Agregar negativas de campaña"
+        cnt={
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IaBadgeFor prov={prov} nodeId={c.resourceName} field="newNegatives" />
+            <span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{c.newNegatives.length} agregadas</span>
+          </span>
+        }
+      >
         <textarea
           style={{ ...inputStyle, minHeight: 56, resize: "vertical" }}
           placeholder={"Una por línea, p. ej.\ngratis\nempleo"}
@@ -419,7 +431,9 @@ function CampaignPanel({ doc, onChange }: { doc: GoogleSearchEditDoc; onChange: 
       ) : null}
 
       <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${UI.border}` }}>
-        <SectionLabel style={{ marginBottom: 10 }}>Negativas de campaña en vivo ({c.baseNegatives.length})</SectionLabel>
+        <SectionLabel style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          Negativas de campaña en vivo ({c.baseNegatives.length}) <ProvBadge kind="dato" />
+        </SectionLabel>
         {c.baseNegatives.length === 0 ? (
           <p style={{ fontSize: 13, color: UI.faint }}>Sin negativas de campaña en vivo.</p>
         ) : (
@@ -478,11 +492,13 @@ function AdGroupPanel({
   currency,
   onChange,
   onSelect,
+  prov,
 }: {
   group: EditAdGroup;
   currency: string | null;
   onChange: DocUpdater;
   onSelect: (s: NodeSelection) => void;
+  prov: ProvenanceMap;
 }) {
   // NodePanel keys this component by group.resourceName, so this local state
   // resets whenever the operator selects a different ad group — it never
@@ -510,11 +526,11 @@ function AdGroupPanel({
       <PanelHead>Grupo de anuncios</PanelHead>
       <NodeTitle>{group.base.name}</NodeTitle>
 
-      <Field label="Estado">
+      <Field label="Estado" cnt={<IaBadgeFor prov={prov} nodeId={group.resourceName} field="desired.status" />}>
         <StatusToggle value={group.desired.status} base={group.base.status} onChange={setStatus} />
       </Field>
 
-      <Field label="CPC máx.">
+      <Field label="CPC máx." cnt={<IaBadgeFor prov={prov} nodeId={group.resourceName} field="desired.cpcBidMicros" />}>
         {group.base.cpcBidMicros == null ? (
           <p style={{ fontSize: 13, color: UI.muted, margin: 0 }}>
             <b style={{ color: UI.text }}>La campaña usa puja automática.</b>
@@ -531,8 +547,8 @@ function AdGroupPanel({
               />
               <span style={{ color: UI.faint, fontSize: 13 }}>{currency ?? "MXN"}</span>
             </div>
-            <span style={{ display: "block", fontSize: 11.5, color: UI.faint, marginTop: 6 }}>
-              En vivo: {formatCpc(group.base.cpcBidMicros)}
+            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: UI.faint, marginTop: 6 }}>
+              <ProvBadge kind="dato" /> En vivo: {formatCpc(group.base.cpcBidMicros)}
             </span>
           </>
         )}
@@ -553,7 +569,7 @@ function AdGroupPanel({
  * Keywords panel — base (read-only) + newKeywords add editor (keywords + negatives).
  * ------------------------------------------------------------------------- */
 
-function KeywordsPanel({ group, onChange }: { group: EditAdGroup; onChange: DocUpdater }) {
+function KeywordsPanel({ group, onChange, prov }: { group: EditAdGroup; onChange: DocUpdater; prov: ProvenanceMap }) {
   const [posDraft, setPosDraft] = useState("");
   const [posMatch, setPosMatch] = useState<MatchType>("PHRASE");
   const [negDraft, setNegDraft] = useState("");
@@ -589,7 +605,15 @@ function KeywordsPanel({ group, onChange }: { group: EditAdGroup; onChange: DocU
       <PanelHead>Palabras clave</PanelHead>
       <NodeTitle>{group.base.name}</NodeTitle>
 
-      <Field label="Agregar palabras clave" cnt={<span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{group.newKeywords.filter((k) => !k.negative).length} agregadas</span>}>
+      <Field
+        label="Agregar palabras clave"
+        cnt={
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IaBadgeFor prov={prov} nodeId={group.resourceName} field="newKeywords" />
+            <span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{group.newKeywords.filter((k) => !k.negative).length} agregadas</span>
+          </span>
+        }
+      >
         <textarea
           style={{ ...inputStyle, minHeight: 74, resize: "vertical" }}
           placeholder={"Una por línea, p. ej.\nimplantes dentales cdmx\nprecio implante dental"}
@@ -641,7 +665,9 @@ function KeywordsPanel({ group, onChange }: { group: EditAdGroup; onChange: DocU
       ) : null}
 
       <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${UI.border}` }}>
-        <SectionLabel style={{ marginBottom: 10 }}>Palabras clave en vivo ({group.baseKeywords.length})</SectionLabel>
+        <SectionLabel style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          Palabras clave en vivo ({group.baseKeywords.length}) <ProvBadge kind="dato" />
+        </SectionLabel>
         {group.baseKeywords.length === 0 ? (
           <p style={{ fontSize: 13, color: UI.faint }}>Sin palabras clave en vivo.</p>
         ) : (
@@ -655,9 +681,10 @@ function KeywordsPanel({ group, onChange }: { group: EditAdGroup; onChange: DocU
                   key={k.resourceName}
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: UI.muted, padding: "3px 0" }}
                 >
-                  <span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {k.negative ? "−" : ""}
                     {k.text} <span style={{ color: UI.faint }}>· {MATCH_LABEL[k.match]}</span>
+                    <IaBadgeFor prov={prov} nodeId={k.resourceName} field="desiredStatus" />
                   </span>
                   {k.negative ? null : pending ? (
                     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -705,7 +732,7 @@ function KeywordsPanel({ group, onChange }: { group: EditAdGroup; onChange: DocU
  * the locked non-RSA notice.
  * ------------------------------------------------------------------------- */
 
-function AdPanel({ group, ad, onChange }: { group: EditAdGroup; ad: EditAd; onChange: DocUpdater }) {
+function AdPanel({ group, ad, onChange, prov }: { group: EditAdGroup; ad: EditAd; onChange: DocUpdater; prov: ProvenanceMap }) {
   function startReplace() {
     onChange((d) => updateAd(d, group.resourceName, ad.resourceName, (a) => ({ ...a, replacement: replacementFromBase(a) })));
   }
@@ -738,9 +765,9 @@ function AdPanel({ group, ad, onChange }: { group: EditAdGroup; ad: EditAd; onCh
           <BaseAdPreview ad={ad.base} />
           {ad.replacement ? (
             <>
-              <p style={{ fontSize: 12.5, color: UI.warn, margin: "0 0 14px" }}>
+              <p style={{ fontSize: 12.5, color: UI.warn, margin: "0 0 14px", display: "flex", alignItems: "center", gap: 8 }}>
                 Google no permite editar anuncios publicados: se creará este anuncio nuevo y se pausará el anterior al
-                publicar.
+                publicar. <IaBadgeFor prov={prov} nodeId={ad.resourceName} field="replacement" />
               </p>
               <RsaFields value={ad.replacement} onChange={updateReplacement} />
               <div style={{ marginTop: 10 }}>
@@ -796,14 +823,19 @@ export function NodePanel({
   selected,
   onSelect,
   onChange,
+  prov,
 }: {
   doc: GoogleSearchEditDoc;
   selected: NodeSelection;
   onSelect: (s: NodeSelection) => void;
   onChange: DocUpdater;
+  /** v2.4 Copiloto — read-only, threaded to every sub-panel for <IaBadgeFor/>/<ProvBadge/>.
+   * Optional so any other caller of NodePanel keeps compiling unchanged. */
+  prov?: ProvenanceMap;
 }) {
+  const p = prov ?? {};
   if (selected.kind === "campaign") {
-    return <CampaignPanel doc={doc} onChange={onChange} />;
+    return <CampaignPanel doc={doc} onChange={onChange} prov={p} />;
   }
 
   const group = doc.campaign.adGroups.find((g) => g.resourceName === selected.groupRef);
@@ -822,16 +854,17 @@ export function NodePanel({
         currency={doc.campaign.base.currency}
         onChange={onChange}
         onSelect={onSelect}
+        prov={p}
       />
     );
   }
   if (selected.kind === "keywords") {
-    return <KeywordsPanel group={group} onChange={onChange} />;
+    return <KeywordsPanel group={group} onChange={onChange} prov={p} />;
   }
   if (selected.kind === "ad") {
     const ad = group.ads.find((a) => a.resourceName === selected.adRef);
     if (!ad) return <p style={{ color: UI.muted }}>Selecciona un elemento del árbol.</p>;
-    return <AdPanel group={group} ad={ad} onChange={onChange} />;
+    return <AdPanel group={group} ad={ad} onChange={onChange} prov={p} />;
   }
 
   const newAd = group.newAds.find((a) => a.tempId === selected.tempId);

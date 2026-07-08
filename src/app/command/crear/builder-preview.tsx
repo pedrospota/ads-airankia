@@ -4,6 +4,8 @@
 // Pure presentational — all state lives in builder-client.tsx.
 
 import { Card, SectionLabel, UI } from "@/components/ui-kit";
+import type { ProvenanceMap } from "@/lib/command/patch/schema";
+import { ProvLegend } from "@/components/command/prov-badge";
 import type { BuilderState, CrearAccountOption } from "./builder-types";
 import { formatMoney, GOALS, treeSubs, unitsToMicros } from "./builder-types";
 
@@ -127,10 +129,15 @@ export function SerpPreview({ state }: { state: BuilderState }) {
 export function RunningSummary({
   account,
   state,
+  prov,
 }: {
   account: CrearAccountOption | null;
   state: BuilderState;
+  /** v2.4 Copiloto — optional so every other RunningSummary call site keeps compiling; the
+   * "Copiloto" row (+ legend) only renders once at least one field carries 'ia' provenance. */
+  prov?: ProvenanceMap;
 }) {
+  const iaCount = prov ? Object.values(prov).filter((v) => v === "ia").length : 0;
   const rows: Array<[string, string, boolean]> = [
     ["Red", "Google Ads", false],
     ["Cuenta", account ? `${account.name} · ${account.accountRef}` : "sin seleccionar", true],
@@ -151,7 +158,7 @@ export function RunningSummary({
               justifyContent: "space-between",
               gap: 12,
               padding: "7px 0",
-              borderBottom: i === rows.length - 1 ? "none" : `1px solid ${UI.border}`,
+              borderBottom: i === rows.length - 1 && iaCount === 0 ? "none" : `1px solid ${UI.border}`,
             }}
           >
             <span style={{ color: UI.faint }}>{k}</span>
@@ -170,6 +177,14 @@ export function RunningSummary({
           </li>
         ))}
       </ul>
+      {iaCount > 0 ? (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10 }}>
+          <span style={{ fontSize: 12, color: UI.accent }}>
+            ✦ {iaCount} campo{iaCount === 1 ? "" : "s"} con IA
+          </span>
+          <ProvLegend />
+        </div>
+      ) : null}
     </Card>
   );
 }

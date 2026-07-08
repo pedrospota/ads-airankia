@@ -30,6 +30,7 @@ import {
   UI,
 } from "@/components/ui-kit";
 import { PausedBadge } from "../../builder-preview";
+import { ProvBadge } from "@/components/command/prov-badge";
 import type { CompiledAction } from "@/lib/command/blueprint/compile";
 import type { GatePreview } from "@/lib/command/blueprint/preview";
 import type {
@@ -385,7 +386,7 @@ function PayloadView({ action }: { action: CompiledAction }) {
   }
 }
 
-function ActionCard({ action }: { action: CompiledAction }) {
+function ActionCard({ action, isIa }: { action: CompiledAction; isIa: boolean }) {
   return (
     <div
       style={{
@@ -410,6 +411,7 @@ function ActionCard({ action }: { action: CompiledAction }) {
           <span style={{ fontWeight: 600, fontSize: 13.5, color: UI.text }}>
             {ACTION_LABEL[action.actionType] ?? action.actionType}
           </span>
+          {isIa ? <ProvBadge kind="ia" /> : null}
         </div>
         <span style={{ fontSize: 11.5, color: UI.faint, fontFamily: UI.fontMono }}>
           {action.entityKind} · {action.localRef}
@@ -515,6 +517,7 @@ export default function RevisarClient({
   accountRef,
   compiled,
   gatePreview,
+  aiMarkers,
 }: {
   blueprintId: string;
   status: string;
@@ -522,6 +525,11 @@ export default function RevisarClient({
   accountRef: string;
   compiled: CompiledAction[];
   gatePreview: GatePreview;
+  /** v2.4 Copiloto — deriveAiMarkers(doc, prov) computed server-side (page.tsx); matched
+   * against each CompiledAction's own `localRef`, the SAME identity repo.ts's
+   * `aiPaths.has(action.localRef)` uses to stamp `cc_actions.source`. Optional so any other
+   * caller keeps compiling unchanged. */
+  aiMarkers?: string[];
 }) {
   const router = useRouter();
   const [publishing, setPublishing] = useState(false);
@@ -535,6 +543,7 @@ export default function RevisarClient({
   const [executeFailed, setExecuteFailed] = useState(false);
 
   const groups = useMemo(() => groupByNode(compiled), [compiled]);
+  const aiPaths = useMemo(() => new Set(aiMarkers ?? []), [aiMarkers]);
   // The blueprint's status the moment this page loaded. If it's already past
   // 'draft' (a reload after publishing, or a stale tab), publishing again would
   // just 409 at the approve step — so the button stays disabled and we point
@@ -658,14 +667,24 @@ export default function RevisarClient({
         </Card>
       ) : null}
 
-      {groups.map((g) => (
-        <Card key={g.key} style={{ marginBottom: 16 }}>
-          <SectionLabel>{g.title}</SectionLabel>
-          {g.actions.map((a) => (
-            <ActionCard key={a.seq} action={a} />
-          ))}
-        </Card>
-      ))}
+      {groups.map((g) => {
+        const iaCount = g.actions.filter((a) => aiPaths.has(a.localRef)).length;
+        return (
+          <Card key={g.key} style={{ marginBottom: 16 }}>
+            <SectionLabel style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {g.title}
+              {iaCount > 0 ? (
+                <span style={{ color: UI.accent, fontWeight: 500, textTransform: "none", letterSpacing: "normal" }}>
+                  ✦ {iaCount} campo{iaCount === 1 ? "" : "s"} de IA
+                </span>
+              ) : null}
+            </SectionLabel>
+            {g.actions.map((a) => (
+              <ActionCard key={a.seq} action={a} isIa={aiPaths.has(a.localRef)} />
+            ))}
+          </Card>
+        );
+      })}
     </>
   );
 }

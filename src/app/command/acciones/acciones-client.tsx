@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, DataTable, THead, Row, Cell, Badge, EmptyState, SectionLabel, PrimaryButton, SecondaryButton, GhostDangerButton, UI } from "@/components/ui-kit";
+import { ProvBadge } from "@/components/command/prov-badge";
 import type { UnifiedDestinationAccount } from "@/lib/command/accounts-list";
 
 export interface GateDto { id: string; severity: "blocking" | "warning"; status: "pass" | "fail"; evidence: string }
@@ -486,7 +487,11 @@ export default function AccionesClient({
                     {a.error ? <span style={{ display: "block", color: UI.danger, fontSize: 12 }}>{a.error}</span> : null}
                   </Cell>
                   <Cell mono>{a.entityName ?? a.entityRef}<span style={{ color: UI.faint }}> · {a.accountRef}</span></Cell>
-                  <Cell>{a.source}</Cell>
+                  {/* v2.4 Copiloto — "Origen" lights up for free from cc_actions.source, which
+                      repo.ts's compile branches stamp 'copiloto' from the doc's `_ai` markers
+                      (spec §b flow). Everything else (manual, or a network where `_ai` is not
+                      a convention — e.g. Meta) renders the plain source string, unchanged. */}
+                  <Cell>{a.source === "copiloto" ? <ProvBadge kind="ia" /> : a.source}</Cell>
                   <Cell>
                     <Badge tone={STATUS_TONE[a.status] ?? "muted"}>{a.status}{a.approvedBy ? ` · ${a.approvedBy}` : ""}</Badge>
                     {isDrift(a) ? <div style={{ marginTop: 4 }}><Badge tone="danger" dot>con deriva</Badge></div> : null}

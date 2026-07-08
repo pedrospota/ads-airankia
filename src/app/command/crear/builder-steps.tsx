@@ -9,6 +9,8 @@ import { useState } from "react";
 import { UI } from "@/components/ui-kit";
 import { GOOGLE_THRESHOLDS, RSA_SPEC } from "@/lib/command/knowledge";
 import type { SuggestKind } from "@/lib/command/blueprint/suggest";
+import type { ProvenanceMap } from "@/lib/command/patch/schema";
+import { IaBadgeFor } from "@/components/command/prov-badge";
 import {
   BIDDING_LABELS,
   BUDGET_CHIPS,
@@ -17,6 +19,7 @@ import {
   LANGUAGE_LABELS,
   formatMoney,
   suggestContext,
+  type BuilderIds,
   type BuilderState,
   type CrearAccountOption,
   type Goal,
@@ -219,6 +222,13 @@ export interface StepCtx {
   suggest: (kind: SuggestKind, context: string, busyKey: string, onValue: (v: string | { text: string; matchType: MatchType }[]) => void) => void;
   /** True once a draft exists server-side — the account is fixed at creation, so the picker locks to prevent a doc/account mismatch. */
   accountLocked: boolean;
+  /** v2.4 Copiloto — the SECOND provenance writer (stamps 'ia'), used ONLY by an accepted ✨
+   * suggestion's onValue callback. Every other write goes through `patch` (clears 'ia'). */
+  applySuggestion: (p: Partial<BuilderState>) => void;
+  /** v2.4 Copiloto — read-only, for rendering <IaBadgeFor/> next to fields an accepted patch
+   * or ✨ suggestion touched. */
+  prov: ProvenanceMap;
+  ids: BuilderIds;
 }
 
 function StepHead({ index, total }: { index: number; total: number }) {
@@ -236,7 +246,7 @@ function StepHead({ index, total }: { index: number; total: number }) {
  * ------------------------------------------------------------------------- */
 
 export function StepObjetivo({ ctx, onNext }: { ctx: StepCtx; onNext: () => void }) {
-  const { state, patch, account, accounts, selectAccount, accountLocked } = ctx;
+  const { state, patch, account, accounts, selectAccount, accountLocked, prov, ids } = ctx;
   return (
     <div>
       <StepHead index={0} total={4} />
@@ -268,7 +278,7 @@ export function StepObjetivo({ ctx, onNext }: { ctx: StepCtx; onNext: () => void
         ) : null}
       </Field>
 
-      <Field label="Nombre de la campaña">
+      <Field label="Nombre de la campaña" cnt={<IaBadgeFor prov={prov} nodeId={ids.campaignNodeId} field="name" />}>
         <input
           type="text"
           style={inputStyle}
@@ -301,7 +311,7 @@ export function StepObjetivo({ ctx, onNext }: { ctx: StepCtx; onNext: () => void
  * ------------------------------------------------------------------------- */
 
 export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () => void; onNext: () => void }) {
-  const { state, patch, account } = ctx;
+  const { state, patch, account, prov, ids } = ctx;
   return (
     <div>
       <StepHead index={1} total={4} />
@@ -310,7 +320,7 @@ export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack:
         Empieza con un monto que puedas sostener 2 semanas — la red necesita ese tiempo para aprender.
       </p>
 
-      <Field label="Presupuesto diario">
+      <Field label="Presupuesto diario" cnt={<IaBadgeFor prov={prov} nodeId={ids.budgetNodeId} field="dailyMicros" />}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input
             type="text"
@@ -328,7 +338,7 @@ export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack:
         </div>
       </Field>
 
-      <Field label="¿Cómo pujar?">
+      <Field label="¿Cómo pujar?" cnt={<IaBadgeFor prov={prov} nodeId={ids.campaignNodeId} field="bidding" />}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
           <OptionCard
             active={state.bidding === "MAXIMIZE_CONVERSIONS"}
@@ -357,7 +367,15 @@ export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack:
         ) : null}
       </Field>
 
-      <Field label="Ubicación e idioma">
+      <Field
+        label="Ubicación e idioma"
+        cnt={
+          <span style={{ display: "flex", gap: 4 }}>
+            <IaBadgeFor prov={prov} nodeId={ids.campaignNodeId} field="geo" />
+            <IaBadgeFor prov={prov} nodeId={ids.campaignNodeId} field="languageCode" />
+          </span>
+        }
+      >
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           {Object.keys(COUNTRY_LABELS).map((code) => (
             <Chip
@@ -405,7 +423,7 @@ export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack:
  * ------------------------------------------------------------------------- */
 
 export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () => void; onNext: () => void }) {
-  const { state, patch, account, busyField, suggest } = ctx;
+  const { state, patch, account, busyField, suggest, applySuggestion, prov, ids } = ctx;
   // Local-only draft text for the "add keywords"/"add negatives" textareas; not part of the blueprint doc.
   const [draft, setDraft] = useState("");
   const [draftMatch, setDraftMatch] = useState<MatchType>("PHRASE");
@@ -443,12 +461,17 @@ export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () =>
       <Field
         label="Nombre del grupo"
         cnt={
-          <SparkleButton
-            busy={busyField === "group_name"}
-            onClick={() =>
-              suggest("group_name", suggestContext(state, account?.name ?? null), "group_name", (v) => patch({ groupName: v as string }))
-            }
-          />
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IaBadgeFor prov={prov} nodeId={ids.adGroupNodeId} field="name" />
+            <SparkleButton
+              busy={busyField === "group_name"}
+              onClick={() =>
+                suggest("group_name", suggestContext(state, account?.name ?? null), "group_name", (v) =>
+                  applySuggestion({ groupName: v as string })
+                )
+              }
+            />
+          </span>
         }
       >
         <input type="text" style={inputStyle} value={state.groupName} onChange={(e) => patch({ groupName: e.target.value })} />
@@ -456,7 +479,12 @@ export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () =>
 
       <Field
         label="Agregar palabras clave"
-        cnt={<span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{state.keywords.length} agregadas</span>}
+        cnt={
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IaBadgeFor prov={prov} nodeId={ids.adGroupNodeId} field="keywords" />
+            <span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{state.keywords.length} agregadas</span>
+          </span>
+        }
       >
         <textarea
           style={{ ...inputStyle, minHeight: 74, resize: "vertical" }}
@@ -477,7 +505,7 @@ export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () =>
             onClick={() =>
               suggest("keywords", suggestContext(state, account?.name ?? null), "keywords", (v) => {
                 const items = v as { text: string; matchType: MatchType }[];
-                patch({ keywords: [...state.keywords, ...items.map((k) => ({ text: k.text, match: k.matchType }))] });
+                applySuggestion({ keywords: [...state.keywords, ...items.map((k) => ({ text: k.text, match: k.matchType }))] });
               })
             }
           />
@@ -503,7 +531,15 @@ export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () =>
         </ul>
       ) : null}
 
-      <Field label="Negativas (opcional)" cnt={<span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{state.negatives.length} agregadas</span>}>
+      <Field
+        label="Negativas (opcional)"
+        cnt={
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <IaBadgeFor prov={prov} nodeId={ids.adGroupNodeId} field="negatives" />
+            <span style={{ fontSize: 12, color: UI.faint, fontFamily: UI.fontMono }}>{state.negatives.length} agregadas</span>
+          </span>
+        }
+      >
         <textarea
           style={{ ...inputStyle, minHeight: 56, resize: "vertical" }}
           placeholder={"Una por línea, p. ej.\ngratis\nempleo"}
@@ -565,7 +601,7 @@ const removeBtnStyle: React.CSSProperties = {
  * ------------------------------------------------------------------------- */
 
 export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: StepCtx; onBack: () => void; onReview: () => void; reviewDisabled: boolean }) {
-  const { state, patch, account, busyField, suggest } = ctx;
+  const { state, patch, account, busyField, suggest, applySuggestion, prov, ids } = ctx;
 
   function updateHeadline(i: number, v: string) {
     patch({ headlines: state.headlines.map((h, idx) => (idx === i ? v : h)) });
@@ -602,7 +638,7 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
         la derecha, tal como saldría en Google.
       </p>
 
-      <Field label="Página de destino">
+      <Field label="Página de destino" cnt={<IaBadgeFor prov={prov} nodeId={ids.adNodeId} field="finalUrl" />}>
         <input
           type="text"
           style={inputStyle}
@@ -613,14 +649,15 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
       </Field>
 
       <div style={{ margin: "14px 0" }}>
-        <label style={{ display: "block", fontSize: 13, color: UI.muted, marginBottom: 6, fontWeight: 600 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: UI.muted, marginBottom: 6, fontWeight: 600 }}>
           Títulos <span style={{ fontFamily: UI.fontMono, fontSize: 12, color: UI.faint, fontWeight: 400 }}>({state.headlines.length}/{RSA_SPEC.headline.max}, mín {RSA_SPEC.headline.min})</span>
+          <IaBadgeFor prov={prov} nodeId={ids.adNodeId} field="headlines" />
         </label>
         {state.headlines.map((h, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <input type="text" style={inputStyle} maxLength={RSA_SPEC.headline.maxLen} value={h} onChange={(e) => updateHeadline(i, e.target.value)} placeholder={`Título ${i + 1}`} />
             <CharCount length={h.length} max={RSA_SPEC.headline.maxLen} />
-            <SparkleButton title="Sugerir título" busy={busyField === `headline-${i}`} onClick={() => suggest("headline", headlineCtx(i), `headline-${i}`, (v) => updateHeadline(i, v as string))} />
+            <SparkleButton title="Sugerir título" busy={busyField === `headline-${i}`} onClick={() => suggest("headline", headlineCtx(i), `headline-${i}`, (v) => applySuggestion({ headlines: state.headlines.map((h2, idx) => (idx === i ? (v as string) : h2)) }))} />
             <button type="button" onClick={() => removeHeadline(i)} disabled={state.headlines.length <= RSA_SPEC.headline.min} aria-label="Quitar título" style={{ ...removeBtnStyle, opacity: state.headlines.length <= RSA_SPEC.headline.min ? 0.3 : 1 }}>
               ×
             </button>
@@ -632,15 +669,16 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
       </div>
 
       <div style={{ margin: "14px 0" }}>
-        <label style={{ display: "block", fontSize: 13, color: UI.muted, marginBottom: 6, fontWeight: 600 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: UI.muted, marginBottom: 6, fontWeight: 600 }}>
           Descripciones <span style={{ fontFamily: UI.fontMono, fontSize: 12, color: UI.faint, fontWeight: 400 }}>({state.descriptions.length}/{RSA_SPEC.description.max}, mín {RSA_SPEC.description.min})</span>
+          <IaBadgeFor prov={prov} nodeId={ids.adNodeId} field="descriptions" />
         </label>
         {state.descriptions.map((d, i) => (
           <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
             <textarea style={{ ...inputStyle, minHeight: 56, resize: "vertical" }} maxLength={RSA_SPEC.description.maxLen} value={d} onChange={(e) => updateDescription(i, e.target.value)} placeholder={`Descripción ${i + 1}`} />
             <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
               <CharCount length={d.length} max={RSA_SPEC.description.maxLen} />
-              <SparkleButton title="Sugerir descripción" busy={busyField === `description-${i}`} onClick={() => suggest("description", descriptionCtx(i), `description-${i}`, (v) => updateDescription(i, v as string))} />
+              <SparkleButton title="Sugerir descripción" busy={busyField === `description-${i}`} onClick={() => suggest("description", descriptionCtx(i), `description-${i}`, (v) => applySuggestion({ descriptions: state.descriptions.map((d2, idx) => (idx === i ? (v as string) : d2)) }))} />
               <button type="button" onClick={() => removeDescription(i)} disabled={state.descriptions.length <= RSA_SPEC.description.min} aria-label="Quitar descripción" style={{ ...removeBtnStyle, opacity: state.descriptions.length <= RSA_SPEC.description.min ? 0.3 : 1 }}>
                 ×
               </button>
@@ -653,10 +691,10 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
       </div>
 
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label={`Ruta 1 (opcional, máx ${RSA_SPEC.path.maxLen})`}>
+        <Field label={`Ruta 1 (opcional, máx ${RSA_SPEC.path.maxLen})`} cnt={<IaBadgeFor prov={prov} nodeId={ids.adNodeId} field="path1" />}>
           <input type="text" style={inputStyle} maxLength={RSA_SPEC.path.maxLen} value={state.path1} onChange={(e) => patch({ path1: e.target.value })} />
         </Field>
-        <Field label={`Ruta 2 (opcional, máx ${RSA_SPEC.path.maxLen})`}>
+        <Field label={`Ruta 2 (opcional, máx ${RSA_SPEC.path.maxLen})`} cnt={<IaBadgeFor prov={prov} nodeId={ids.adNodeId} field="path2" />}>
           <input type="text" style={inputStyle} maxLength={RSA_SPEC.path.maxLen} value={state.path2} onChange={(e) => patch({ path2: e.target.value })} />
         </Field>
       </div>

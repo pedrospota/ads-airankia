@@ -7,6 +7,7 @@ import { diffEditDoc, type EditCompiledAction } from "@/lib/command/edit/diff";
 import { EDIT_BASELINE_MAX_AGE_MS, parseEditDoc, type GoogleSearchEditDoc } from "@/lib/command/edit/schema";
 import { previewBlueprintGates, type GatePreview } from "@/lib/command/blueprint/preview";
 import { buildExecutorDeps } from "@/lib/command/executor-deps";
+import { deriveAiMarkers, readProv } from "@/lib/command/patch/schema";
 import RevisarClient from "./revisar-client";
 
 // Auth + DB reads (blueprint) — never prerender.
@@ -40,10 +41,15 @@ export default async function RevisarEditPage({ params }: { params: Promise<{ id
   let gatePreview: GatePreview | null = null;
   let error: string | null = null;
   let noChanges = false;
+  // v2.4 Copiloto — matched against each EditCompiledAction's own `entityRef`, the SAME
+  // identity repo.ts's edit branch uses (`aiPaths.has(a.entityRef)`) to stamp
+  // `cc_actions.source`. Display-only here, never gating.
+  let aiMarkers: string[] = [];
 
   try {
     doc = parseEditDoc(blueprint.doc);
     compiled = diffEditDoc(doc, id);
+    aiMarkers = deriveAiMarkers(doc, readProv(blueprint.doc));
     if (compiled.length === 0) {
       noChanges = true;
     } else {
@@ -99,6 +105,7 @@ export default async function RevisarEditPage({ params }: { params: Promise<{ id
             gatePreview={gatePreview}
             baselineAgeMs={baselineAgeMs}
             baselineStale={baselineStale}
+            aiMarkers={aiMarkers}
           />
         )}
       </main>

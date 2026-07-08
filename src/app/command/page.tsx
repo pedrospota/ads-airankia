@@ -6,6 +6,7 @@ import {
   StatCard,
   ErrorCard,
   SectionLabel,
+  PrimaryButton,
   UI,
 } from "@/components/ui-kit";
 import { getCommandAccess } from "@/lib/command/access";
@@ -75,6 +76,19 @@ export default async function CommandPage() {
               : metaCaps.reason ?? "pendiente de credenciales"}
             .
           </p>
+        </Card>
+
+        <Card style={{ marginTop: 24 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+            <div>
+              <SectionLabel>Nueva campaña Meta — beta</SectionLabel>
+              <p style={{ color: UI.muted, margin: 0, fontSize: 13.5, maxWidth: 520 }}>
+                Un formulario, una campaña de Meta Ads (campaña → conjunto de anuncios → anuncio). Nace en pausa;
+                revisas y publicas en la siguiente pantalla.
+              </p>
+            </div>
+            <PrimaryButton href="/command/crear-meta">Crear campaña Meta</PrimaryButton>
+          </div>
         </Card>
 
         {workspaceId && settings ? (

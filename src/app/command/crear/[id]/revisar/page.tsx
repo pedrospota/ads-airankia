@@ -4,7 +4,9 @@ import { PageHeader, ErrorCard, UI } from "@/components/ui-kit";
 import { getCommandAccess } from "@/lib/command/access";
 import { getBlueprint } from "@/lib/command/blueprint/repo";
 import { compile, type CompiledAction } from "@/lib/command/blueprint/compile";
+import { compileMeta } from "@/lib/command/blueprint/meta-compile";
 import { parseBlueprint } from "@/lib/command/blueprint/schema";
+import { parseMetaBlueprint } from "@/lib/command/blueprint/meta-schema";
 import { previewBlueprintGates, type GatePreview } from "@/lib/command/blueprint/preview";
 import { buildExecutorDeps } from "@/lib/command/executor-deps";
 import RevisarClient from "./revisar-client";
@@ -25,7 +27,14 @@ export default async function RevisarPage({ params }: { params: Promise<{ id: st
   let gatePreview: GatePreview | null = null;
   let error: string | null = null;
   try {
-    compiled = compile(parseBlueprint(blueprint.doc), id);
+    // v2.2: dispatch on the ROW's `network` column, mirroring repo.ts's
+    // compileBlueprintToActions and the [id] GET route — meta_ads blueprints compile via
+    // compileMeta/parseMetaBlueprint, never the google-only compile/parseBlueprint below
+    // (whose schema literal-rejects a "meta_ads" doc). Without this branch the review
+    // screen could never render a Meta blueprint's action list.
+    compiled = blueprint.network === "meta_ads"
+      ? compileMeta(parseMetaBlueprint(blueprint.doc), id)
+      : compile(parseBlueprint(blueprint.doc), id);
     // Proactive gate preview (spec §10): run the SAME deterministic gates the executor runs
     // at publish time, server-side, so the review screen can show "compuertas: N/N" BEFORE
     // the operator clicks Publish — not only reactively, after a 409. Reuses the exact

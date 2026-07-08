@@ -39,6 +39,9 @@ import type {
   CreateAdGroupPayload,
   CreateKeywordsPayload,
   CreateAdPayload,
+  MetaCreateCampaignPayload,
+  MetaCreateAdsetPayload,
+  MetaCreateAdPayload,
 } from "@/lib/command/types";
 
 const ACTION_LABEL: Record<string, string> = {
@@ -47,6 +50,15 @@ const ACTION_LABEL: Record<string, string> = {
   create_ad_group: "Crear grupo de anuncios",
   create_keywords: "Añadir palabras clave",
   create_ad: "Crear anuncio (RSA)",
+  create_adset: "Crear conjunto de anuncios",
+};
+
+const CTA_LABEL: Record<string, string> = {
+  LEARN_MORE: "Más información",
+  CONTACT_US: "Contáctanos",
+  SHOP_NOW: "Comprar ahora",
+  SIGN_UP: "Regístrate",
+  GET_QUOTE: "Solicitar cotización",
 };
 
 const BIDDING_LABEL: Record<string, string> = {
@@ -113,13 +125,30 @@ function groupByNode(compiled: CompiledAction[]): ActionGroup[] {
       adGroups.push(group);
       continue;
     }
+    // Meta: create_adset is the adset-level sibling of create_ad_group above — same
+    // grouping role (one node per "Conjunto"), reusing adGroupByRef/adGroups so a
+    // create_ad below resolves into it exactly like a Google ad resolves into its ad group.
+    if (action.actionType === "create_adset") {
+      const group: ActionGroup = {
+        key: action.entityRef,
+        title: `Conjunto de anuncios — ${(action.payload as MetaCreateAdsetPayload).name}`,
+        actions: [action],
+      };
+      adGroupByRef.set(action.entityRef, group);
+      adGroups.push(group);
+      continue;
+    }
     if (action.actionType === "create_keywords") {
       const ref = (action.payload as CreateKeywordsPayload).adGroupRef;
       (adGroupByRef.get(ref) ?? campaignGroup).actions.push(action);
       continue;
     }
     if (action.actionType === "create_ad") {
-      const ref = (action.payload as CreateAdPayload).adGroupRef;
+      // Google ads carry adGroupRef (CreateAdPayload); Meta ads carry adsetRef
+      // (MetaCreateAdPayload) — discriminate on the field's presence, mirroring PayloadView.
+      const ref = "adsetRef" in action.payload
+        ? (action.payload as MetaCreateAdPayload).adsetRef
+        : (action.payload as CreateAdPayload).adGroupRef;
       (adGroupByRef.get(ref) ?? campaignGroup).actions.push(action);
       continue;
     }
@@ -201,6 +230,27 @@ function PayloadView({ action }: { action: CompiledAction }) {
       );
     }
     case "create_campaign": {
+      // Meta (MetaCreateCampaignPayload) and Google (CreateCampaignPayload) both compile to
+      // actionType "create_campaign" but carry disjoint payload shapes — "objective" only
+      // exists on the Meta variant, so it's a safe discriminator (mirrors groupByNode's
+      // "adsetRef" check below).
+      if ("objective" in action.payload) {
+        const p = action.payload as MetaCreateCampaignPayload;
+        return (
+          <FieldGrid>
+            <Field label="Nombre">{p.name}</Field>
+            <Field label="Objetivo">{p.objective}</Field>
+            <Field label="Estado inicial">
+              <Badge tone="warn" dot>
+                EN PAUSA
+              </Badge>
+            </Field>
+            <Field label="Categorías especiales">
+              {p.specialAdCategories.length > 0 ? p.specialAdCategories.join(", ") : "Ninguna"}
+            </Field>
+          </FieldGrid>
+        );
+      }
       const p = action.payload as CreateCampaignPayload;
       return (
         <FieldGrid>
@@ -226,6 +276,29 @@ function PayloadView({ action }: { action: CompiledAction }) {
             {p.presenceOnly ? " (solo presencia física)" : ""}
           </Field>
           {p.languageId ? <Field label="Idioma (ID de constante)">{p.languageId}</Field> : null}
+        </FieldGrid>
+      );
+    }
+    case "create_adset": {
+      const p = action.payload as MetaCreateAdsetPayload;
+      return (
+        <FieldGrid>
+          <Field label="Nombre">{p.name}</Field>
+          <Field label="Campaña">{p.campaignRef}</Field>
+          <Field label="Estado inicial">
+            <Badge tone="warn" dot>
+              EN PAUSA
+            </Badge>
+          </Field>
+          <Field label="Presupuesto diario">{money(p.dailyBudgetMicros)}</Field>
+          <Field label="Países">{p.targeting.countryCodes.join(", ")}</Field>
+          <Field label="Edades">
+            {p.targeting.ageMin}–{p.targeting.ageMax}
+          </Field>
+          <Field label="Optimización">
+            {p.optimizationGoal} · {p.billingEvent}
+          </Field>
+          <Field label="Estrategia de puja">{p.bidStrategy}</Field>
         </FieldGrid>
       );
     }
@@ -257,6 +330,27 @@ function PayloadView({ action }: { action: CompiledAction }) {
       );
     }
     case "create_ad": {
+      // Same disjoint-payload situation as create_campaign above: Meta ads carry a
+      // "creative" sub-object (MetaCreateAdPayload) that Google's CreateAdPayload never has.
+      if ("creative" in action.payload) {
+        const p = action.payload as MetaCreateAdPayload;
+        const { link, message, headline, description, callToActionType, imageUrl } = p.creative;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <FieldGrid>
+              <Field label="Conjunto de anuncios">{p.adsetRef}</Field>
+              <Field label="Enlace">{link}</Field>
+              {headline ? <Field label="Título">{headline}</Field> : null}
+              {callToActionType ? (
+                <Field label="Llamado a la acción">{CTA_LABEL[callToActionType] ?? callToActionType}</Field>
+              ) : null}
+            </FieldGrid>
+            <Field label="Mensaje">{message}</Field>
+            {description ? <Field label="Descripción">{description}</Field> : null}
+            {imageUrl ? <Field label="Imagen">{imageUrl}</Field> : null}
+          </div>
+        );
+      }
       const p = action.payload as CreateAdPayload;
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

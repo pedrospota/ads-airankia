@@ -24,8 +24,12 @@ const gate = (
 ): GateResult => ({ id, severity, status: pass ? "pass" : "fail", evidence });
 
 function budgetMicros(input: GateInput): number | null {
-  const p = input.action.payload as { newDailyBudgetMicros?: unknown; amountMicros?: unknown };
-  const v = input.action.actionType === "create_budget" ? p?.amountMicros : p?.newDailyBudgetMicros;
+  const p = input.action.payload as { newDailyBudgetMicros?: unknown; amountMicros?: unknown; dailyBudgetMicros?: unknown };
+  const v = input.action.actionType === "create_budget"
+    ? p?.amountMicros
+    : input.action.actionType === "create_adset"
+      ? p?.dailyBudgetMicros
+      : p?.newDailyBudgetMicros;
   return typeof v === "number" ? v : null;
 }
 
@@ -85,7 +89,7 @@ const blastRadius: Gate = (i) =>
     `${i.executedTodayForAccount}/${i.settings.maxActionsPerAccountDay} acciones ejecutadas hoy en esta cuenta.`);
 
 const currencySanity: Gate = (i) => {
-  const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget";
+  const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget" || i.action.actionType === "create_adset";
   if (!isBudget) return gate("CURRENCY_SANITY", "blocking", true, "No aplica.");
   const next = budgetMicros(i);
   const ok = next !== null && Number.isInteger(next) && next >= MICROS_PER_UNIT;
@@ -111,15 +115,23 @@ const trackingSignal: Gate = (i) => {
     blind ? "Gasto en 30d sin conversiones registradas: revisar medición antes de operar." : "Señal de conversión presente o sin gasto.");
 };
 
+const CREATE_FAMILY = new Set(["create_campaign", "create_adset", "create_ad"]);
+
 const validateOnly: Gate = (i) => {
-  if (i.network !== "google_ads") return gate("VALIDATE_ONLY", "blocking", true, "No aplica (solo Google).");
-  if (!i.validateResult) return gate("VALIDATE_ONLY", "blocking", false, "Falta el ensayo validateOnly de Google.");
+  const requiresRehearsal = i.network === "google_ads" || (i.network === "meta_ads" && CREATE_FAMILY.has(i.action.actionType));
+  if (!requiresRehearsal) return gate("VALIDATE_ONLY", "blocking", true, "No aplica.");
+  if (i.network === "google_ads") {
+    if (!i.validateResult) return gate("VALIDATE_ONLY", "blocking", false, "Falta el ensayo validateOnly de Google.");
+    return gate("VALIDATE_ONLY", "blocking", i.validateResult.ok,
+      i.validateResult.ok ? "Ensayo validateOnly aprobado por Google." : `Google rechazó el ensayo: ${i.validateResult.detail ?? "error"}.`);
+  }
+  if (!i.validateResult) return gate("VALIDATE_ONLY", "blocking", false, "Falta el ensayo de validación de Meta.");
   return gate("VALIDATE_ONLY", "blocking", i.validateResult.ok,
-    i.validateResult.ok ? "Ensayo validateOnly aprobado por Google." : `Google rechazó el ensayo: ${i.validateResult.detail ?? "error"}.`);
+    i.validateResult.ok ? "Ensayo de validación de Meta aprobado." : `Meta rechazó el ensayo: ${i.validateResult.detail ?? "error"}.`);
 };
 
 const absBudgetCap: Gate = (i) => {
-  const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget";
+  const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget" || i.action.actionType === "create_adset";
   if (!isBudget || i.settings.maxDailyBudgetMicros == null) {
     return gate("ABS_BUDGET_CAP", "blocking", true, "No aplica (sin tope absoluto o no es presupuesto).");
   }
@@ -147,10 +159,12 @@ const metaLearningReset: Gate = (i) => {
 };
 
 const pausedOnCreate: Gate = (i) => {
-  if (i.action.actionType !== "create_campaign") return gate("PAUSED_ON_CREATE", "blocking", true, "No aplica.");
+  const isCreate = i.action.actionType === "create_campaign" || i.action.actionType === "create_adset";
+  if (!isCreate) return gate("PAUSED_ON_CREATE", "blocking", true, "No aplica.");
   const status = (i.action.payload as { status?: string })?.status;
+  const label = i.action.actionType === "create_campaign" ? "Campaña" : "Ad set";
   return gate("PAUSED_ON_CREATE", "blocking", status === "PAUSED",
-    status === "PAUSED" ? "Campaña se crea en pausa." : `Campaña de creación debe nacer PAUSED (status=${status ?? "ausente"}).`);
+    status === "PAUSED" ? `${label} se crea en pausa.` : `${label} de creación debe nacer PAUSED (status=${status ?? "ausente"}).`);
 };
 
 const GATES: Gate[] = [

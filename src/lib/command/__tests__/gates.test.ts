@@ -24,6 +24,27 @@ function baseInput(over: Partial<GateInput> = {}): GateInput {
 }
 const failed = (rs: ReturnType<typeof runGates>) => rs.filter(r => r.status === "fail").map(r => r.id);
 
+function metaInput(over: Partial<GateInput> = {}): GateInput {
+  return baseInput({
+    network: "meta_ads",
+    capabilities: {
+      read: true, write: true,
+      actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives",
+        "create_campaign", "create_adset", "create_ad", "remove_entity"],
+    },
+    action: {
+      actionType: "create_adset", entityKind: "adset", entityRef: "tmp:as:1",
+      payload: {
+        name: "A", status: "PAUSED", campaignRef: "tmp:c:1", dailyBudgetMicros: 10_000_000,
+        optimizationGoal: "LINK_CLICKS", billingEvent: "IMPRESSIONS", bidStrategy: "LOWEST_COST_WITHOUT_CAP",
+        targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+      } as never,
+    },
+    validateResult: { ok: true },
+    ...over,
+  });
+}
+
 describe("gates", () => {
   it("all pass on a clean pause", () => {
     expect(failed(runGates(baseInput()))).toEqual([]);
@@ -192,5 +213,74 @@ describe("gates", () => {
       capabilities: { read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_campaign"] as never },
       action: { actionType: "create_campaign" as never, entityKind: "campaign", entityRef: "temp:campaign:2", payload: { name: "c", status: "PAUSED" } as never } }));
     expect(ok.find(r => r.id === "PAUSED_ON_CREATE")?.status).toBe("pass");
+  });
+  it("ABS_BUDGET_CAP + CURRENCY_SANITY apply to create_adset.dailyBudgetMicros", () => {
+    const over = runGates(metaInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, maxDailyBudgetMicros: 50_000_000 },
+      action: {
+        actionType: "create_adset", entityKind: "adset", entityRef: "tmp:as:1",
+        payload: {
+          name: "A", status: "PAUSED", campaignRef: "tmp:c:1", dailyBudgetMicros: 60_000_000,
+          optimizationGoal: "LINK_CLICKS", billingEvent: "IMPRESSIONS", bidStrategy: "LOWEST_COST_WITHOUT_CAP",
+          targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+        } as never,
+      },
+    }));
+    expect(blockingFailures(over).map(r => r.id)).toContain("ABS_BUDGET_CAP");
+  });
+  it("THE 100x TRIPWIRE: a cents value smuggled as micros (3500) fails CURRENCY_SANITY", () => {
+    const rs = runGates(metaInput({
+      action: {
+        actionType: "create_adset", entityKind: "adset", entityRef: "tmp:as:1",
+        payload: {
+          name: "A", status: "PAUSED", campaignRef: "tmp:c:1", dailyBudgetMicros: 3500,
+          optimizationGoal: "LINK_CLICKS", billingEvent: "IMPRESSIONS", bidStrategy: "LOWEST_COST_WITHOUT_CAP",
+          targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+        } as never,
+      },
+    }));
+    expect(blockingFailures(rs).map(r => r.id)).toContain("CURRENCY_SANITY");
+  });
+  it("PAUSED_ON_CREATE blocks a non-PAUSED create_adset and passes PAUSED", () => {
+    const bad = runGates(metaInput({
+      action: {
+        actionType: "create_adset", entityKind: "adset", entityRef: "tmp:as:1",
+        payload: {
+          name: "A", status: "ACTIVE", campaignRef: "tmp:c:1", dailyBudgetMicros: 10_000_000,
+          optimizationGoal: "LINK_CLICKS", billingEvent: "IMPRESSIONS", bidStrategy: "LOWEST_COST_WITHOUT_CAP",
+          targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+        } as never,
+      },
+    }));
+    expect(blockingFailures(bad).map(r => r.id)).toContain("PAUSED_ON_CREATE");
+    const ok = runGates(metaInput());
+    expect(ok.find(r => r.id === "PAUSED_ON_CREATE")?.status).toBe("pass");
+  });
+  it("VALIDATE_ONLY: meta create without validateResult fails closed; meta v1 pause passes No-aplica; meta remove_entity passes", () => {
+    const noRehearsal = runGates(metaInput({ validateResult: null }));
+    expect(blockingFailures(noRehearsal).map(r => r.id)).toContain("VALIDATE_ONLY");
+
+    const v1Pause = runGates(baseInput({
+      network: "meta_ads",
+      action: { actionType: "pause", entityKind: "adset", entityRef: "123", payload: {} },
+      validateResult: null,
+    }));
+    expect(v1Pause.find(r => r.id === "VALIDATE_ONLY")?.status).toBe("pass");
+
+    const removeEntity = runGates(baseInput({
+      network: "meta_ads",
+      capabilities: { read: true, write: true, actionTypes: ["remove_entity"] },
+      action: { actionType: "remove_entity", entityKind: "adset", entityRef: "123", payload: { resourceNames: ["rn1"] } },
+      validateResult: null,
+    }));
+    expect(removeEntity.find(r => r.id === "VALIDATE_ONLY")?.status).toBe("pass");
+  });
+  it("VALIDATE_ONLY: google behavior byte-identical (existing tests still green)", () => {
+    const missing = runGates(baseInput({ validateResult: null }));
+    expect(blockingFailures(missing).map(r => r.id)).toContain("VALIDATE_ONLY");
+    const failedRehearsal = runGates(baseInput({ validateResult: { ok: false, detail: "INVALID_ARGUMENT" } }));
+    expect(blockingFailures(failedRehearsal).map(r => r.id)).toContain("VALIDATE_ONLY");
+    const passed = runGates(baseInput({ validateResult: { ok: true } }));
+    expect(passed.find(r => r.id === "VALIDATE_ONLY")?.status).toBe("pass");
   });
 });

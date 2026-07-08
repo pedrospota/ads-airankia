@@ -158,6 +158,29 @@ describe("executeAction", () => {
     expect(out.ok).toBe(true);
   });
 
+  it("create_adset (Meta) uses a synthetic before (no snapshot call) and still gate", async () => {
+    const deps = fakeDeps();
+    deps.repo.getAction = async () => baseAction({
+      status: "approved", network: "meta_ads", actionType: "create_adset",
+      entityKind: "adset", entityRef: "tmp:as:1",
+      payload: {
+        name: "as", status: "PAUSED", campaignRef: "tmp:c:1", dailyBudgetMicros: 35_000_000,
+        optimizationGoal: "LINK_CLICKS", billingEvent: "IMPRESSIONS", bidStrategy: "LOWEST_COST_WITHOUT_CAP",
+        targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+      },
+    }) as never;
+    let snapCalled = false;
+    deps.adapters = { for: () => fakeAdapter({
+      network: "meta_ads",
+      capabilities: () => ({ read: true, write: true, actionTypes: ["budget_update", "pause", "enable", "add_negatives", "remove_negatives", "create_adset"] }),
+      snapshot: async () => { snapCalled = true; throw new Error("should not snapshot a temp entity"); }
+    }) };
+    deps.settings = { get: async () => ({ ...CC_SETTINGS_DEFAULTS, allowedActionTypes: ["create_adset"] as CcInternalActionType[] } as CcSettingsValues) };
+    const out = await executeAction("a1", "op@x.com", ["w1"], deps);
+    expect(snapCalled).toBe(false);
+    expect(out.ok).toBe(true);
+  });
+
   it("remove_entity (create-rollback) uses a synthetic before, never snapshot() on the live resourceName", async () => {
     // remove_entity's entityRef is a full resourceName (customers/x/campaigns/y),
     // not a numeric id — snapshot() expects a numeric id and would throw.

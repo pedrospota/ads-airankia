@@ -48,7 +48,7 @@ function toInput(row: CcActionRow, override?: CcActionInput): CcActionInput {
   };
 }
 
-const CREATE_ACTION_TYPES = new Set(["create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad"]);
+const CREATE_ACTION_TYPES = new Set(["create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad", "create_adset"]);
 
 async function prepare(row: CcActionRow, input: CcActionInput, deps: ExecutorDeps) {
   const adapter = deps.adapters.for(row.network as CcNetwork);
@@ -72,7 +72,7 @@ async function prepare(row: CcActionRow, input: CcActionInput, deps: ExecutorDep
   const settings = await deps.settings.get(row.workspaceId);
   const executedTodayForAccount = await deps.repo.countExecutedToday(row.accountRef);
   const validateResult =
-    row.network === "google_ads" && adapter.validate && capabilities.write
+    adapter.validate && capabilities.write
       ? await adapter.validate(auth, row.accountRef, input, before)
       : null;
   const gates = runGates({

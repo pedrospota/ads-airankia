@@ -9,7 +9,7 @@ export type CcEntityKind = "campaign" | "ad_group" | "adset" | "ad";
 // user-proposable and never allowed by cc_settings.allowed_action_types.
 export type CcActionType = "budget_update" | "pause" | "enable" | "add_negatives";
 export type CcCreateActionType =
-  | "create_budget" | "create_campaign" | "create_ad_group" | "create_keywords" | "create_ad";
+  | "create_budget" | "create_campaign" | "create_ad_group" | "create_keywords" | "create_ad" | "create_adset";
 export type CcInternalActionType = CcActionType | CcCreateActionType | "remove_negatives" | "remove_entity";
 
 export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_update", "pause", "enable", "add_negatives"]);
@@ -24,7 +24,7 @@ export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_u
  */
 export const CC_SETTINGS_ACTION_TYPES: readonly (CcActionType | CcCreateActionType)[] = Object.freeze([
   ...CC_ACTION_TYPES,
-  "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+  "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad", "create_adset",
 ]);
 
 export type CcActionStatus =
@@ -58,11 +58,31 @@ export interface CreateAdPayload {
   headlines: Array<{ text: string; pinnedField?: string }>;
   descriptions: Array<{ text: string }>; path1?: string; path2?: string;
 }
+export interface MetaCreateCampaignPayload {
+  name: string; status: "PAUSED";
+  objective: "OUTCOME_TRAFFIC"; buyingType: "AUCTION";
+  specialAdCategories: string[];               // slice 1: always []
+}
+export interface MetaCreateAdsetPayload {
+  name: string; status: "PAUSED"; campaignRef: CcRef;   // tmp:<campaign tempId>
+  dailyBudgetMicros: number;                             // RAIL MICROS — adapter converts to cents
+  optimizationGoal: "LINK_CLICKS"; billingEvent: "IMPRESSIONS";
+  bidStrategy: "LOWEST_COST_WITHOUT_CAP";
+  targeting: { countryCodes: string[]; ageMin: number; ageMax: number };
+}
+export interface MetaCreateAdPayload {
+  name: string; status: "ACTIVE"; adsetRef: CcRef;       // tmp:<adset tempId>
+  creative: { link: string; message: string; headline?: string; description?: string;
+    callToActionType?: "LEARN_MORE"|"CONTACT_US"|"SHOP_NOW"|"SIGN_UP"|"GET_QUOTE";
+    imageUrl?: string };                                 // → link_data.picture (optional)
+}
 export interface RemoveEntityPayload { resourceNames: string[] }
 export type CcPayload =
   | BudgetUpdatePayload | NegativesPayload | RemoveNegativesPayload
   | CreateBudgetPayload | CreateCampaignPayload | CreateAdGroupPayload
-  | CreateKeywordsPayload | CreateAdPayload | RemoveEntityPayload
+  | CreateKeywordsPayload | CreateAdPayload
+  | MetaCreateCampaignPayload | MetaCreateAdsetPayload | MetaCreateAdPayload
+  | RemoveEntityPayload
   | Record<string, never>;
 
 /** What the executor hands to an adapter. */

@@ -581,7 +581,7 @@ export async function POST() {
       max_budget_delta_pct INT NOT NULL DEFAULT 30,
       max_actions_per_account_day INT NOT NULL DEFAULT 20,
       require_two_step BOOLEAN NOT NULL DEFAULT true,
-      allowed_action_types JSONB NOT NULL DEFAULT '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad"]',
+      allowed_action_types JSONB NOT NULL DEFAULT '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset"]',
       watch_hours INT NOT NULL DEFAULT 72,
       max_daily_budget_micros BIGINT,
       updated_by TEXT,
@@ -617,6 +617,13 @@ export async function POST() {
     sql`ALTER TABLE cc_settings ALTER COLUMN allowed_action_types SET DEFAULT
       '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad"]'::jsonb`,
     sql`INSERT INTO schema_migrations (version) VALUES ('008_command_center_v2') ON CONFLICT (version) DO NOTHING`,
+
+    // 009_command_center_v2_2 — Meta create flow: create_adset joins the allow-list.
+    sql`UPDATE cc_settings SET allowed_action_types = allowed_action_types || '["create_adset"]'::jsonb
+      WHERE NOT (allowed_action_types ? 'create_adset')`,
+    sql`ALTER TABLE cc_settings ALTER COLUMN allowed_action_types SET DEFAULT
+      '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset"]'::jsonb`,
+    sql`INSERT INTO schema_migrations (version) VALUES ('009_command_center_v2_2') ON CONFLICT (version) DO NOTHING`,
   ];
 
   const results = [];

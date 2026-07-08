@@ -693,7 +693,7 @@ export const ccSettings = pgTable("cc_settings", {
   allowedActionTypes: jsonb("allowed_action_types")
     .default([
       "budget_update", "pause", "enable", "add_negatives",
-      "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+      "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad", "create_adset",
     ])
     .notNull(),
   watchHours: integer("watch_hours").default(72).notNull(),

@@ -1,9 +1,10 @@
 import { describe, it, expect } from "bun:test";
 import { rowToSettings } from "../settings";
 import { runGates, type GateInput } from "../gates";
-import { CC_SETTINGS_DEFAULTS, type CcCreateActionType, type CreateCampaignPayload, type EntitySnapshot } from "../types";
+import { CC_SETTINGS_DEFAULTS, type CcCreateActionType, type CreateCampaignPayload, type EntitySnapshot, type MetaCreateAdsetPayload } from "../types";
 
 const CREATE_TYPES: CcCreateActionType[] = ["create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad"];
+const CREATE_TYPES_V22: CcCreateActionType[] = [...CREATE_TYPES, "create_adset"];
 
 describe("rowToSettings", () => {
   it("returns defaults for null row", () => {
@@ -38,6 +39,50 @@ describe("rowToSettings", () => {
     for (const t of CREATE_TYPES) {
       expect(v.allowedActionTypes).toContain(t);
     }
+  });
+
+  // v2.2: create_adset (Meta) joins the allow-list alongside the v2 Google create_* family.
+  it("preserves create_adset loaded from a migrated DB row (does not strip it)", () => {
+    const v = rowToSettings({
+      allowedActionTypes: ["budget_update", ...CREATE_TYPES_V22],
+    });
+    for (const t of CREATE_TYPES_V22) {
+      expect(v.allowedActionTypes).toContain(t);
+    }
+  });
+
+  it("defaults (null row / no settings row) include create_adset", () => {
+    const v = rowToSettings(null);
+    expect(v.allowedActionTypes).toContain("create_adset");
+  });
+
+  it("end-to-end: create_adset passes ACTION_ALLOWED using settings loaded via rowToSettings(null)", () => {
+    const settings = rowToSettings(null);
+    const before: EntitySnapshot = {
+      entityKind: "adset", entityRef: "tmp:adset-1", name: null, status: "UNKNOWN",
+      dailyBudgetMicros: null, currency: "USD", learningPhase: "UNKNOWN",
+      conversions30d: null, spend30dMicros: null,
+    };
+    const payload: MetaCreateAdsetPayload = {
+      name: "New Adset", status: "PAUSED", campaignRef: "tmp:campaign-1",
+      dailyBudgetMicros: 35_000_000,
+      optimizationGoal: "LINK_CLICKS", billingEvent: "IMPRESSIONS",
+      bidStrategy: "LOWEST_COST_WITHOUT_CAP",
+      targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+    };
+    const input: GateInput = {
+      settings,
+      network: "meta_ads",
+      action: { actionType: "create_adset", entityKind: "adset", entityRef: "tmp:adset-1", payload },
+      capabilities: { read: true, write: true, actionTypes: [...CREATE_TYPES_V22, "budget_update", "pause", "enable", "add_negatives"] as never },
+      before,
+      expected: null,
+      executedTodayForAccount: 0,
+      validateResult: null,
+    };
+    const results = runGates(input);
+    const actionAllowed = results.find((r) => r.id === "ACTION_ALLOWED");
+    expect(actionAllowed?.status).toBe("pass");
   });
 
   it("end-to-end: create_campaign passes ACTION_ALLOWED using settings loaded via rowToSettings(null)", () => {

@@ -356,3 +356,21 @@ export function sanitizeProv(mergedDoc: GoogleSearchEditDoc, rawProv: unknown): 
   }
   return out;
 }
+
+/**
+ * The edit PUT route's re-attach composition (spec §b "the one real plumbing change"):
+ * sanitizeProv → deriveAiMarkers → spread the two raw jsonb siblings back onto the merged
+ * doc, exactly mirroring the `_ai` convention the create path already relies on (zod strips
+ * both; readers pull them off raw jsonb). Extracted here — not inlined in the route — so the
+ * sanitize→derive→spread composition is unit-testable without a request/DB harness.
+ *
+ * Returns `mergedDoc` UNCHANGED (no `_prov`/`_ai` siblings at all) when sanitizeProv keeps
+ * nothing, so a plain edit save with no accepted AI ops never grows empty-object noise.
+ */
+export function attachProvenance(
+  mergedDoc: GoogleSearchEditDoc, rawProv: unknown
+): GoogleSearchEditDoc & { _prov?: ProvenanceMap; _ai?: string[] } {
+  const prov = sanitizeProv(mergedDoc, rawProv);
+  if (Object.keys(prov).length === 0) return mergedDoc;
+  return { ...mergedDoc, _prov: prov, _ai: deriveAiMarkers(mergedDoc, prov) };
+}

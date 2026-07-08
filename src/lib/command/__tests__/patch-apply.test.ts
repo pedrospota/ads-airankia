@@ -11,6 +11,7 @@ import {
   clearProv,
   deriveAiMarkers,
   sanitizeProv,
+  attachProvenance,
   type BlueprintPatch,
   type PatchOp,
   type ProvenanceMap,
@@ -688,5 +689,59 @@ describe("provenance helpers", () => {
       expect(Object.keys(result)).toHaveLength(0);
       expect(result[validKey]).toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachProvenance — the edit PUT route's re-attach composition (Task 4, spec §b "the one
+// real plumbing change"): sanitizeProv -> deriveAiMarkers -> spread onto the merged doc.
+// ---------------------------------------------------------------------------
+
+describe("attachProvenance", () => {
+  it("valid keys survive the merge round-trip: _prov keeps them and _ai derives from them", () => {
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const key = `${ag.resourceName}:desired.status`;
+    const result = attachProvenance(doc, { [key]: "ia" });
+    expect(result._prov).toEqual({ [key]: "ia" });
+    expect(result._ai).toEqual([ag.id]);
+    // The doc's own fields ride along unchanged — this is a spread onto the merged doc, not
+    // a replacement of it.
+    expect(result.campaign.resourceName).toBe(doc.campaign.resourceName);
+    expect(result.campaign.adGroups[0].desired).toEqual(ag.desired);
+  });
+
+  it("drops unknown and prototype-chain keys via sanitizeProv before deriving _ai (they never reach the output)", () => {
+    const doc = editDoc();
+    const result = attachProvenance(doc, {
+      "campaign:__proto__": "ia",
+      "does-not-exist:field": "ia",
+      "campaign:resourceName": "ia", // a real but non-writable field
+    });
+    expect("_prov" in result).toBe(false);
+    expect("_ai" in result).toBe(false);
+  });
+
+  it("empty -> no siblings: rawProv undefined/null/garbage returns the merged doc as-is, with no _prov/_ai keys at all", () => {
+    const doc = editDoc();
+    for (const raw of [undefined, null, "not-an-object", ["ia"]]) {
+      const result = attachProvenance(doc, raw);
+      expect(result).toEqual(doc);
+      expect("_prov" in result).toBe(false);
+      expect("_ai" in result).toBe(false);
+    }
+  });
+
+  it("mixes surviving and dropped keys: only the surviving key's node/field appears in _prov and feeds _ai", () => {
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const validKey = `${ag.resourceName}:desired.cpcBidMicros`;
+    const result = attachProvenance(doc, {
+      [validKey]: "ia",
+      "ghost-node:field": "ia",
+      [`${ag.resourceName}:resourceName`]: "ia", // real node, non-writable field
+    });
+    expect(result._prov).toEqual({ [validKey]: "ia" });
+    expect(result._ai).toEqual([ag.id]);
   });
 });

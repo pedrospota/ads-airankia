@@ -39,6 +39,18 @@ function editDocWithBudgetChange(loadedAt = new Date().toISOString()) {
   };
 }
 
+// Task 4: same shape as editDocWithBudgetChange, plus an ad-group pause (a SECOND,
+// unrelated diffEditDoc action, entityRef = the ad group's `id`) so a test can assert `_ai`
+// source-stamping is per-row, not blueprint-wide — only the entityRef(s) listed in `_ai` get
+// 'copiloto', the other row stays 'manual'. `ai` rides along as the raw `_ai` sibling exactly
+// like the edit PUT route's attachProvenance would leave it (compileBlueprintToActions reads
+// it off raw jsonb, never through parseEditDoc, which doesn't declare it).
+function editDocWithBudgetChangeAndAdGroupPause(ai?: string[], loadedAt = new Date().toISOString()) {
+  const doc = editDocWithBudgetChange(loadedAt);
+  doc.campaign.adGroups[0].desired.status = "PAUSED";
+  return ai ? { ...doc, _ai: ai } : doc;
+}
+
 // Same node-graph shape as blueprint-compile.test.ts's fixture (already proven to satisfy
 // blueprintDocSchema + compile()): budget → campaign → ad_group → keywords → ad = 5 actions.
 function docFixture(ai?: string[]) {
@@ -292,6 +304,42 @@ describe("compileBlueprintToActions — edit-doc branch (Task 5)", () => {
     const rows = await compileBlueprintToActions("bp1", [WS], deps);
 
     expect(rows[0].recKey?.startsWith("bp-")).toBe(true); // create compiler, not the edit one
+  });
+});
+
+describe("compileBlueprintToActions — edit-doc _ai source stamping (Task 4)", () => {
+  const WS = "w1";
+
+  it("an edit doc whose raw _ai lists the campaign id stamps ONLY the budget row 'copiloto'; the unrelated ad-group pause row stays 'manual'", async () => {
+    const doc = editDocWithBudgetChangeAndAdGroupPause(["5"]); // campaign.id === "5"
+    const { deps } = makeHarness([baseBlueprint({ doc })]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows).toHaveLength(2);
+    const budgetRow = rows.find((r) => r.actionType === "budget_update")!;
+    expect(budgetRow.entityRef).toBe("5");
+    expect(budgetRow.source).toBe("copiloto");
+
+    const pauseRow = rows.find((r) => r.actionType === "pause")!;
+    expect(pauseRow.entityRef).toBe("7"); // the ad group's id, not "5" — exact match, not blueprint-wide
+    expect(pauseRow.source).toBe("manual");
+  });
+
+  it("an edit doc with no _ai sibling compiles every row 'manual' (regression: absence never accidentally stamps 'copiloto')", async () => {
+    const doc = editDocWithBudgetChangeAndAdGroupPause();
+    const { deps } = makeHarness([baseBlueprint({ doc })]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.source === "manual")).toBe(true);
+  });
+
+  it("an _ai entry that matches no compiled row's entityRef stamps nothing 'copiloto' (stale/foreign marker, fails closed)", async () => {
+    const doc = editDocWithBudgetChangeAndAdGroupPause(["does-not-match-anything"]);
+    const { deps } = makeHarness([baseBlueprint({ doc })]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows.every((r) => r.source === "manual")).toBe(true);
   });
 });
 

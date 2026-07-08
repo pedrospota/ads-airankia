@@ -7,6 +7,7 @@ import { parseMetaBlueprint } from "@/lib/command/blueprint/meta-schema";
 import { parseBlueprint } from "@/lib/command/blueprint/schema";
 import { diffEditDoc } from "@/lib/command/edit/diff";
 import { mergeEditDoc, parseEditDoc } from "@/lib/command/edit/schema";
+import { attachProvenance } from "@/lib/command/patch/schema";
 
 /** v2.3 edit docs are keyed by this literal docType, distinct from the v2 create-blueprint doc. */
 function isEditDoc(doc: unknown): boolean {
@@ -71,8 +72,19 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: `No se puede editar desde estado ${blueprint.status}` }, { status: 409 });
     }
 
+    // v2.4 PROVENANCE RE-ATTACH (spec §b "the one real plumbing change"): mergeEditDoc above
+    // parses `body.doc` through editDocSchema, which doesn't declare `_prov`/`_ai` — both
+    // siblings are silently stripped from `merged`. Without this, edit-doc AI provenance
+    // vanishes on every save (badges + `source:'copiloto'` both go dark). Read the RAW
+    // `_prov` off body.doc (never `merged`, which never had it), re-validate every key
+    // against the MERGED doc via sanitizeProv (a node the merge dropped, or a field
+    // mergeEditDoc doesn't lift, must not survive), then derive `_ai` from what survives.
+    // Save the result — plain merged doc when there's nothing to attach.
+    const rawProv = (body.doc as { _prov?: unknown } | null | undefined)?._prov;
+    const docToSave = attachProvenance(merged, rawProv);
+
     try {
-      const updated = await saveBlueprintDoc(id, merged, access.workspaceIds);
+      const updated = await saveBlueprintDoc(id, docToSave, access.workspaceIds);
       if (!updated) {
         return NextResponse.json({ error: "El blueprint ya no está en borrador." }, { status: 409 });
       }

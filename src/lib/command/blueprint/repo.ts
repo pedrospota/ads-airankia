@@ -178,12 +178,24 @@ export async function compileBlueprintToActions(
     const doc = parseEditDoc(blueprint.doc);
     const compiled = diffEditDoc(doc, blueprintId);
     if (compiled.length === 0) throw new Error("No hay cambios que aplicar.");
+
+    // v2.4 (Task 4): AI-accepted markers live as an optional `_ai: string[]` sibling of
+    // `docType`/`campaign` on the RAW edit doc — the edit PUT route's `attachProvenance`
+    // (patch/schema.ts) is the writer, mirroring the create branch's `_ai` reader below.
+    // editDocSchema doesn't declare it, so it's stripped from `doc` (the parsed value) —
+    // read it off the raw jsonb instead. Matched against EditCompiledAction.entityRef (the
+    // differ's own per-action identity — resourceName-derived ids, or `tmp:`-prefixed refs
+    // for create_* actions), the SAME identity deriveAiMarkers emits its markers in.
+    const rawAi = (blueprint.doc as { _ai?: unknown } | null)?._ai;
+    const aiPaths = new Set(Array.isArray(rawAi) ? rawAi.filter((p): p is string => typeof p === "string") : []);
+
     const rows = compiled.map((a) => ({
       workspaceId: blueprint.workspaceId, createdBy: blueprint.createdBy, network: blueprint.network,
       connectionId: blueprint.connectionId, accountRef: blueprint.accountRef,
       entityKind: a.entityKind, entityRef: a.entityRef, entityName: a.entityName,
       actionType: a.actionType, payload: a.payload as never, expected: a.expected as never,
-      source: "manual" as const, recKey: a.recKey, rationale: a.note,
+      source: aiPaths.has(a.entityRef) ? "copiloto" as const : "manual" as const,
+      recKey: a.recKey, rationale: a.note,
       status: "proposed" as const, blueprintId, seq: a.seq, localRef: a.localRef,
     }));
     return deps.insertActions(rows);

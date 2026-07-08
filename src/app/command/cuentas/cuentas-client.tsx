@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Card, DataTable, THead, Row, Cell, Badge, EmptyState, SecondaryButton, PrimaryButton, UI } from "@/components/ui-kit";
+import type { CampaignMetrics, CcMetricsRange } from "@/lib/command/types";
 
 export interface UnifiedAccount {
   network: "google_ads" | "meta_ads";
@@ -22,6 +24,36 @@ interface CampaignRow {
 
 const NET_LABEL = { google_ads: "Google Ads", meta_ads: "Meta Ads" } as const;
 
+// v2.6 — 7d/30d segmented range toggle for the campaign metrics columns.
+// Same segmented-control styling as editar/editor-panels.tsx's StatusToggle.
+function RangeToggle({ value, onChange }: { value: CcMetricsRange; onChange: (r: CcMetricsRange) => void }) {
+  const segStyle = (active: boolean): CSSProperties => ({
+    border: `1px solid ${active ? UI.accent : UI.borderStrong}`,
+    background: active ? UI.accentSoft : "none",
+    color: active ? UI.text : UI.muted,
+    borderRadius: UI.radiusSm,
+    padding: "6px 14px",
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  });
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <button type="button" style={segStyle(value === "7d")} onClick={() => onChange("7d")}>
+        7 días
+      </button>
+      <button type="button" style={segStyle(value === "30d")} onClick={() => onChange("30d")}>
+        30 días
+      </button>
+    </div>
+  );
+}
+
+// Micros → currency units, 2 decimals (matches the existing budget column style).
+function fmtMicros(micros: number): string {
+  return (micros / 1_000_000).toFixed(2);
+}
+
 export default function CuentasClient({
   accounts,
   metaWritable,
@@ -34,6 +66,9 @@ export default function CuentasClient({
   const router = useRouter();
   const [selected, setSelected] = useState<UnifiedAccount | null>(null);
   const [campaigns, setCampaigns] = useState<CampaignRow[] | null>(null);
+  const [range, setRange] = useState<CcMetricsRange>("30d");
+  const [metrics, setMetrics] = useState<CampaignMetrics[] | null>(null);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposing, setProposing] = useState<string | null>(null);
@@ -41,24 +76,42 @@ export default function CuentasClient({
   const [editingRef, setEditingRef] = useState<string | null>(null);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
-  async function loadCampaigns(account: UnifiedAccount) {
+  // Fetch stays gated behind an explicit trigger (the "Ver campañas" click, or
+  // the range toggle once an account is already selected) — never on render.
+  async function loadCampaigns(account: UnifiedAccount, r: CcMetricsRange = range) {
     setSelected(account);
     setCampaigns(null);
+    setMetrics(null);
+    setMetricsError(null);
     setError(null);
     setBusy(true);
     try {
-      const qs = new URLSearchParams({ network: account.network, account: account.accountRef });
+      const qs = new URLSearchParams({ network: account.network, account: account.accountRef, range: r });
       if (account.connectionId) qs.set("connection", account.connectionId);
       const res = await fetch(`/api/command/campaigns?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setCampaigns(data.campaigns ?? []);
+      setMetrics(data.metrics ?? []);
+      setMetricsError(data.metricsError ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error cargando campañas");
     } finally {
       setBusy(false);
     }
   }
+
+  function changeRange(r: CcMetricsRange) {
+    setRange(r);
+    if (selected) void loadCampaigns(selected, r);
+  }
+
+  // Zero-impression campaigns are never dropped from `campaigns` (the entity
+  // list is the untouched source of truth — see types.ts CampaignMetrics doc),
+  // but a campaign absent from `metrics` (or the whole read failing/missing)
+  // has no known spend/clicks/conv for the range: the cells render "—", never
+  // a fabricated 0.
+  const metricsByRef = new Map((metrics ?? []).map((m) => [m.entityRef, m]));
 
   async function propose(campaign: CampaignRow, actionType: "pause" | "enable") {
     if (!selected) return;
@@ -158,9 +211,15 @@ export default function CuentasClient({
 
       {selected ? (
         <Card style={{ marginTop: 16 }}>
-          <h3 style={{ margin: "0 0 12px", fontWeight: 600 }}>Campañas · {selected.name}</h3>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontWeight: 600 }}>Campañas · {selected.name}</h3>
+            <RangeToggle value={range} onChange={changeRange} />
+          </div>
           {error ? <p style={{ color: UI.danger }}>{error}</p> : null}
           {notice ? <p style={{ color: UI.accent }}>{notice}</p> : null}
+          {metricsError ? (
+            <p style={{ color: UI.warn, fontSize: 13 }}>No se pudieron cargar las métricas: {metricsError}</p>
+          ) : null}
           {busy ? <p style={{ color: UI.muted }}>Cargando…</p> : null}
           {campaigns && campaigns.length === 0 ? <EmptyState title="Sin campañas" /> : null}
           {campaigns && campaigns.length > 0 ? (
@@ -170,12 +229,18 @@ export default function CuentasClient({
                   { label: "Campaña" },
                   { label: "Estado" },
                   { label: "Presupuesto/día", align: "right" },
+                  { label: "Inversión", align: "right" },
+                  { label: "Clics", align: "right" },
+                  { label: "Conv.", align: "right" },
+                  { label: "CPA", align: "right" },
                   { label: "Aprendizaje" },
                   { label: "Acciones" },
                 ]}
               />
               <tbody>
-                {campaigns.map((c) => (
+                {campaigns.map((c) => {
+                  const m = metricsByRef.get(c.entityRef);
+                  return (
                   <Row key={c.entityRef}>
                     <Cell>{c.name ?? c.entityRef}</Cell>
                     <Cell>
@@ -185,6 +250,12 @@ export default function CuentasClient({
                     </Cell>
                     <Cell align="right" mono>
                       {c.dailyBudgetMicros != null ? (c.dailyBudgetMicros / 1_000_000).toFixed(2) : "—"}
+                    </Cell>
+                    <Cell align="right" mono>{m ? fmtMicros(m.spendMicros) : "—"}</Cell>
+                    <Cell align="right" mono>{m ? m.clicks : "—"}</Cell>
+                    <Cell align="right" mono>{m ? m.conversions.toFixed(2) : "—"}</Cell>
+                    <Cell align="right" mono>
+                      {m && m.conversions !== 0 ? fmtMicros(m.spendMicros / m.conversions) : "—"}
                     </Cell>
                     <Cell>{c.learningPhase ?? "—"}</Cell>
                     <Cell>
@@ -211,7 +282,8 @@ export default function CuentasClient({
                       </div>
                     </Cell>
                   </Row>
-                ))}
+                  );
+                })}
               </tbody>
             </DataTable>
           ) : null}

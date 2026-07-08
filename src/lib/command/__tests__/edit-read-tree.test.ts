@@ -1,22 +1,27 @@
 import { describe, it, expect } from "bun:test";
 import { buildEditDoc } from "../edit/read-tree";
-import { parseEditDoc } from "../edit/schema";
+import { parseEditDoc, EDIT_BATCH_MAX } from "../edit/schema";
 import type { RawCampaignTree } from "../networks/google";
 
 const TREE: RawCampaignTree = {
   campaign: { campaign: { id: "5", resourceName: "customers/123/campaigns/5", name: "C", status: "ENABLED", advertisingChannelType: "SEARCH", campaignBudget: "customers/123/campaignBudgets/9" },
               campaignBudget: { amountMicros: "350000000", explicitlyShared: false }, customer: { currencyCode: "USD" } },
-  adGroups: [{ adGroup: { id: "7", resourceName: "customers/123/adGroups/7", name: "G", status: "ENABLED" } }],
-  keywords: [{ adGroupCriterion: { resourceName: "customers/123/adGroupCriteria/7~1", negative: false, keyword: { text: "kw", matchType: "PHRASE" } }, adGroup: { id: "7" } }],
+  adGroups: [{ adGroup: { id: "7", resourceName: "customers/123/adGroups/7", name: "G", status: "ENABLED", cpcBidMicros: "800000" } }],
+  keywords: [
+    { adGroupCriterion: { resourceName: "customers/123/adGroupCriteria/7~1", negative: false, status: "ENABLED", keyword: { text: "kw", matchType: "PHRASE" } }, adGroup: { id: "7" } },
+    { adGroupCriterion: { resourceName: "customers/123/adGroupCriteria/7~2", negative: true, status: "ENABLED", keyword: { text: "gratis", matchType: "EXACT" } }, adGroup: { id: "7" } },
+  ],
   ads: [
     { adGroupAd: { resourceName: "customers/123/adGroupAds/7~11", status: "ENABLED",
         ad: { type: "RESPONSIVE_SEARCH_AD", finalUrls: ["https://x.com"],
           responsiveSearchAd: { headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }], descriptions: [{ text: "D1" }, { text: "D2" }], path1: "ofertas" } } }, adGroup: { id: "7" } },
     { adGroupAd: { resourceName: "customers/123/adGroupAds/7~12", status: "ENABLED", ad: { type: "EXPANDED_TEXT_AD" } }, adGroup: { id: "7" } },
   ],
-  // v2.7: readCampaignTree's 5th GAQL (Task 3 consumes this field; buildEditDoc
-  // doesn't read it yet, so an empty fixture is sufficient here).
-  campaignNegatives: [],
+  // v2.7: readCampaignTree's 5th GAQL — live campaign-level negatives feeding
+  // schema.ts's server-owned baseNegatives.
+  campaignNegatives: [
+    { campaignCriterion: { resourceName: "customers/123/campaignCriteria/5~1", keyword: { text: "descuento", matchType: "BROAD" } } },
+  ],
 };
 
 describe("buildEditDoc", () => {
@@ -27,7 +32,7 @@ describe("buildEditDoc", () => {
     expect(doc.campaign.base.dailyBudgetMicros).toBe(350_000_000); // string micros → number
     expect(doc.campaign.base.budgetShared).toBe(false);
     expect(doc.campaign.desired).toEqual({ status: "ENABLED", dailyBudgetMicros: 350_000_000 });
-    expect(doc.campaign.adGroups[0].baseKeywords).toHaveLength(1);
+    expect(doc.campaign.adGroups[0].baseKeywords).toHaveLength(2);
     expect(doc.campaign.adGroups[0].newKeywords).toHaveLength(0);
   });
   it("flags non-RSA ads unsupported (they still exist for the enabled-count)", () => {
@@ -43,5 +48,59 @@ describe("buildEditDoc", () => {
   it("output round-trips through parseEditDoc (schema-valid by construction)", () => {
     const doc = buildEditDoc(TREE, "123", "2026-07-07T12:00:00.000Z");
     expect(() => parseEditDoc(doc)).not.toThrow();
+  });
+
+  // v2.7 status/cpc/negatives mapping (spec §b)
+  it("maps ad_group_criterion.status onto each baseKeywords row (positive and negative alike)", () => {
+    const doc = buildEditDoc(TREE, "123", "2026-07-07T12:00:00.000Z");
+    const [positive, negative] = doc.campaign.adGroups[0].baseKeywords;
+    expect(positive.status).toBe("ENABLED");
+    expect(positive.negative).toBe(false);
+    expect(negative.status).toBe("ENABLED");
+    expect(negative.negative).toBe(true);
+  });
+  it("no baseKeywords row carries a desiredStatus on load (operator hasn't proposed anything yet)", () => {
+    const doc = buildEditDoc(TREE, "123", "2026-07-07T12:00:00.000Z");
+    expect(doc.campaign.adGroups[0].baseKeywords.every((k) => k.desiredStatus === undefined)).toBe(true);
+  });
+  it("throws with a Spanish message on an unrecognized keyword status", () => {
+    const bad: RawCampaignTree = {
+      ...TREE,
+      keywords: [{ adGroupCriterion: { resourceName: "customers/123/adGroupCriteria/7~1", negative: false, status: "UNKNOWN", keyword: { text: "kw", matchType: "PHRASE" } }, adGroup: { id: "7" } }],
+    };
+    expect(() => buildEditDoc(bad, "123", "2026-07-07T12:00:00.000Z")).toThrow(/palabra clave/);
+  });
+  it("maps ad_group.cpc_bid_micros into base.cpcBidMicros and seeds desired with the same value", () => {
+    const doc = buildEditDoc(TREE, "123", "2026-07-07T12:00:00.000Z");
+    expect(doc.campaign.adGroups[0].base.cpcBidMicros).toBe(800_000); // string micros → number
+    expect(doc.campaign.adGroups[0].desired.cpcBidMicros).toBe(800_000); // seeded = base
+  });
+  it("maps a missing/null cpc_bid_micros (smart-bidding ad group) to null, not 0", () => {
+    const noCpc: RawCampaignTree = {
+      ...TREE,
+      adGroups: [{ adGroup: { id: "7", resourceName: "customers/123/adGroups/7", name: "G", status: "ENABLED", cpcBidMicros: null } }],
+    };
+    const doc = buildEditDoc(noCpc, "123", "2026-07-07T12:00:00.000Z");
+    expect(doc.campaign.adGroups[0].base.cpcBidMicros).toBeNull();
+    expect(doc.campaign.adGroups[0].desired.cpcBidMicros).toBeNull();
+  });
+  it("maps campaignNegatives rows into campaign.baseNegatives (resourceName/text/matchType→match)", () => {
+    const doc = buildEditDoc(TREE, "123", "2026-07-07T12:00:00.000Z");
+    expect(doc.campaign.baseNegatives).toEqual([
+      { resourceName: "customers/123/campaignCriteria/5~1", text: "descuento", match: "BROAD" },
+    ]);
+    expect(doc.campaign.removeNegatives).toEqual([]);
+  });
+  it("blast-bound refine rejects an over-cap doc built from the tree and then mutated past EDIT_BATCH_MAX", () => {
+    const doc = buildEditDoc(TREE, "123", "2026-07-07T12:00:00.000Z");
+    const template = doc.campaign.adGroups[0].baseKeywords[0];
+    doc.campaign.adGroups[0].baseKeywords = Array.from({ length: EDIT_BATCH_MAX + 1 }, (_, i) => ({
+      ...template,
+      resourceName: `customers/123/adGroupCriteria/7~${i}`,
+      negative: false,
+      status: "ENABLED" as const,
+      desiredStatus: "PAUSED" as const,
+    }));
+    expect(() => parseEditDoc(doc)).toThrow();
   });
 });

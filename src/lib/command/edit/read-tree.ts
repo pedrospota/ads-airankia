@@ -24,6 +24,14 @@ function optStr(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** GAQL int64 fields (cpc_bid_micros) come back as string|number|null|undefined; a
+ * missing/unset bid (e.g. smart-bidding ad groups) must map to null, not 0. */
+function optNum(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === "string" ? Number(value) : typeof value === "number" ? value : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Fail-closed: the edit surface only models ENABLED/PAUSED entities. */
 function requireEditableStatus(status: unknown, label: string): Status {
   if (status !== "ENABLED" && status !== "PAUSED") {
@@ -38,6 +46,19 @@ function buildKeyword(row: Row) {
   return {
     resourceName: str(criterion.resourceName),
     negative: Boolean(criterion.negative),
+    text: str(keyword.text),
+    match: str(keyword.matchType) as Match,
+    // REMOVED rows are already excluded by the GAQL WHERE clause; anything else
+    // unrecognized fails closed rather than silently defaulting a keyword's status.
+    status: requireEditableStatus(criterion.status, "palabra clave"),
+  };
+}
+
+function buildNegative(row: Row) {
+  const criterion = (row.campaignCriterion ?? {}) as Row;
+  const keyword = (criterion.keyword ?? {}) as Row;
+  return {
+    resourceName: str(criterion.resourceName),
     text: str(keyword.text),
     match: str(keyword.matchType) as Match,
   };
@@ -76,6 +97,9 @@ function buildAdGroup(agRow: Row, tree: RawCampaignTree) {
   const adGroup = (agRow.adGroup ?? {}) as Row;
   const id = str(adGroup.id);
   const status = requireEditableStatus(adGroup.status, "grupo de anuncios");
+  // null for smart-bidding ad groups (no manual CPC); desired seeds from base
+  // on load, same as status — the operator hasn't proposed anything yet.
+  const cpcBidMicros = optNum(adGroup.cpcBidMicros);
 
   const baseKeywords = tree.keywords
     .filter((row) => str(((row as Row).adGroup as Row | undefined)?.id) === id)
@@ -87,8 +111,8 @@ function buildAdGroup(agRow: Row, tree: RawCampaignTree) {
   return {
     resourceName: str(adGroup.resourceName),
     id,
-    base: { name: str(adGroup.name), status },
-    desired: { status },
+    base: { name: str(adGroup.name), status, cpcBidMicros },
+    desired: { status, cpcBidMicros },
     baseKeywords,
     newKeywords: [],
     ads,
@@ -127,6 +151,8 @@ export function buildEditDoc(tree: RawCampaignTree, accountRef: string, nowIso: 
       },
       desired: { status, dailyBudgetMicros },
       newNegatives: [],
+      baseNegatives: tree.campaignNegatives.map((row) => buildNegative(row as Row)),
+      removeNegatives: [],
       adGroups: tree.adGroups.map((row) => buildAdGroup(row as Row, tree)),
     },
   };

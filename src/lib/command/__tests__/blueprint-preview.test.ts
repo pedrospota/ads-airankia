@@ -135,8 +135,8 @@ function editDocFixture(desiredDailyBudgetMicros: number) {
       newNegatives: [],
       adGroups: [{
         resourceName: "customers/123/adGroups/7", id: "7",
-        base: { name: "G", status: "ENABLED" }, desired: { status: "ENABLED" },
-        baseKeywords: [{ text: "kw", match: "PHRASE", negative: false, resourceName: "customers/123/adGroupCriteria/7~1" }],
+        base: { name: "G", status: "ENABLED", cpcBidMicros: null }, desired: { status: "ENABLED", cpcBidMicros: null },
+        baseKeywords: [{ text: "kw", match: "PHRASE", negative: false, resourceName: "customers/123/adGroupCriteria/7~1", status: "ENABLED" }],
         newKeywords: [], newAds: [],
         ads: [{
           resourceName: "customers/123/adGroupAds/7~11", unsupported: false,

@@ -411,7 +411,7 @@ function AdGroupPanel({
   onSelect: (s: NodeSelection) => void;
 }) {
   function setStatus(status: "ENABLED" | "PAUSED") {
-    onChange((d) => updateAdGroup(d, group.resourceName, (g) => ({ ...g, desired: { status } })));
+    onChange((d) => updateAdGroup(d, group.resourceName, (g) => ({ ...g, desired: { ...g.desired, status } })));
   }
   function addAd() {
     const na = blankNewAd();

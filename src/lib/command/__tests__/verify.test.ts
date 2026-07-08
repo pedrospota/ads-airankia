@@ -35,7 +35,7 @@ function snapshot(over: Partial<EntitySnapshot> = {}): EntitySnapshot {
 }
 
 function access(workspaceIds: string[]): CommandAccess {
-  return { email: "op@x.com", userId: "u1", accessToken: "tok", workspaceIds };
+  return { email: "op@x.com", userId: "u1", accessToken: "tok", role: "admin", workspaceIds };
 }
 
 interface Harness {

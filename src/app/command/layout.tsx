@@ -1,12 +1,10 @@
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
-import { createSupabaseServerClient } from "@/lib/supabase-auth";
-import { isAdminEmail } from "@/lib/admin";
+import { getCommandAccess } from "@/lib/command/access";
 
-// Centro de Mando (beta): stealth gate. Unless COMMAND_CENTER_BETA is on AND
-// the signed-in user is an admin, the whole /command subtree 404s — same
-// posture as AppShell's own (separate) check that hides the sidebar nav
-// group. This is the one that actually blocks the route.
+// Centro de Mando (beta): stealth gate. getCommandAccess owns the whole
+// decision (flag → session → role/allow-list) — v3.0 operators pass, plain
+// users 404, flag-off 404s for everyone. Same posture as before, one owner.
 export const dynamic = "force-dynamic";
 
 export default async function CommandLayout({
@@ -14,11 +12,7 @@ export default async function CommandLayout({
 }: {
   children: React.ReactNode;
 }) {
-  if (process.env.COMMAND_CENTER_BETA !== "true") notFound();
-  const authClient = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-  if (!user?.email || !isAdminEmail(user.email)) notFound();
+  const access = await getCommandAccess();
+  if (!access) notFound();
   return <AppShell>{children}</AppShell>;
 }

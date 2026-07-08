@@ -581,7 +581,7 @@ export async function POST() {
       max_budget_delta_pct INT NOT NULL DEFAULT 30,
       max_actions_per_account_day INT NOT NULL DEFAULT 20,
       require_two_step BOOLEAN NOT NULL DEFAULT true,
-      allowed_action_types JSONB NOT NULL DEFAULT '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset"]',
+      allowed_action_types JSONB NOT NULL DEFAULT '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset","update_keyword_status","update_cpc","remove_negatives"]',
       watch_hours INT NOT NULL DEFAULT 72,
       max_daily_budget_micros BIGINT,
       updated_by TEXT,
@@ -624,6 +624,19 @@ export async function POST() {
     sql`ALTER TABLE cc_settings ALTER COLUMN allowed_action_types SET DEFAULT
       '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset"]'::jsonb`,
     sql`INSERT INTO schema_migrations (version) VALUES ('009_command_center_v2_2') ON CONFLICT (version) DO NOTHING`,
+
+    // 010_command_center_v2_7 — Weekly Loop: maintenance verbs join the allow-list
+    // (settings-only; zero structural DB change). update_keyword_status/update_cpc
+    // are new user verbs; remove_negatives is PROMOTED from internal-only to
+    // user-proposable — remove_entity remains the sole internal-only type.
+    sql`UPDATE cc_settings SET allowed_action_types =
+      allowed_action_types || '["update_keyword_status","update_cpc","remove_negatives"]'::jsonb
+      WHERE NOT (allowed_action_types ? 'update_keyword_status')`,
+    // Align the column DEFAULT so any future bare-insert of a cc_settings row also
+    // permits the 3 new verbs (else a placeholder row would re-block them).
+    sql`ALTER TABLE cc_settings ALTER COLUMN allowed_action_types SET DEFAULT
+      '["budget_update","pause","enable","add_negatives","create_budget","create_campaign","create_ad_group","create_keywords","create_ad","create_adset","update_keyword_status","update_cpc","remove_negatives"]'::jsonb`,
+    sql`INSERT INTO schema_migrations (version) VALUES ('010_command_center_v2_7') ON CONFLICT (version) DO NOTHING`,
   ];
 
   const results = [];

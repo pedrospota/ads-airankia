@@ -4,6 +4,14 @@ import type {
 } from "./types";
 import { MICROS_PER_UNIT } from "./types";
 
+/** v2.7: CPC floor is US$0.01 (10_000 micros) — CPCs are legitimately sub-unit, unlike the 1-unit budget floor. */
+const CPC_FLOOR_MICROS = 10_000;
+
+function newCpcMicros(input: GateInput): number | null {
+  const v = (input.action.payload as { newCpcBidMicros?: unknown })?.newCpcBidMicros;
+  return typeof v === "number" ? v : null;
+}
+
 export interface GateInput {
   settings: CcSettingsValues;
   network: CcNetwork;
@@ -44,7 +52,13 @@ const capability: Gate = (i) => {
        : `Adaptador sin capacidad: ${i.capabilities.reason ?? `no soporta ${i.action.actionType}`}.`);
 };
 
-const INTERNAL_ACTION_TYPES = new Set(["remove_negatives", "remove_entity"]);
+// v2.7: "remove_negatives" is PROMOTED to a normal user-proposable verb — it
+// now faces ACTION_ALLOWED like any other verb. "remove_entity" is the sole
+// remaining internal-only type. Its rollback-of-add_negatives usage still
+// executes even when remove_negatives is un-allow-listed, because the
+// executor's rollback path filters blocking gates down to a hard-blocker list
+// that EXCLUDES ACTION_ALLOWED (executor.ts) — not because of this set.
+const INTERNAL_ACTION_TYPES = new Set(["remove_entity"]);
 
 const actionAllowed: Gate = (i) => {
   // Internal rollback types are always allowed (a rollback restores prior state).
@@ -69,6 +83,16 @@ const drift: Gate = (i) => {
   ) {
     problems.push(`presupuesto esperado ${i.expected.dailyBudgetMicros}, real ${i.before.dailyBudgetMicros}`);
   }
+  // v2.7: same both-present pattern as dailyBudgetMicros above — a legacy
+  // approved row without expected.cpcBidMicros (or a smart-bidding entity with
+  // before.cpcBidMicros null) must never false-block here.
+  if (
+    i.expected.cpcBidMicros !== undefined && i.expected.cpcBidMicros !== null &&
+    i.before.cpcBidMicros !== undefined && i.before.cpcBidMicros !== null &&
+    i.expected.cpcBidMicros !== i.before.cpcBidMicros
+  ) {
+    problems.push(`CPC esperado ${i.expected.cpcBidMicros}, real ${i.before.cpcBidMicros}`);
+  }
   return gate("DRIFT", "blocking", problems.length === 0,
     problems.length ? `La entidad cambió desde la aprobación: ${problems.join("; ")}.` : "Estado real coincide con el baseline.");
 };
@@ -84,11 +108,37 @@ const budgetDelta: Gate = (i) => {
     `Delta ${deltaPct.toFixed(1)}% (límite ${i.settings.maxBudgetDeltaPct}%).`);
 };
 
+// v2.7: reuses settings.maxBudgetDeltaPct (no new settings column). Null
+// before.cpcBidMicros fails OPEN — a smart-bidding ad group legitimately has
+// no manual CPC to diff against; validateOnly is the real backstop there, and
+// CPC isn't budget so an open-fail here is never over-spend.
+const cpcDelta: Gate = (i) => {
+  if (i.action.actionType !== "update_cpc") return gate("CPC_DELTA", "blocking", true, "No aplica (no es cambio de CPC).");
+  const prev = i.before.cpcBidMicros ?? null;
+  if (prev === null) {
+    return gate("CPC_DELTA", "blocking", true, "Sin CPC base (puja automática); validateOnly es el respaldo.");
+  }
+  const next = newCpcMicros(i);
+  if (next === null) return gate("CPC_DELTA", "blocking", false, "CPC nuevo ausente.");
+  const deltaPct = Math.abs(next - prev) / prev * 100;
+  return gate("CPC_DELTA", "blocking", deltaPct <= i.settings.maxBudgetDeltaPct,
+    `Delta ${deltaPct.toFixed(1)}% (límite ${i.settings.maxBudgetDeltaPct}%).`);
+};
+
 const blastRadius: Gate = (i) =>
   gate("BLAST_RADIUS", "blocking", i.executedTodayForAccount < i.settings.maxActionsPerAccountDay,
     `${i.executedTodayForAccount}/${i.settings.maxActionsPerAccountDay} acciones ejecutadas hoy en esta cuenta.`);
 
 const currencySanity: Gate = (i) => {
+  // v2.7: update_cpc is a SEPARATE clause — it is NOT budget, so it never runs
+  // through budgetMicros()/the 1-unit floor, and never trips ABS_BUDGET_CAP
+  // (that gate's isBudget check below deliberately excludes update_cpc).
+  if (i.action.actionType === "update_cpc") {
+    const next = newCpcMicros(i);
+    const ok = next !== null && Number.isInteger(next) && next >= CPC_FLOOR_MICROS;
+    return gate("CURRENCY_SANITY", "blocking", ok,
+      ok ? `CPC ${next} micros (≥ ${CPC_FLOOR_MICROS}, entero).` : `CPC inválido: ${next} micros (mínimo ${CPC_FLOOR_MICROS}, entero).`);
+  }
   const isBudget = i.action.actionType === "budget_update" || i.action.actionType === "create_budget" || i.action.actionType === "create_adset";
   if (!isBudget) return gate("CURRENCY_SANITY", "blocking", true, "No aplica.");
   const next = budgetMicros(i);
@@ -170,7 +220,7 @@ const pausedOnCreate: Gate = (i) => {
 const GATES: Gate[] = [
   killSwitch, capability, actionAllowed, drift, budgetDelta,
   blastRadius, currencySanity, learningPhase, trackingSignal, validateOnly,
-  absBudgetCap, metaLearningReset, pausedOnCreate,
+  absBudgetCap, metaLearningReset, pausedOnCreate, cpcDelta,
 ];
 
 export function runGates(input: GateInput): GateResult[] {

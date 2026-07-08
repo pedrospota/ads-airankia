@@ -300,4 +300,98 @@ describe("gates", () => {
     const passed = runGates(baseInput({ validateResult: { ok: true } }));
     expect(passed.find(r => r.id === "VALIDATE_ONLY")?.status).toBe("pass");
   });
+
+  // ==========================================================================
+  // v2.7 Weekly Loop — maintenance verbs (update_keyword_status/update_cpc) +
+  // the promotion of remove_negatives out of INTERNAL_ACTION_TYPES.
+  // ==========================================================================
+
+  it("CPC_DELTA blocks a delta over maxBudgetDeltaPct and passes within it", () => {
+    const mk = (newCpcBidMicros: number) => baseInput({
+      before: baseBefore({ entityKind: "ad_group", cpcBidMicros: 1_000_000 }),
+      capabilities: { read: true, write: true, actionTypes: ["update_cpc"] },
+      action: { actionType: "update_cpc", entityKind: "ad_group", entityRef: "456", payload: { newCpcBidMicros } },
+    });
+    expect(blockingFailures(runGates(mk(1_400_000))).map(r => r.id)).toContain("CPC_DELTA"); // +40%
+    expect(runGates(mk(1_200_000)).find(r => r.id === "CPC_DELTA")?.status).toBe("pass"); // +20%
+  });
+
+  it("CPC_DELTA passes open («Sin CPC base») when before.cpcBidMicros is null", () => {
+    const rs = runGates(baseInput({
+      before: baseBefore({ entityKind: "ad_group", cpcBidMicros: null }),
+      capabilities: { read: true, write: true, actionTypes: ["update_cpc"] },
+      action: { actionType: "update_cpc", entityKind: "ad_group", entityRef: "456", payload: { newCpcBidMicros: 5_000_000 } },
+    }));
+    const g = rs.find(r => r.id === "CPC_DELTA");
+    expect(g?.status).toBe("pass");
+    expect(g?.evidence).toContain("Sin CPC base");
+  });
+
+  it("CPC_DELTA does not apply to other action types (No aplica)", () => {
+    const rs = runGates(baseInput());
+    expect(rs.find(r => r.id === "CPC_DELTA")?.status).toBe("pass");
+  });
+
+  it("CURRENCY_SANITY: update_cpc floor rejects 9_999, passes 10_000, rejects non-integer, and never trips ABS_BUDGET_CAP", () => {
+    const mk = (newCpcBidMicros: number) => baseInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, maxDailyBudgetMicros: 50_000_000 },
+      before: baseBefore({ entityKind: "ad_group", cpcBidMicros: 1_000_000 }),
+      capabilities: { read: true, write: true, actionTypes: ["update_cpc"] },
+      action: { actionType: "update_cpc", entityKind: "ad_group", entityRef: "456", payload: { newCpcBidMicros } },
+    });
+    expect(blockingFailures(runGates(mk(9_999))).map(r => r.id)).toContain("CURRENCY_SANITY"); // cents-as-micros
+    expect(runGates(mk(10_000)).find(r => r.id === "CURRENCY_SANITY")?.status).toBe("pass");
+    expect(blockingFailures(runGates(mk(10_000.5))).map(r => r.id)).toContain("CURRENCY_SANITY"); // non-integer
+    // update_cpc must never be routed through the budget-only ABS_BUDGET_CAP check,
+    // even with a huge CPC value and a low absolute budget ceiling configured.
+    const rs = runGates(mk(60_000_000));
+    expect(rs.find(r => r.id === "ABS_BUDGET_CAP")?.status).toBe("pass");
+  });
+
+  it("DRIFT: cpcBidMicros both-present blocks on mismatch and passes on match", () => {
+    const before = baseBefore({ entityKind: "ad_group", cpcBidMicros: 1_000_000 });
+    const mismatched = runGates(baseInput({ before, expected: { status: "ENABLED", cpcBidMicros: 900_000 } }));
+    expect(blockingFailures(mismatched).map(r => r.id)).toContain("DRIFT");
+    const matched = runGates(baseInput({ before, expected: { status: "ENABLED", cpcBidMicros: 1_000_000 } }));
+    expect(matched.find(r => r.id === "DRIFT")?.status).toBe("pass");
+  });
+
+  it("DRIFT: a legacy expected baseline without cpcBidMicros does not false-block (risk #3)", () => {
+    const before = baseBefore({ entityKind: "ad_group", cpcBidMicros: 1_000_000 });
+    const rs = runGates(baseInput({ before, expected: { status: "ENABLED", dailyBudgetMicros: 10_000_000 } }));
+    expect(rs.find(r => r.id === "DRIFT")?.status).toBe("pass");
+  });
+
+  it("ACTION_ALLOWED passes the 3 v2.7 verbs under default settings", () => {
+    const cases: Array<{ actionType: string; entityKind: "ad_group" | "campaign"; payload: unknown }> = [
+      { actionType: "update_keyword_status", entityKind: "ad_group",
+        payload: { status: "PAUSED", keywords: [{ resourceName: "customers/1/adGroupCriteria/1~1", text: "shoes" }] } },
+      { actionType: "update_cpc", entityKind: "ad_group", payload: { newCpcBidMicros: 1_000_000 } },
+      { actionType: "remove_negatives", entityKind: "campaign", payload: { resourceNames: ["rn1"] } },
+    ];
+    for (const c of cases) {
+      const rs = runGates(baseInput({
+        action: { actionType: c.actionType as never, entityKind: c.entityKind, entityRef: "1", payload: c.payload as never },
+      }));
+      expect(rs.find(r => r.id === "ACTION_ALLOWED")?.status).toBe("pass");
+    }
+  });
+
+  it("ACTION_ALLOWED still auto-passes remove_entity as internal even with an empty allow-list", () => {
+    const rs = runGates(baseInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: [] },
+      action: { actionType: "remove_entity", entityKind: "campaign", entityRef: "1", payload: { resourceNames: ["rn1"] } },
+    }));
+    const g = rs.find(r => r.id === "ACTION_ALLOWED");
+    expect(g?.status).toBe("pass");
+    expect(g?.evidence).toContain("rollback interno");
+  });
+
+  it("ACTION_ALLOWED now blocks remove_negatives when NOT allow-listed (promotion: no longer internal-only)", () => {
+    const rs = runGates(baseInput({
+      settings: { ...CC_SETTINGS_DEFAULTS, allowedActionTypes: ["pause"] },
+      action: { actionType: "remove_negatives", entityKind: "campaign", entityRef: "123", payload: { resourceNames: ["rn1"] } },
+    }));
+    expect(blockingFailures(rs).map(r => r.id)).toContain("ACTION_ALLOWED");
+  });
 });

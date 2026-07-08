@@ -4,27 +4,40 @@
 export type CcNetwork = "google_ads" | "meta_ads";
 export type CcEntityKind = "campaign" | "ad_group" | "adset" | "ad";
 
-// User-selectable action types. "remove_negatives" is INTERNAL-ONLY: it exists
-// so rollbacks of add_negatives can be expressed as an action; it is never
-// user-proposable and never allowed by cc_settings.allowed_action_types.
+// User-selectable action types. "remove_entity" is the sole INTERNAL-ONLY type
+// left: it exists so rollbacks of create_* actions can be expressed as an
+// action; it is never user-proposable and never allowed by cc_settings.
+// allowed_action_types. "remove_negatives" is NOT internal-only (v2.7
+// promotion) — it is a normal user-proposable verb that ALSO doubles as the
+// internal rollback of add_negatives; that rollback usage bypasses
+// ACTION_ALLOWED via the rollback path's hard-blocker filter (executor.ts),
+// not via INTERNAL_ACTION_TYPES.
 export type CcActionType = "budget_update" | "pause" | "enable" | "add_negatives";
 export type CcCreateActionType =
   | "create_budget" | "create_campaign" | "create_ad_group" | "create_keywords" | "create_ad" | "create_adset";
-export type CcInternalActionType = CcActionType | CcCreateActionType | "remove_negatives" | "remove_entity";
+/** v2.7 maintenance verbs: batched keyword pause/reactivate + ad-group CPC edit. Both user-proposable. */
+export type CcMaintenanceActionType = "update_keyword_status" | "update_cpc";
+export type CcInternalActionType =
+  CcActionType | CcCreateActionType | CcMaintenanceActionType | "remove_negatives" | "remove_entity";
 
 export const CC_ACTION_TYPES: readonly CcActionType[] = Object.freeze(["budget_update", "pause", "enable", "add_negatives"]);
 
+/** Element type of the cc_settings allow-list — every user-proposable verb. */
+export type CcSettingsActionType = CcActionType | CcCreateActionType | CcMaintenanceActionType | "remove_negatives";
+
 /**
- * Settings-permitted action types: the v1 CC_ACTION_TYPES plus the 5 user-proposable
- * create_* types emitted by the v2 blueprint flow. Deliberately excludes
- * "remove_negatives"/"remove_entity" (internal-only rollback types, never
- * user-proposable, always allowed by gates regardless of cc_settings).
+ * Settings-permitted action types: the v1 CC_ACTION_TYPES, the 5 user-proposable
+ * create_* types emitted by the v2 blueprint flow, and (v2.7) the 2 new
+ * maintenance verbs plus the promoted "remove_negatives". Deliberately excludes
+ * "remove_entity" — the sole remaining internal-only rollback type, never
+ * user-proposable, always allowed by gates regardless of cc_settings.
  * Used for the cc_settings.allowed_action_types allow-list (load + save), NOT for
  * validating manual/v1 action creation (that still uses CC_ACTION_TYPES).
  */
-export const CC_SETTINGS_ACTION_TYPES: readonly (CcActionType | CcCreateActionType)[] = Object.freeze([
+export const CC_SETTINGS_ACTION_TYPES: readonly CcSettingsActionType[] = Object.freeze([
   ...CC_ACTION_TYPES,
   "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad", "create_adset",
+  "update_keyword_status", "update_cpc", "remove_negatives",
 ]);
 
 export type CcActionStatus =
@@ -37,8 +50,25 @@ export interface BudgetUpdatePayload { newDailyBudgetMicros: number }
 export interface NegativesPayload {
   negatives: Array<{ text: string; match: "EXACT" | "PHRASE" | "BROAD" }>;
 }
-/** pause/enable carry an empty payload. remove_negatives carries resourceNames. */
-export interface RemoveNegativesPayload { resourceNames: string[] }
+/**
+ * pause/enable carry an empty payload. remove_negatives carries the
+ * resourceNames to remove plus an optional `removed` snapshot (text+match per
+ * negative) — `removed` is what makes rollback (re-add) possible. The internal
+ * rollback-of-add_negatives caller passes only resourceNames, so its own
+ * rollback recipe is null (no rollback-of-rollback).
+ */
+export interface RemoveNegativesPayload {
+  resourceNames: string[];
+  removed?: Array<{ text: string; match: "EXACT" | "PHRASE" | "BROAD" }>;
+}
+/** v2.7: batched pause/reactivate of positive ad-group keyword criteria (self-inverse — rollback is the same verb with inverted status). */
+export interface UpdateKeywordStatusPayload {
+  status: "PAUSED" | "ENABLED";
+  /** `text` rides along for ledger/Bitácora legibility only; not used by the mutation. */
+  keywords: Array<{ resourceName: string; text: string }>;
+}
+/** v2.7: ad-group cpcBidMicros change (integer micros). */
+export interface UpdateCpcPayload { newCpcBidMicros: number }
 export type BiddingStrategy = "MAXIMIZE_CONVERSIONS" | "TARGET_CPA" | "TARGET_ROAS";
 /** A parent reference: either a live Google resourceName or a `tmp:<localRef>` placeholder. */
 export type CcRef = string;
@@ -79,6 +109,7 @@ export interface MetaCreateAdPayload {
 export interface RemoveEntityPayload { resourceNames: string[] }
 export type CcPayload =
   | BudgetUpdatePayload | NegativesPayload | RemoveNegativesPayload
+  | UpdateKeywordStatusPayload | UpdateCpcPayload
   | CreateBudgetPayload | CreateCampaignPayload | CreateAdGroupPayload
   | CreateKeywordsPayload | CreateAdPayload
   | MetaCreateCampaignPayload | MetaCreateAdsetPayload | MetaCreateAdPayload
@@ -113,6 +144,7 @@ export interface EntitySnapshot {
   name?: string | null;
   status?: "ENABLED" | "PAUSED" | "REMOVED" | "ARCHIVED" | "UNKNOWN";
   dailyBudgetMicros?: number | null;   // ALWAYS micros, both networks
+  cpcBidMicros?: number | null;        // ad_group only; null = smart-bidding (no manual CPC)
   budgetResourceName?: string | null;  // Google: customers/x/campaignBudgets/y
   currency?: string | null;
   learningPhase?: "LEARNING" | "LIMITED" | "STABLE" | "UNKNOWN";
@@ -180,7 +212,7 @@ export interface CcSettingsValues {
   maxBudgetDeltaPct: number;
   maxActionsPerAccountDay: number;
   requireTwoStep: boolean;
-  allowedActionTypes: (CcActionType | CcCreateActionType)[];
+  allowedActionTypes: CcSettingsActionType[];
   /** Absolute per-entity daily-budget ceiling in micros; null = disabled. */
   maxDailyBudgetMicros: number | null;
   watchHours: number;

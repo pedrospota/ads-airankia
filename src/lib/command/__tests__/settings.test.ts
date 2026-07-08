@@ -85,6 +85,27 @@ describe("rowToSettings", () => {
     expect(actionAllowed?.status).toBe("pass");
   });
 
+  // v2.7 Weekly Loop: 2 new maintenance verbs + the promoted remove_negatives
+  // join the settings allow-list via migration 010.
+  const V27_TYPES = ["update_keyword_status", "update_cpc", "remove_negatives"] as const;
+
+  it("preserves the 3 v2.7 verbs loaded from a migrated DB row (does not strip them)", () => {
+    const v = rowToSettings({
+      allowedActionTypes: ["budget_update", ...V27_TYPES],
+    });
+    for (const t of V27_TYPES) {
+      expect(v.allowedActionTypes).toContain(t);
+    }
+    expect(v.allowedActionTypes).toContain("budget_update");
+  });
+
+  it("defaults (null row / no settings row) include the 3 v2.7 verbs", () => {
+    const v = rowToSettings(null);
+    for (const t of V27_TYPES) {
+      expect(v.allowedActionTypes).toContain(t);
+    }
+  });
+
   it("end-to-end: create_campaign passes ACTION_ALLOWED using settings loaded via rowToSettings(null)", () => {
     const settings = rowToSettings(null);
     const before: EntitySnapshot = {

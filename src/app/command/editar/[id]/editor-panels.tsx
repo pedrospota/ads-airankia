@@ -15,7 +15,11 @@ import { MICROS_PER_UNIT } from "@/lib/command/types";
 import type { GoogleSearchEditDoc } from "@/lib/command/edit/schema";
 import {
   blankNewAd,
+  queueRemoveNegative,
   replacementFromBase,
+  setKeywordDesiredStatus,
+  undoRemoveNegative,
+  unitsToCpcMicros,
   updateAd,
   updateAdGroup,
   updateNewAd,
@@ -60,6 +64,26 @@ const removeBtnStyle: React.CSSProperties = {
   lineHeight: 1,
   padding: 0,
 };
+
+// v2.7 pruning — small inline text buttons for the live-keyword/live-negative
+// row controls ([Pausar]/[Reactivar]/[Quitar]/[Deshacer]). Color is set per
+// call site (amber for a pending pause, green/accent for a pending reactivate,
+// danger for Quitar, muted for Deshacer).
+const rowActionBtnStyle: React.CSSProperties = {
+  border: "none",
+  background: "none",
+  fontSize: 11.5,
+  fontWeight: 600,
+  cursor: "pointer",
+  padding: "2px 4px",
+  whiteSpace: "nowrap",
+};
+
+/** v2.7 — CPC needs 2 decimal places always (unlike formatMoney's whole-unit budget
+ * formatting): a $0.65 live CPC must never render as "$1" or "$0". */
+function formatCpc(micros: number): string {
+  return `$${(micros / MICROS_PER_UNIT).toFixed(2)}`;
+}
 
 function Chip({ label, active, onClick }: { label: string; active?: boolean; onClick: () => void }) {
   return (
@@ -393,6 +417,54 @@ function CampaignPanel({ doc, onChange }: { doc: GoogleSearchEditDoc; onChange: 
           ))}
         </ul>
       ) : null}
+
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${UI.border}` }}>
+        <SectionLabel style={{ marginBottom: 10 }}>Negativas de campaña en vivo ({c.baseNegatives.length})</SectionLabel>
+        {c.baseNegatives.length === 0 ? (
+          <p style={{ fontSize: 13, color: UI.faint }}>Sin negativas de campaña en vivo.</p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {c.baseNegatives.map((n) => {
+              const pending = c.removeNegatives.includes(n.resourceName);
+              return (
+                <li
+                  key={n.resourceName}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, padding: "3px 0" }}
+                >
+                  <span style={{ color: pending ? UI.faint : UI.muted, textDecoration: pending ? "line-through" : "none" }}>
+                    −{n.text} <span style={{ color: UI.faint }}>· {MATCH_LABEL[n.match]}</span>
+                  </span>
+                  {pending ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11.5, color: UI.faint }}>se quitará</span>
+                      <button
+                        type="button"
+                        onClick={() => onChange((d) => undoRemoveNegative(d, n.resourceName))}
+                        style={{ ...rowActionBtnStyle, color: UI.muted }}
+                      >
+                        Deshacer
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onChange((d) => queueRemoveNegative(d, n.resourceName))}
+                      style={{ ...rowActionBtnStyle, color: UI.danger }}
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {c.removeNegatives.length > 0 ? (
+          <p style={{ fontSize: 12, color: UI.faint, marginTop: 10 }}>
+            Pausar es reversible; quitar negativas re-crea recursos nuevos al revertir.
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -403,15 +475,29 @@ function CampaignPanel({ doc, onChange }: { doc: GoogleSearchEditDoc; onChange: 
 
 function AdGroupPanel({
   group,
+  currency,
   onChange,
   onSelect,
 }: {
   group: EditAdGroup;
+  currency: string | null;
   onChange: DocUpdater;
   onSelect: (s: NodeSelection) => void;
 }) {
+  // NodePanel keys this component by group.resourceName, so this local state
+  // resets whenever the operator selects a different ad group — it never
+  // shows a stale CPC input carried over from the previously viewed group.
+  const [cpcInput, setCpcInput] = useState(
+    group.desired.cpcBidMicros != null ? String(group.desired.cpcBidMicros / MICROS_PER_UNIT) : ""
+  );
+
   function setStatus(status: "ENABLED" | "PAUSED") {
     onChange((d) => updateAdGroup(d, group.resourceName, (g) => ({ ...g, desired: { ...g.desired, status } })));
+  }
+  function commitCpc(raw: string) {
+    setCpcInput(raw.replace(/[^0-9.]/g, ""));
+    const cpcBidMicros = unitsToCpcMicros(raw);
+    onChange((d) => updateAdGroup(d, group.resourceName, (g) => ({ ...g, desired: { ...g.desired, cpcBidMicros } })));
   }
   function addAd() {
     const na = blankNewAd();
@@ -426,6 +512,30 @@ function AdGroupPanel({
 
       <Field label="Estado">
         <StatusToggle value={group.desired.status} base={group.base.status} onChange={setStatus} />
+      </Field>
+
+      <Field label="CPC máx.">
+        {group.base.cpcBidMicros == null ? (
+          <p style={{ fontSize: 13, color: UI.muted, margin: 0 }}>
+            <b style={{ color: UI.text }}>La campaña usa puja automática.</b>
+          </p>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="text"
+                inputMode="decimal"
+                style={{ ...inputStyle, fontFamily: UI.fontMono, fontVariantNumeric: "tabular-nums", fontSize: 16, width: 120 }}
+                value={cpcInput}
+                onChange={(e) => commitCpc(e.target.value)}
+              />
+              <span style={{ color: UI.faint, fontSize: 13 }}>{currency ?? "MXN"}</span>
+            </div>
+            <span style={{ display: "block", fontSize: 11.5, color: UI.faint, marginTop: 6 }}>
+              En vivo: {formatCpc(group.base.cpcBidMicros)}
+            </span>
+          </>
+        )}
       </Field>
 
       <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${UI.border}` }}>
@@ -535,13 +645,54 @@ function KeywordsPanel({ group, onChange }: { group: EditAdGroup; onChange: DocU
         {group.baseKeywords.length === 0 ? (
           <p style={{ fontSize: 13, color: UI.faint }}>Sin palabras clave en vivo.</p>
         ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4, opacity: 0.7 }}>
-            {group.baseKeywords.map((k) => (
-              <li key={k.resourceName} style={{ fontSize: 12.5, color: UI.muted }}>
-                {k.negative ? "−" : ""}
-                {k.text} <span style={{ color: UI.faint }}>· {MATCH_LABEL[k.match]}</span>
-              </li>
-            ))}
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {group.baseKeywords.map((k) => {
+              // Negatives never get a status control — the differ throws if a
+              // negative ever carries a desiredStatus (edit/diff.ts guard).
+              const pending = !k.negative && k.desiredStatus !== undefined && k.desiredStatus !== k.status;
+              return (
+                <li
+                  key={k.resourceName}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: UI.muted, padding: "3px 0" }}
+                >
+                  <span>
+                    {k.negative ? "−" : ""}
+                    {k.text} <span style={{ color: UI.faint }}>· {MATCH_LABEL[k.match]}</span>
+                  </span>
+                  {k.negative ? null : pending ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, color: k.desiredStatus === "PAUSED" ? UI.warn : UI.accent }}>
+                        {k.desiredStatus === "PAUSED" ? "se pausará" : "se reactivará"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onChange((d) => setKeywordDesiredStatus(d, group.resourceName, k.resourceName, undefined))}
+                        style={{ ...rowActionBtnStyle, color: UI.muted }}
+                      >
+                        Deshacer
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange((d) =>
+                          setKeywordDesiredStatus(
+                            d,
+                            group.resourceName,
+                            k.resourceName,
+                            k.status === "ENABLED" ? "PAUSED" : "ENABLED"
+                          )
+                        )
+                      }
+                      style={{ ...rowActionBtnStyle, color: k.status === "ENABLED" ? UI.warn : UI.accent }}
+                    >
+                      {k.status === "ENABLED" ? "Pausar" : "Reactivar"}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -661,7 +812,18 @@ export function NodePanel({
   }
 
   if (selected.kind === "adGroup") {
-    return <AdGroupPanel group={group} onChange={onChange} onSelect={onSelect} />;
+    // Keyed by resourceName so AdGroupPanel's local CPC-input state resets
+    // when the operator switches to a different ad group in the tree, rather
+    // than carrying over the previously selected group's draft text.
+    return (
+      <AdGroupPanel
+        key={group.resourceName}
+        group={group}
+        currency={doc.campaign.base.currency}
+        onChange={onChange}
+        onSelect={onSelect}
+      />
+    );
   }
   if (selected.kind === "keywords") {
     return <KeywordsPanel group={group} onChange={onChange} />;

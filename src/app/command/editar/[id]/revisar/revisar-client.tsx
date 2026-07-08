@@ -43,6 +43,9 @@ import type {
   NegativesPayload,
   CreateKeywordsPayload,
   CreateAdPayload,
+  UpdateKeywordStatusPayload,
+  UpdateCpcPayload,
+  RemoveNegativesPayload,
 } from "@/lib/command/types";
 
 type EditAdGroupDoc = GoogleSearchEditDoc["campaign"]["adGroups"][number];
@@ -55,6 +58,10 @@ const ACTION_LABEL: Record<string, string> = {
   add_negatives: "Agregar negativas",
   create_keywords: "Añadir palabras clave",
   create_ad: "Crear anuncio (RSA)",
+  // v2.7 maintenance verbs (weekly loop: pruning + CPC edits + live-negative removal)
+  update_keyword_status: "Pausar/Reactivar keywords",
+  update_cpc: "Cambiar CPC",
+  remove_negatives: "Quitar negativas",
 };
 
 const ENTITY_KIND_LABEL: Record<string, string> = {
@@ -215,6 +222,33 @@ function KeywordChips({ items, negative }: { items: Array<{ text: string; match:
   );
 }
 
+/** v2.7 — plain text chips for update_keyword_status's payload (resourceName + text
+ * only, no match type carried — match isn't needed to identify a pause/reactivate). */
+function TextChips({ items }: { items: string[] }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {items.map((text, i) => (
+        <span
+          key={`${text}-${i}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            borderRadius: 999,
+            padding: "3px 9px",
+            fontSize: 12,
+            fontFamily: UI.fontMono,
+            color: UI.text,
+            background: UI.surface2,
+            border: `1px solid ${UI.border}`,
+          }}
+        >
+          {text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function AdCreativeView({
   finalUrl,
   headlines,
@@ -281,6 +315,36 @@ function PayloadView({ action }: { action: EditCompiledAction }) {
     case "add_negatives": {
       const p = action.payload as NegativesPayload;
       return <KeywordChips items={p.negatives} negative />;
+    }
+    case "update_keyword_status": {
+      const p = action.payload as UpdateKeywordStatusPayload;
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Field label="Estado nuevo">{p.status === "PAUSED" ? "Pausada" : "Activa"}</Field>
+          <Field label={`Palabras clave (${p.keywords.length})`}>
+            <TextChips items={p.keywords.map((k) => k.text)} />
+          </Field>
+        </div>
+      );
+    }
+    case "update_cpc": {
+      const p = action.payload as UpdateCpcPayload;
+      const before = action.expected?.cpcBidMicros;
+      return (
+        <FieldGrid>
+          <Field label="CPC anterior">{typeof before === "number" ? money(before) : before === null ? "(auto)" : "—"}</Field>
+          <Field label="CPC nuevo">{money(p.newCpcBidMicros)}</Field>
+        </FieldGrid>
+      );
+    }
+    case "remove_negatives": {
+      const p = action.payload as RemoveNegativesPayload;
+      const removed = p.removed ?? [];
+      return removed.length > 0 ? (
+        <KeywordChips items={removed} negative />
+      ) : (
+        <span style={{ color: UI.faint, fontSize: 12.5 }}>{p.resourceNames.length} negativa(s)</span>
+      );
     }
     case "create_keywords": {
       const p = action.payload as CreateKeywordsPayload;

@@ -259,3 +259,60 @@ export function suggestContext(state: BuilderState, accountName: string | null, 
   ].filter((p): p is string => Boolean(p));
   return parts.join("\n");
 }
+
+/** Convert micros back to currency units as a string. Inverse of unitsToMicros. */
+export function microsToUnits(micros: number): string {
+  const units = micros / MICROS_PER_UNIT;
+  return units.toString();
+}
+
+/** Inverse of buildDoc — reconstructs BuilderState from a CcBlueprintDoc.
+ * All writable fields are sourced from the doc; UI-only fields (accountRef, goal) come from prev.
+ * Fields not present in doc (undefined languageCode) are filled with defaults.
+ */
+export function stateFromDoc(doc: CcBlueprintDoc, prev: BuilderState): BuilderState {
+  // Extract the single ad group and ad (builder only supports one of each)
+  const adGroup = doc.campaign.adGroups[0];
+  const ad = adGroup.ads[0];
+
+  // Parse bidding strategy and target values
+  let bidding: BiddingStrategy = "MAXIMIZE_CONVERSIONS";
+  let targetCpaAmount = "";
+  let targetRoas = "";
+
+  if (doc.campaign.bidding.strategy === "TARGET_CPA") {
+    bidding = "TARGET_CPA";
+    targetCpaAmount = microsToUnits(doc.campaign.bidding.targetCpaMicros || 0);
+  } else if (doc.campaign.bidding.strategy === "TARGET_ROAS") {
+    bidding = "TARGET_ROAS";
+    targetRoas = (doc.campaign.bidding.targetRoas || 0).toString();
+  }
+
+  return {
+    // UI-only fields: preserved from prev
+    accountRef: prev.accountRef,
+    goal: prev.goal,
+
+    // Campaign fields
+    campaignName: doc.campaign.name,
+    dailyAmount: microsToUnits(doc.campaign.budget.dailyMicros),
+    bidding,
+    targetCpaAmount,
+    targetRoas,
+    countryCodes: doc.campaign.geo.countryCodes,
+    presenceOnly: doc.campaign.geo.presenceOnly,
+    languageCode: doc.campaign.languageCode || DEFAULT_LANGUAGE,
+
+    // Ad group fields
+    groupName: adGroup.name,
+    keywords: adGroup.keywords,
+    negatives: adGroup.negatives,
+
+    // Ad fields (extract text from headline/description objects)
+    finalUrl: ad.finalUrl,
+    headlines: ad.headlines.map((h) => h.text),
+    descriptions: ad.descriptions.map((d) => d.text),
+    path1: ad.path1 || "",
+    path2: ad.path2 || "",
+  };
+}

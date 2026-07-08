@@ -130,9 +130,17 @@ const COMMAND_DESTINATIONS: Destination[] = [
 const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: "admin" };
 const ADMIN_DESTINATION: Destination = { label: "Admin", href: "/admin", section: "Cuenta" };
 
+// v3.0 — Equipo (spec §d): admin-only nav entry into /command/equipo. Spliced
+// onto COMMAND_GROUP the same way ADMIN_NAV_ITEM is spliced onto "Cuenta" —
+// operators (commandCenter=true, isPlatformAdmin=false) never see it.
+const EQUIPO_NAV_ITEM: NavItem = { href: "/command/equipo", label: "Equipo", icon: "comando" };
+
 export function navGroups(commandCenter: boolean, isPlatformAdmin: boolean): NavGroup[] {
+  const commandGroup: NavGroup = isPlatformAdmin
+    ? { ...COMMAND_GROUP, items: [...COMMAND_GROUP.items, EQUIPO_NAV_ITEM] }
+    : COMMAND_GROUP;
   const base = commandCenter
-    ? [...NAV_GROUPS.slice(0, 1), COMMAND_GROUP, ...NAV_GROUPS.slice(1)]
+    ? [...NAV_GROUPS.slice(0, 1), commandGroup, ...NAV_GROUPS.slice(1)]
     : NAV_GROUPS;
   if (!isPlatformAdmin) return base;
   return base.map((g) =>

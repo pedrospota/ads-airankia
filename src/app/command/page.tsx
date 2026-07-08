@@ -179,7 +179,11 @@ export default async function CommandPage() {
         </Card>
 
         {workspaceId && settings ? (
-          <ResumenClient workspaceId={workspaceId} initialSettings={settings} />
+          <ResumenClient
+            workspaceId={workspaceId}
+            initialSettings={settings}
+            isAdmin={access.role === "admin"}
+          />
         ) : null}
       </main>
     </div>

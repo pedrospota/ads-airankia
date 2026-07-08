@@ -32,6 +32,12 @@ describe("navGroups — role-aware nav (spec §a finding #1)", () => {
   test("Conexiones stays in Cuenta for everyone (only Admin was gated)", () => {
     expect(allHrefs(navGroups(false, false))).toContain("/conexiones");
   });
+
+  test("Equipo del Centro de Mando: admin-only — operators never see it", () => {
+    expect(allHrefs(navGroups(true, true))).toContain("/command/equipo");
+    expect(allHrefs(navGroups(true, false))).not.toContain("/command/equipo");
+    expect(allHrefs(navGroups(false, true))).not.toContain("/command/equipo");
+  });
 });
 
 describe("paletteDestinations — same matrix for ⌘K", () => {

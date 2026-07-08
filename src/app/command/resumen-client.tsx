@@ -8,9 +8,12 @@ import type { CcSettingsValues } from "@/lib/command/types";
 export default function ResumenClient({
   workspaceId,
   initialSettings,
+  isAdmin,
 }: {
   workspaceId: string;
   initialSettings: CcSettingsValues;
+  /** v3.0 — only platform admins may pause/resume the kill switch; operators see the status only. */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [settings, setSettings] = useState(initialSettings);
@@ -57,14 +60,20 @@ export default function ResumenClient({
         <Badge tone={settings.executionsPaused ? "danger" : "ok"} dot>
           {settings.executionsPaused ? "Ejecuciones PAUSADAS (kill switch)" : "Ejecuciones habilitadas"}
         </Badge>
-        {settings.executionsPaused ? (
-          <PrimaryButton disabled={busy} onClick={() => save({ executions_paused: false })}>
-            Reanudar ejecuciones
-          </PrimaryButton>
+        {isAdmin ? (
+          settings.executionsPaused ? (
+            <PrimaryButton disabled={busy} onClick={() => save({ executions_paused: false })}>
+              Reanudar ejecuciones
+            </PrimaryButton>
+          ) : (
+            <GhostDangerButton disabled={busy} onClick={() => save({ executions_paused: true })}>
+              Pausar todo (kill switch)
+            </GhostDangerButton>
+          )
         ) : (
-          <GhostDangerButton disabled={busy} onClick={() => save({ executions_paused: true })}>
-            Pausar todo (kill switch)
-          </GhostDangerButton>
+          <span style={{ color: UI.muted, fontSize: 13 }}>
+            Solo un administrador de plataforma puede pausar o reanudar las ejecuciones.
+          </span>
         )}
         <span style={{ color: UI.muted, fontSize: 13 }}>
           Δ presupuesto máx {settings.maxBudgetDeltaPct}% · {settings.maxActionsPerAccountDay} acciones/cuenta/día

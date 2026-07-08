@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCommandAccess, commandDenied } from "@/lib/command/access";
 import { runSweep } from "@/lib/command/verify";
+import { notifyEnabled, notifyNovedades } from "@/lib/command/notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,10 @@ export async function POST(_request: NextRequest) {
   if (!access) return commandDenied();
   try {
     const result = await runSweep(access);
+    // v3.0: external notification is a SIDE EFFECT and lives here in the
+    // route, not in verify.ts (READ-only covenant) — fire-and-forget so a
+    // Telegram outage can never block or fail the sweep response.
+    if (notifyEnabled()) void notifyNovedades(access.workspaceIds).catch(() => {});
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });

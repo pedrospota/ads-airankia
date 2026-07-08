@@ -19,57 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { UI } from "./ui-kit";
-
-/* ---------------------------------------------------------------------------
- * Nav destinations — the searchable index. `section` groups them the way the
- * sidebar does; both label + section feed the substring filter.
- * ------------------------------------------------------------------------- */
-
-interface Destination {
-  label: string;
-  href: string;
-  section: string;
-}
-
-const DESTINATIONS: Destination[] = [
-  // Rendimiento
-  { label: "Cockpit", href: "/performance", section: "Rendimiento" },
-  { label: "Recomendaciones", href: "/performance/recomendaciones", section: "Rendimiento" },
-  { label: "Diagnostico", href: "/performance/diagnostics", section: "Rendimiento" },
-  { label: "Auditoria MCC", href: "/performance/auditoria", section: "Rendimiento" },
-  { label: "Simulacion", href: "/performance/simulacion", section: "Rendimiento" },
-  { label: "Backtest", href: "/performance/backtest", section: "Rendimiento" },
-  { label: "Playbook", href: "/performance/playbook", section: "Rendimiento" },
-  { label: "QS", href: "/performance/qs", section: "Rendimiento" },
-  { label: "Datalake", href: "/performance/datalake", section: "Rendimiento" },
-  { label: "Costos", href: "/performance/costos", section: "Rendimiento" },
-  { label: "Salud", href: "/performance/salud", section: "Rendimiento" },
-  { label: "Ajustes", href: "/performance/ajustes", section: "Rendimiento" },
-  { label: "Introduccion", href: "/performance/introduccion", section: "Rendimiento" },
-  // Seguridad
-  { label: "Monitor", href: "/security", section: "Seguridad" },
-  { label: "Equipo", href: "/security/equipo", section: "Seguridad" },
-  { label: "Dominios", href: "/security/dominios", section: "Seguridad" },
-  // Principal
-  { label: "Marcas", href: "/brands", section: "Principal" },
-  // Inteligencia
-  { label: "Ad Spy", href: "/spy", section: "Inteligencia" },
-  { label: "Copiloto", href: "/copiloto", section: "Inteligencia" },
-  { label: "Keywords", href: "/keywords", section: "Inteligencia" },
-  // Cuenta
-  { label: "Conexiones", href: "/conexiones", section: "Cuenta" },
-  { label: "Admin", href: "/admin", section: "Cuenta" },
-];
-
-// Centro de Mando (beta): only appended to the searchable index when
-// `commandCenter` (threaded from AppShell's flag+admin gate) is true.
-const COMMAND_DESTINATIONS: Destination[] = [
-  { label: "Centro de Mando · Resumen", href: "/command", section: "Centro de Mando" },
-  { label: "Centro de Mando · Constructor", href: "/command/crear", section: "Centro de Mando" },
-  { label: "Centro de Mando · Acciones", href: "/command/acciones", section: "Centro de Mando" },
-  { label: "Centro de Mando · Cuentas", href: "/command/cuentas", section: "Centro de Mando" },
-  { label: "Centro de Mando · Bitácora", href: "/command/bitacora", section: "Centro de Mando" },
-];
+import { paletteDestinations, type Destination } from "./nav-config";
 
 /** Case-insensitive substring match on label + section. */
 function filterDestinations(query: string, destinations: Destination[]): Destination[] {
@@ -88,10 +38,12 @@ export function CommandPalette({
   open,
   onClose,
   commandCenter,
+  isPlatformAdmin,
 }: {
   open: boolean;
   onClose: () => void;
   commandCenter?: boolean;
+  isPlatformAdmin?: boolean;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -100,8 +52,8 @@ export function CommandPalette({
   const [active, setActive] = useState(0);
 
   const destinations = useMemo(
-    () => (commandCenter ? [...DESTINATIONS, ...COMMAND_DESTINATIONS] : DESTINATIONS),
-    [commandCenter]
+    () => paletteDestinations(commandCenter ?? false, isPlatformAdmin ?? false),
+    [commandCenter, isPlatformAdmin]
   );
   const results = useMemo(
     () => filterDestinations(query, destinations),
@@ -373,7 +325,8 @@ export function CommandPalette({
 
 export function CommandPaletteMount({
   commandCenter,
-}: { commandCenter?: boolean } = {}) {
+  isPlatformAdmin,
+}: { commandCenter?: boolean; isPlatformAdmin?: boolean } = {}) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -392,6 +345,7 @@ export function CommandPaletteMount({
       open={open}
       onClose={() => setOpen(false)}
       commandCenter={commandCenter}
+      isPlatformAdmin={isPlatformAdmin}
     />
   );
 }

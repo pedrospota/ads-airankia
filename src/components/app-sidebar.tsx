@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./theme-provider";
 import { UI } from "./ui-kit";
+import { navGroups, type NavGroup } from "./nav-config";
 
 const SIDEBAR_WIDTH = 220;
 
@@ -187,92 +188,6 @@ function Icon({ name }: { name: string }) {
   );
 }
 
-/* ---------------------------------------------------------------------------
- * Navigation model
- * ------------------------------------------------------------------------- */
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: string;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Principal",
-    items: [{ href: "/brands", label: "Marcas", icon: "brands" }],
-  },
-  {
-    label: "Asistentes",
-    items: [
-      { href: "/copiloto", label: "Copiloto", icon: "copiloto" },
-      { href: "/keywords", label: "Keywords", icon: "keywords" },
-    ],
-  },
-  {
-    label: "Rendimiento",
-    items: [
-      { href: "/performance/introduccion", label: "Introduccion", icon: "introduccion" },
-      { href: "/performance", label: "Cockpit", icon: "cockpit" },
-      { href: "/performance/recomendaciones", label: "Recomendaciones", icon: "recomendaciones" },
-      { href: "/performance/diagnostics", label: "Diagnostico", icon: "diagnostics" },
-      { href: "/performance/auditoria", label: "Auditoria MCC", icon: "auditoria" },
-      { href: "/performance/simulacion", label: "Simulacion", icon: "simulacion" },
-      { href: "/performance/backtest", label: "Backtest", icon: "backtest" },
-      { href: "/performance/playbook", label: "Playbook", icon: "playbook" },
-      { href: "/performance/qs", label: "QS", icon: "qs" },
-      { href: "/performance/datalake", label: "Datalake", icon: "datalake" },
-      { href: "/performance/costos", label: "Costos", icon: "costos" },
-      { href: "/performance/salud", label: "Salud", icon: "salud" },
-      { href: "/performance/ajustes", label: "Ajustes", icon: "ajustes" },
-    ],
-  },
-  {
-    label: "Seguridad",
-    items: [
-      { href: "/security", label: "Monitor", icon: "monitor" },
-      { href: "/security/equipo", label: "Equipo", icon: "equipo" },
-      { href: "/security/dominios", label: "Dominios", icon: "dominios" },
-    ],
-  },
-  {
-    label: "Inteligencia",
-    items: [{ href: "/spy", label: "Ad Spy", icon: "spy" }],
-  },
-  {
-    label: "Cuenta",
-    items: [
-      { href: "/conexiones", label: "Conexiones", icon: "conexiones" },
-      { href: "/admin", label: "Admin", icon: "admin" },
-    ],
-  },
-];
-
-// Centro de Mando (beta): additive group, spliced in right after "Principal"
-// only when the flag+admin gate (threaded from AppShell) is on. NAV_GROUPS
-// itself stays untouched so the ungated nav is byte-identical.
-const COMMAND_GROUP: NavGroup = {
-  label: "Centro de Mando",
-  items: [
-    { href: "/command", label: "Resumen", icon: "comando" },
-    { href: "/command/crear", label: "Constructor", icon: "comando" },
-    { href: "/command/acciones", label: "Acciones", icon: "comando" },
-    { href: "/command/cuentas", label: "Cuentas", icon: "comando" },
-    { href: "/command/bitacora", label: "Bitácora", icon: "comando" },
-  ],
-};
-
-function navGroups(commandCenter: boolean): NavGroup[] {
-  return commandCenter
-    ? [...NAV_GROUPS.slice(0, 1), COMMAND_GROUP, ...NAV_GROUPS.slice(1)]
-    : NAV_GROUPS;
-}
-
 /**
  * Longest-prefix active match across ALL items so e.g.
  * /performance/recomendaciones highlights "Recomendaciones" and not
@@ -299,13 +214,15 @@ function findActiveHref(pathname: string, groups: NavGroup[]): string | null {
 function SidebarContent({
   onNavigate,
   commandCenter,
+  isPlatformAdmin,
 }: {
   onNavigate?: () => void;
   commandCenter?: boolean;
+  isPlatformAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const { colors } = useTheme();
-  const groups = navGroups(commandCenter ?? false);
+  const groups = navGroups(commandCenter ?? false, isPlatformAdmin ?? false);
   const activeHref = findActiveHref(pathname ?? "", groups);
   // Hover = card surface (#0E0E11 dark), active = surface2 (#131316 dark).
   const hoverBg = colors.bgCard;
@@ -480,7 +397,10 @@ function SidebarContent({
  * - Desktop (md+): sticky column, always visible, ~230px wide.
  * - Mobile: hidden by default; a floating toggle opens it as an overlay.
  */
-export function AppSidebar({ commandCenter }: { commandCenter?: boolean } = {}) {
+export function AppSidebar({
+  commandCenter,
+  isPlatformAdmin,
+}: { commandCenter?: boolean; isPlatformAdmin?: boolean } = {}) {
   const pathname = usePathname();
   const { colors } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -515,7 +435,7 @@ export function AppSidebar({ commandCenter }: { commandCenter?: boolean } = {}) 
           height: "100vh",
         }}
       >
-        <SidebarContent commandCenter={commandCenter} />
+        <SidebarContent commandCenter={commandCenter} isPlatformAdmin={isPlatformAdmin} />
       </aside>
 
       {/* Mobile toggle */}
@@ -616,6 +536,7 @@ export function AppSidebar({ commandCenter }: { commandCenter?: boolean } = {}) 
             <SidebarContent
               onNavigate={() => setMobileOpen(false)}
               commandCenter={commandCenter}
+              isPlatformAdmin={isPlatformAdmin}
             />
           </aside>
         </div>

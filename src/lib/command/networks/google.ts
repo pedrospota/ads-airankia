@@ -3,7 +3,7 @@
 // (AdapterAuth.googleRefreshToken). NEVER reads GOOGLE_ADS_REFRESH_TOKEN.
 import { mintAccessToken } from "@/lib/ads-connections";
 import type {
-  AdapterAuth, AdapterCapabilities, CcActionInput, CcEntityKind,
+  AdapterAuth, AdapterCapabilities, CampaignMetrics, CcActionInput, CcEntityKind, CcMetricsRange,
   CreateAdGroupPayload, CreateAdPayload, CreateBudgetPayload, CreateCampaignPayload,
   CreateKeywordsPayload, EntitySnapshot, ExecuteResult, NetworkAdapter,
   RemoveEntityPayload, RollbackRecipe,
@@ -413,6 +413,32 @@ export const googleAdapter: NetworkAdapter = {
     }
 
     return { operation: mutation.endpoint, request: mutation.body, response, resourceNames };
+  },
+
+  // v2.6 sibling read (design spec §a, top-risk #1). ONE aggregated GAQL per
+  // account+range — segments.date DURING appears ONLY in WHERE, never in
+  // SELECT, so it stays one row per campaign. Adding it to SELECT (or to the
+  // entity-listing query in listCampaigns) would fragment into per-day rows
+  // and — worse — silently drop zero-impression campaigns from the entity
+  // list, exactly the dormant campaigns an operator pauses/enables. This
+  // method NEVER replaces or filters listCampaigns' result; the caller merges
+  // by campaign.id with zero-defaults.
+  async listCampaignMetrics(auth, accountRef, range: CcMetricsRange): Promise<CampaignMetrics[]> {
+    const during = range === "7d" ? "LAST_7_DAYS" : "LAST_30_DAYS";
+    const rows = await gaql(auth, accountRef, `
+      SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+      FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING ${during}`);
+    return rows.map((row) => {
+      const c = (row.campaign ?? {}) as Record<string, unknown>;
+      const m = (row.metrics ?? {}) as Record<string, unknown>;
+      return {
+        entityRef: String(c.id ?? ""),
+        spendMicros: num(m.costMicros),
+        clicks: num(m.clicks),
+        impressions: num(m.impressions),
+        conversions: num(m.conversions),
+      };
+    });
   },
 
   buildRollback(action, beforeSnap, exec): RollbackRecipe | null {

@@ -141,6 +141,20 @@ export interface AccountInfo {
   connectionId?: string | null;         // Supabase ads_google_connections.id
 }
 
+/** v2.6: on-demand campaign performance read. "7d" | "30d" only (custom ranges deferred). */
+export type CcMetricsRange = "7d" | "30d";
+
+/**
+ * v2.6 sibling read (NOT an extension of EntitySnapshot/listCampaigns — see
+ * design spec §a). entityRef joins EntitySnapshot.entityRef; the caller merges
+ * by id with zero-defaults, so a campaign missing from this list still renders
+ * (zero-impression campaigns must never be silently dropped from the entity list).
+ */
+export interface CampaignMetrics {
+  entityRef: string;
+  spendMicros: number; clicks: number; impressions: number; conversions: number;
+}
+
 export interface NetworkAdapter {
   network: CcNetwork;
   capabilities(auth: AdapterAuth): AdapterCapabilities;
@@ -150,6 +164,8 @@ export interface NetworkAdapter {
   validate?(auth: AdapterAuth, accountRef: string, action: CcActionInput, before: EntitySnapshot): Promise<{ ok: boolean; detail?: string }>;
   execute(auth: AdapterAuth, accountRef: string, action: CcActionInput, before: EntitySnapshot): Promise<ExecuteResult>;
   buildRollback(action: CcActionInput, before: EntitySnapshot, exec: ExecuteResult): RollbackRecipe | null;
+  /** OPTIONAL v2.6 read: bulk campaign-level spend/clicks/impressions/conversions for the range. */
+  listCampaignMetrics?(auth: AdapterAuth, accountRef: string, range: CcMetricsRange): Promise<CampaignMetrics[]>;
 }
 
 export interface GateResult {

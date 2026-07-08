@@ -7,7 +7,7 @@
 // end-to-end; cents exist only inside this file (see microsToCents).
 import { createHmac } from "node:crypto";
 import type {
-  AdapterAuth, AdapterCapabilities, CcActionInput, CcInternalActionType,
+  AdapterAuth, AdapterCapabilities, CampaignMetrics, CcActionInput, CcInternalActionType, CcMetricsRange,
   EntitySnapshot, ExecuteResult, MetaCreateAdPayload, MetaCreateAdsetPayload,
   MetaCreateCampaignPayload, NetworkAdapter, RemoveEntityPayload, RollbackRecipe,
 } from "../types";
@@ -68,6 +68,18 @@ async function metaPost(path: string, form: Record<string, string>): Promise<Rec
   try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; }
 }
 
+// Fetches a fully-qualified URL as-is — used ONLY to follow Graph API's
+// `paging.next`, which already comes back as a complete URL (own access_token
+// + cursor baked in by Meta). Unlike metaGet, this must NOT re-append
+// access_token/appsecret_proof — that would either duplicate the param or
+// override the cursor-scoped token Meta issued for this page.
+async function metaGetUrl(url: string): Promise<Record<string, unknown>> {
+  const res = await fetch(url, { cache: "no-store" });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Meta API GET ${url} ${res.status}: ${text.slice(0, 400)}`);
+  try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; }
+}
+
 async function metaDelete(path: string): Promise<Record<string, unknown>> {
   const tok = token();
   const search = new URLSearchParams({ access_token: tok });
@@ -102,6 +114,17 @@ const CONVERSION_ACTIONS = new Set([
   "omni_complete_registration", "lead_grouped",
 ]);
 
+// Shared per-row conversions extraction — the SINGLE source of truth used by
+// BOTH insightsToSignals (snapshot's 30d rollup) and listCampaignMetrics (v2.6
+// bulk campaign read), so the two can never diverge on which action types count.
+function conversionsFromActions(actions: Array<{ action_type?: string; value?: string }> | undefined): number {
+  let conversions = 0;
+  for (const action of actions ?? []) {
+    if (action.action_type && CONVERSION_ACTIONS.has(action.action_type)) conversions += Number(action.value ?? 0);
+  }
+  return conversions;
+}
+
 function insightsToSignals(data: unknown): { conversions30d: number | null; spend30dMicros: number | null } {
   const rows = (data as { data?: Array<Record<string, unknown>> })?.data ?? [];
   if (!rows.length) return { conversions30d: null, spend30dMicros: null };
@@ -109,9 +132,7 @@ function insightsToSignals(data: unknown): { conversions30d: number | null; spen
   let spendMicros = 0;
   for (const row of rows) {
     spendMicros += Math.round(Number(row.spend ?? 0) * MICROS_PER_UNIT);
-    for (const action of (row.actions as Array<{ action_type?: string; value?: string }> | undefined) ?? []) {
-      if (action.action_type && CONVERSION_ACTIONS.has(action.action_type)) conversions += Number(action.value ?? 0);
-    }
+    conversions += conversionsFromActions(row.actions as Array<{ action_type?: string; value?: string }> | undefined);
   }
   return { conversions30d: conversions, spend30dMicros: spendMicros };
 }
@@ -124,6 +145,15 @@ function microsToCents(micros: number): string {
   if (!Number.isInteger(micros) || micros <= 0 || micros % MICROS_PER_MINOR_UNIT !== 0)
     throw new Error(`Presupuesto no convertible a centavos: ${micros} micros`);
   return String(micros / MICROS_PER_MINOR_UNIT);
+}
+
+// v2.6 (spec risk #2): the ONE shared rounding helper Task 3's verification
+// mirrors to compare an intended budget against what actually landed. The
+// adapter's OWN write path (budget_update above) rounds via division, never
+// through this helper — it must stay a pure re-derivation of that same rule
+// so verify.ts's drift comparison can never disagree with what was written.
+export function metaBudgetRoundMicros(micros: number): number {
+  return Math.round(micros / MICROS_PER_MINOR_UNIT) * MICROS_PER_MINOR_UNIT;
 }
 
 interface MetaMutation { path: string; method: "POST" | "DELETE"; form: Record<string, string> }
@@ -309,6 +339,36 @@ export const metaAdapter: NetworkAdapter = {
       response,
       ...(isCreate ? { resourceNames: [String(response.id)] } : {}),
     };
+  },
+
+  // v2.6 sibling read (design spec §a). ONE insights GET at campaign level;
+  // follows paging.next AT MOST once (1000-row ceiling) — never loops until
+  // exhausted. spend is a decimal string in account currency major units;
+  // Math.round(...*MICROS_PER_UNIT) mirrors insightsToSignals exactly.
+  // Conversions go through the SAME conversionsFromActions helper as
+  // insightsToSignals so the two reads can never diverge on which action
+  // types count as a conversion.
+  async listCampaignMetrics(_auth, accountRef, range: CcMetricsRange): Promise<CampaignMetrics[]> {
+    const datePreset = range === "7d" ? "last_7d" : "last_30d";
+    const first = await metaGet(`/${accountRef}/insights`, {
+      level: "campaign",
+      date_preset: datePreset,
+      fields: "campaign_id,spend,clicks,impressions,actions",
+      limit: "500",
+    });
+    const rows: Array<Record<string, unknown>> = [...((first.data as Array<Record<string, unknown>> | undefined) ?? [])];
+    const nextUrl = (first.paging as { next?: string } | undefined)?.next;
+    if (nextUrl) {
+      const second = await metaGetUrl(nextUrl);
+      rows.push(...((second.data as Array<Record<string, unknown>> | undefined) ?? []));
+    }
+    return rows.map((row) => ({
+      entityRef: String(row.campaign_id ?? ""),
+      spendMicros: Math.round(Number(row.spend ?? 0) * MICROS_PER_UNIT),
+      clicks: Number(row.clicks ?? 0),
+      impressions: Number(row.impressions ?? 0),
+      conversions: conversionsFromActions(row.actions as Array<{ action_type?: string; value?: string }> | undefined),
+    }));
   },
 
   buildRollback(action, beforeSnap, exec): RollbackRecipe | null {

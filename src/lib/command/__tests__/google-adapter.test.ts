@@ -308,4 +308,48 @@ describe("googleAdapter", () => {
     }] });
     await expect(readCampaignTree(AUTH, "123", "5")).rejects.toThrow("Solo campañas de Búsqueda");
   });
+
+  describe("listCampaignMetrics", () => {
+    it("sends ONE aggregated GAQL with segments.date DURING in WHERE only (never SELECT), status filter, and maps rows by campaign.id", async () => {
+      responder = () => ({ results: [
+        { campaign: { id: "111" }, metrics: { costMicros: "3000000", clicks: "10", impressions: "500", conversions: "2.5" } },
+        { campaign: { id: "222" }, metrics: { costMicros: "1000000", clicks: "4", impressions: "200", conversions: "0" } },
+      ] });
+      const metrics = await googleAdapter.listCampaignMetrics!(AUTH, "123", "7d");
+      const gaqlCalls = calls.filter((c) => c.url.includes("googleAds:search"));
+      expect(gaqlCalls).toHaveLength(1);
+      const q = String(JSON.parse(String(gaqlCalls[0]?.init?.body ?? "{}")).query ?? "");
+      expect(q).toContain("FROM campaign");
+      expect(q).toContain("segments.date DURING LAST_7_DAYS");
+      expect(q).toContain("campaign.status != 'REMOVED'");
+      // The SELECT clause (before FROM) must never carry segments.date — that would
+      // fragment the aggregate into one row per day per campaign, dropping the
+      // single-row-per-campaign guarantee the merge-by-id logic depends on.
+      const selectClause = q.slice(0, q.indexOf("FROM campaign"));
+      expect(selectClause).not.toContain("segments.date");
+      expect(q).toContain("metrics.cost_micros");
+      expect(q).toContain("metrics.clicks");
+      expect(q).toContain("metrics.impressions");
+      expect(q).toContain("metrics.conversions");
+      expect(metrics).toEqual([
+        { entityRef: "111", spendMicros: 3_000_000, clicks: 10, impressions: 500, conversions: 2.5 },
+        { entityRef: "222", spendMicros: 1_000_000, clicks: 4, impressions: 200, conversions: 0 },
+      ]);
+    });
+
+    it("30d range uses segments.date DURING LAST_30_DAYS", async () => {
+      responder = () => ({ results: [] });
+      await googleAdapter.listCampaignMetrics!(AUTH, "123", "30d");
+      const q = String(JSON.parse(String(calls.find((c) => c.url.includes("googleAds:search"))?.init?.body ?? "{}")).query ?? "");
+      expect(q).toContain("segments.date DURING LAST_30_DAYS");
+    });
+
+    it("does not call the entity-listing endpoint or filter the entity list — it is a sibling read", async () => {
+      responder = () => ({ results: [] });
+      await googleAdapter.listCampaignMetrics!(AUTH, "123", "7d");
+      // Only one search call total: the metrics GAQL. listCampaigns is never invoked here.
+      const gaqlCalls = calls.filter((c) => c.url.includes("googleAds:search"));
+      expect(gaqlCalls).toHaveLength(1);
+    });
+  });
 });

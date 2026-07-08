@@ -14,6 +14,8 @@ import { adsDb } from "@/lib/ads-db";
 import { ccActions, ccBlueprints } from "@/lib/schema";
 import { createActions, listActionsByBlueprint, type CcActionRow } from "../actions-repo";
 import { diffEditDoc } from "../edit/diff";
+import { diffMetaEditDoc } from "../edit/meta-diff";
+import { parseMetaEditDoc } from "../edit/meta-schema";
 import { EDIT_BASELINE_MAX_AGE_MS, parseEditDoc } from "../edit/schema";
 import { compile } from "./compile";
 import { compileMeta } from "./meta-compile";
@@ -158,7 +160,12 @@ export async function compileBlueprintToActions(
   // TTL is validated BEFORE the delete-first block: a doomed recompile must never wipe the
   // blueprint's existing proposed actions on its way to failing.
   const rawDoc = blueprint.doc as { docType?: unknown };
-  const isEditDoc = rawDoc?.docType === "google_search_edit_v1";
+  const isGoogleEditDoc = rawDoc?.docType === "google_search_edit_v1";
+  // meta-edit: keyed on the exact literal, and it MUST be resolved before the
+  // `network === "meta_ads"` branch below — a meta edit row satisfies that
+  // network check and would otherwise die inside parseMetaBlueprint (risk #1).
+  const isMetaEditDoc = rawDoc?.docType === "meta_edit_v1";
+  const isEditDoc = isGoogleEditDoc || isMetaEditDoc;
   if (isEditDoc) {
     const ageMs = Date.now() - Date.parse((rawDoc as { loadedAt?: string }).loadedAt ?? "");
     if (!Number.isFinite(ageMs) || ageMs > EDIT_BASELINE_MAX_AGE_MS) {
@@ -174,7 +181,7 @@ export async function compileBlueprintToActions(
     await deps.deleteProposedActionsByBlueprint(blueprintId, blueprint.workspaceId);
   }
 
-  if (isEditDoc) {
+  if (isGoogleEditDoc) {
     const doc = parseEditDoc(blueprint.doc);
     const compiled = diffEditDoc(doc, blueprintId);
     if (compiled.length === 0) throw new Error("No hay cambios que aplicar.");
@@ -195,6 +202,29 @@ export async function compileBlueprintToActions(
       entityKind: a.entityKind, entityRef: a.entityRef, entityName: a.entityName,
       actionType: a.actionType, payload: a.payload as never, expected: a.expected as never,
       source: aiPaths.has(a.entityRef) ? "copiloto" as const : "manual" as const,
+      recKey: a.recKey, rationale: a.note,
+      status: "proposed" as const, blueprintId, seq: a.seq, localRef: a.localRef,
+    }));
+    return deps.insertActions(rows);
+  }
+
+  // META-EDIT BRANCH: docType-first dispatch, sibling of the google edit block
+  // above. Rows mirror the google edit branch field-by-field, but
+  // `connectionId` is always null (Meta auth is the workspace env token, never
+  // a per-blueprint OAuth connection) and `source` is always "manual" — the
+  // `_ai` copiloto marker is a google convention; meta docs never carry it
+  // (the meta editor never mounts CopilotoDock, spec adjudication #4).
+  if (isMetaEditDoc) {
+    const doc = parseMetaEditDoc(blueprint.doc);
+    const compiled = diffMetaEditDoc(doc, blueprintId);
+    if (compiled.length === 0) throw new Error("No hay cambios que aplicar.");
+
+    const rows = compiled.map((a) => ({
+      workspaceId: blueprint.workspaceId, createdBy: blueprint.createdBy, network: blueprint.network,
+      connectionId: null, accountRef: blueprint.accountRef,
+      entityKind: a.entityKind, entityRef: a.entityRef, entityName: a.entityName,
+      actionType: a.actionType, payload: a.payload as never, expected: a.expected as never,
+      source: "manual" as const,
       recKey: a.recKey, rationale: a.note,
       status: "proposed" as const, blueprintId, seq: a.seq, localRef: a.localRef,
     }));

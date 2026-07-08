@@ -1,9 +1,12 @@
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   createBlueprint, getBlueprint, saveBlueprintDoc, compileBlueprintToActions, approveBlueprint, setBlueprintStatus,
   type BlueprintRepoDeps, type CcBlueprintRow,
 } from "../blueprint/repo";
 import type { CcActionRow } from "../actions-repo";
+import { CC_SETTINGS_DEFAULTS } from "../types";
 
 // Edit-doc fixture (Task 5): same shape as edit-schema.test.ts/edit-diff.test.ts's baseDoc(),
 // with the campaign's desired.dailyBudgetMicros bumped so it diffs to exactly one
@@ -428,5 +431,104 @@ describe("setBlueprintStatus", () => {
     const out = await setBlueprintStatus("bp1", "executing", ["other-ws"], undefined, deps);
     expect(out).toBeNull();
     expect(bpStore.get("bp1")?.status).toBe("approved");
+  });
+});
+
+// Meta-EDIT doc fixture (meta-edit plan Task 4): same shape as
+// meta-edit-schema.test.ts's baseDoc(), with one adset budget bump + one ad
+// pause so it diffs to exactly two rows. Raw `unknown` on purpose —
+// compileBlueprintToActions itself must parse it.
+function metaEditDocWithChanges(loadedAt = new Date().toISOString()) {
+  return {
+    docType: "meta_edit_v1", network: "meta_ads", accountRef: "act_123",
+    loadedAt,
+    campaign: {
+      id: "111",
+      base: { name: "C", status: "ENABLED", effectiveStatus: "ACTIVE",
+              dailyBudgetMicros: null, lifetimeBudgetMicros: null, currency: "MXN" },
+      desired: { status: "ENABLED", dailyBudgetMicros: null },
+      adsets: [{
+        id: "222",
+        base: { name: "AS", status: "ENABLED", effectiveStatus: "ACTIVE",
+                dailyBudgetMicros: 20_000_000, lifetimeBudgetMicros: null, learningPhase: "STABLE" },
+        desired: { status: "ENABLED", dailyBudgetMicros: 24_000_000 },
+        ads: [{ id: "333", base: { name: "Ad 1", status: "ENABLED", effectiveStatus: "ACTIVE" }, desired: { status: "PAUSED" } }],
+      }],
+    },
+  };
+}
+
+function baseMetaEditBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
+  return baseMetaBlueprint({ doc: metaEditDocWithChanges(), ...over });
+}
+
+describe("compileBlueprintToActions — meta-edit docType branch", () => {
+  const WS = "w1";
+
+  it("meta-edit doc compiles via diffMetaEditDoc: 'me-' recKeys, connectionId null, source manual, expected + rationale set", async () => {
+    const { deps } = makeHarness([baseMetaEditBlueprint()]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows.map((r) => r.actionType)).toEqual(["pause", "budget_update"]); // A before B
+    expect(rows.every((r) => r.recKey?.startsWith("me-"))).toBe(true);
+    expect(rows.every((r) => r.connectionId === null)).toBe(true);
+    expect(rows.every((r) => r.source === "manual")).toBe(true);
+    expect(rows.every((r) => r.status === "proposed")).toBe(true);
+    const budget = rows.find((r) => r.actionType === "budget_update")!;
+    expect(budget.entityRef).toBe("222");
+    expect(budget.expected).toEqual({ dailyBudgetMicros: 20_000_000 });
+    expect(budget.rationale).toContain("«AS»");
+  });
+
+  it("risk #1 regression: four-way dispatch is unchanged — google edit 'ed-', meta CREATE 'bp-', google create 'bp-'", async () => {
+    const gEdit = makeHarness([baseBlueprint({ doc: editDocWithBudgetChange() })]);
+    expect((await compileBlueprintToActions("bp1", [WS], gEdit.deps))[0].recKey?.startsWith("ed-")).toBe(true);
+
+    const mCreate = makeHarness([baseMetaBlueprint()]);
+    const mRows = await compileBlueprintToActions("bp1", [WS], mCreate.deps);
+    expect(mRows.map((r) => r.actionType)).toEqual(["create_campaign", "create_adset", "create_ad"]);
+    expect(mRows.every((r) => r.recKey?.startsWith("bp-"))).toBe(true);
+
+    const gCreate = makeHarness([baseBlueprint()]);
+    expect(await compileBlueprintToActions("bp1", [WS], gCreate.deps)).toHaveLength(5);
+  });
+
+  it("risk #9: stale meta-edit baseline (>60 min) refuses BEFORE deleting existing proposed actions", async () => {
+    const staleLoadedAt = new Date(Date.now() - 61 * 60_000).toISOString();
+    const existing = baseAction({ id: "a1", blueprintId: "bp1", status: "proposed" });
+    const { deps, actionStore } = makeHarness(
+      [baseMetaEditBlueprint({ doc: metaEditDocWithChanges(staleLoadedAt) })], [existing]
+    );
+
+    await expect(compileBlueprintToActions("bp1", [WS], deps)).rejects.toThrow(/caducado/);
+    expect(actionStore.size).toBe(1); // the doomed recompile wiped nothing
+  });
+
+  it("meta-edit doc with zero diffs throws 'No hay cambios que aplicar.'", async () => {
+    const doc = metaEditDocWithChanges();
+    doc.campaign.adsets[0].desired.dailyBudgetMicros = 20_000_000; // back to base
+    doc.campaign.adsets[0].ads[0].desired.status = "ENABLED";
+    const { deps } = makeHarness([baseMetaEditBlueprint({ doc })]);
+    await expect(compileBlueprintToActions("bp1", [WS], deps)).rejects.toThrow(/No hay cambios/);
+  });
+});
+
+describe("zero-migration guard (meta-edit risk #11)", () => {
+  // Meta edit ships with ZERO migrations because budget_update|pause|enable are
+  // already in every cc_settings default. These assertions turn that assumption
+  // into a tripwire: if a future migration/default change drops one of the three
+  // verbs, meta edit silently bricks at ACTION_ALLOWED — fail here instead.
+  const VERBS = ["budget_update", "pause", "enable"] as const;
+
+  it("CC_SETTINGS_DEFAULTS (types.ts, mirrored by schema.ts's Drizzle default) allows the three meta-edit verbs", () => {
+    for (const v of VERBS) expect(CC_SETTINGS_DEFAULTS.allowedActionTypes).toContain(v);
+  });
+
+  it("the migrate route's 007 CREATE TABLE default and 010 cumulative default both carry the three verbs", () => {
+    const src = readFileSync(join(import.meta.dir, "../../../app/api/migrate/route.ts"), "utf8");
+    const defaults = src.match(/\["budget_update","pause","enable"[^\]]*\]/g) ?? [];
+    // 007 CREATE TABLE default, 008 UPDATE+DEFAULT, 009 DEFAULT, 010 UPDATE(partial)+DEFAULT.
+    expect(defaults.length).toBeGreaterThanOrEqual(4);
+    for (const d of defaults) for (const v of VERBS) expect(d).toContain(`"${v}"`);
   });
 });

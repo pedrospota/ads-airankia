@@ -84,6 +84,23 @@ describe("gates", () => {
     const ok = runGates(baseInput({ expected: { status: "ENABLED", dailyBudgetMicros: 10_000_000 } }));
     expect(failed(ok)).toEqual([]);
   });
+  it("DRIFT ignores approve-time metrics context (conversions30d/spend30dMicros)", () => {
+    // spec §a "Free bonus": approve now persists conversions30d/spend30dMicros
+    // into `expected` alongside status/dailyBudgetMicros. The DRIFT gate must
+    // read only status/dailyBudgetMicros, so the extra keys are inert.
+    const withoutMetrics = runGates(baseInput({ expected: { status: "ENABLED", dailyBudgetMicros: 10_000_000 } }));
+    const withMetrics = runGates(baseInput({
+      expected: { status: "ENABLED", dailyBudgetMicros: 10_000_000, conversions30d: 999, spend30dMicros: 123_456_789 },
+    }));
+    expect(withMetrics.find(r => r.id === "DRIFT")).toEqual(withoutMetrics.find(r => r.id === "DRIFT"));
+    expect(failed(withMetrics)).toEqual([]);
+
+    // Same drift-triggering baseline, with or without the extra metrics keys,
+    // must produce the identical DRIFT result.
+    const driftWithout = runGates(baseInput({ expected: { status: "PAUSED" } }));
+    const driftWith = runGates(baseInput({ expected: { status: "PAUSED", conversions30d: 5, spend30dMicros: 1 } }));
+    expect(driftWith.find(r => r.id === "DRIFT")).toEqual(driftWithout.find(r => r.id === "DRIFT"));
+  });
   it("BUDGET_DELTA blocks >30% and nonpositive; passes 20%", () => {
     const mk = (n: number) => baseInput({ action: { actionType: "budget_update", entityKind: "campaign", entityRef: "123", payload: { newDailyBudgetMicros: n } } });
     expect(blockingFailures(runGates(mk(14_000_000))).map(r => r.id)).toContain("BUDGET_DELTA"); // +40%

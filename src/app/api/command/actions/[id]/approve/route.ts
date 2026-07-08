@@ -26,6 +26,13 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     if (adapter.capabilities(auth).read) {
       const snap = await adapter.snapshot(auth, action.accountRef, action.entityKind as CcEntityKind, action.entityRef);
       expected = { status: snap.status, dailyBudgetMicros: snap.dailyBudgetMicros };
+      // Free bonus, zero extra API calls (spec §a): the snapshot already carries
+      // 30d performance context (Google GAQL / Meta insights). Persist it into
+      // the same `expected` baseline for display on the Acciones row. VERIFIED
+      // inert to the DRIFT gate, which reads only expected.status/dailyBudgetMicros
+      // — see the "DRIFT ignores approve-time metrics context" gates test.
+      if (snap.conversions30d !== undefined) expected.conversions30d = snap.conversions30d;
+      if (snap.spend30dMicros !== undefined) expected.spend30dMicros = snap.spend30dMicros;
     }
   } catch { /* baseline opcional: DRIFT pasará sin expected */ }
   try {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Card,
   SectionLabel,
@@ -42,6 +42,8 @@ export default function EquipoClient({ workspaceIds }: { workspaceIds: string[] 
   const [notice, setNotice] = useState<string | null>(null);
   // First click on "Quitar" arms the confirmation for that row; second click DELETEs.
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  // Staleness guard: track the workspace ID to prevent overwriting with stale responses.
+  const workspaceIdRef = useRef(workspaceId);
 
   async function loadMembers(id: string) {
     if (!id) return;
@@ -50,18 +52,29 @@ export default function EquipoClient({ workspaceIds }: { workspaceIds: string[] 
     try {
       const res = await fetch(`/api/command/equipo?workspaceId=${encodeURIComponent(id)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      // Staleness guard: stop if workspace switched before setState
+      if (id !== workspaceIdRef.current) return;
+      if (!res.ok) {
+        setError(data.error ?? `HTTP ${res.status}`);
+        setMembers(null);
+        return;
+      }
       setMembers(data.members ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error cargando el equipo");
+      // Staleness guard: don't overwrite if workspace switched
+      if (id !== workspaceIdRef.current) return;
+      setError("Error de red o respuesta inválida del servidor.");
       setMembers(null);
     } finally {
-      setLoading(false);
+      if (id === workspaceIdRef.current) {
+        setLoading(false);
+      }
     }
   }
 
   // On mount + workspace change: reset any armed confirmation and refetch.
   useEffect(() => {
+    workspaceIdRef.current = workspaceId;
     setConfirmTarget(null);
     void loadMembers(workspaceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,7 +94,10 @@ export default function EquipoClient({ workspaceIds }: { workspaceIds: string[] 
         body: JSON.stringify({ email: trimmed, workspaceId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        setError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
       setNotice(
         data.invited
           ? `Invitación enviada a ${trimmed}.`
@@ -90,7 +106,7 @@ export default function EquipoClient({ workspaceIds }: { workspaceIds: string[] 
       setEmail("");
       await loadMembers(workspaceId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error invitando");
+      setError("Error de red o respuesta inválida del servidor.");
     } finally {
       setBusy(false);
     }
@@ -111,10 +127,13 @@ export default function EquipoClient({ workspaceIds }: { workspaceIds: string[] 
         body: JSON.stringify({ workspaceId, userId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        setError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
       await loadMembers(workspaceId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error quitando miembro");
+      setError("Error de red o respuesta inválida del servidor.");
     } finally {
       setConfirmTarget(null);
       setBusy(false);
@@ -138,6 +157,7 @@ export default function EquipoClient({ workspaceIds }: { workspaceIds: string[] 
           style={inputStyle}
           value={workspaceId}
           onChange={(e) => setWorkspaceId(e.target.value)}
+          disabled={busy || loading}
         >
           {workspaceIds.map((id) => (
             <option key={id} value={id}>

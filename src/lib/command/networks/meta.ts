@@ -71,12 +71,19 @@ async function metaPost(path: string, form: Record<string, string>): Promise<Rec
 // Fetches a fully-qualified URL as-is — used ONLY to follow Graph API's
 // `paging.next`, which already comes back as a complete URL (own access_token
 // + cursor baked in by Meta). Unlike metaGet, this must NOT re-append
-// access_token/appsecret_proof — that would either duplicate the param or
-// override the cursor-scoped token Meta issued for this page.
+// access_token (which would duplicate) — but appsecret_proof must be APPENDED
+// when META_APP_SECRET is configured, as Meta's paging.next does not include it.
 async function metaGetUrl(url: string): Promise<Record<string, unknown>> {
-  const res = await fetch(url, { cache: "no-store" });
+  let fetchUrl = url;
+  const proof = appsecretProof(token());
+  if (proof) {
+    const urlObj = new URL(url);
+    urlObj.searchParams.set("appsecret_proof", proof);
+    fetchUrl = urlObj.toString();
+  }
+  const res = await fetch(fetchUrl, { cache: "no-store" });
   const text = await res.text();
-  if (!res.ok) throw new Error(`Meta API GET ${url} ${res.status}: ${text.slice(0, 400)}`);
+  if (!res.ok) throw new Error(`Meta API GET ${fetchUrl} ${res.status}: ${text.slice(0, 400)}`);
   try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; }
 }
 

@@ -425,3 +425,23 @@ describe("safety invariant: verify.ts source never calls executeAction or adapte
     expect(src).not.toMatch(/\.execute\s*\(/);
   });
 });
+
+describe("invariant: only recordVerificationDrift writes error on executed rows", () => {
+  it("(sole-error-writer pin) actions-repo.ts's recordVerificationDrift has guarded UPDATE with both error set AND status='executed' in WHERE", () => {
+    // The sole writer of `error` on an 'executed' row must:
+    // (a) SET error to a non-null value (error: note)
+    // (b) GUARD the WHERE clause with status='executed' so the write is a no-op if row moved on
+    // This ensures error≠null on 'executed' unambiguously means drift.
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "actions-repo.ts"), "utf8");
+    expect(src).toContain("function recordVerificationDrift");
+    expect(src).toMatch(/recordVerificationDrift[\s\S]*?\.set\(\s*\{\s*error:\s*note/);
+    expect(src).toMatch(/recordVerificationDrift[\s\S]*?eq\(ccActions\.status,\s*["']executed["']\)/);
+  });
+
+  it("(sole-error-writer pin) executor.ts's executeAction transition to 'executed' clears error to null on success", () => {
+    // When a mutation succeeds, the action transitions from 'executing' to 'executed'
+    // and error must be explicitly cleared to null so it can't carry forward from a failed attempt.
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "executor.ts"), "utf8");
+    expect(src).toMatch(/transitionAction[\s\S]*?["']executed["'][\s\S]*?error:\s*null/);
+  });
+});

@@ -186,6 +186,27 @@ describe("metaAdapter", () => {
       expect(metrics.map((m) => m.entityRef)).toEqual(["111", "333"]);
     });
 
+    it("appends appsecret_proof to paging.next URL when META_APP_SECRET is set", async () => {
+      process.env.META_APP_SECRET = "app-secret";
+      responder = (url) => {
+        if (url.includes("page2marker")) {
+          return { data: [{ campaign_id: "222", spend: "2.00", clicks: "2", impressions: "20", actions: [] }] };
+        }
+        if (url.includes("/insights")) {
+          return {
+            data: [{ campaign_id: "111", spend: "1.00", clicks: "1", impressions: "10", actions: [] }],
+            paging: { next: "https://graph.facebook.com/v25.0/act_1/insights?page2marker=1&access_token=cursor-token" },
+          };
+        }
+        return {};
+      };
+      await metaAdapter.listCampaignMetrics!({}, "act_1", "7d");
+      // Verify the second request (paging.next follow) includes appsecret_proof
+      const page2Call = calls.find((c) => c.url.includes("page2marker"));
+      expect(page2Call?.url).toContain("appsecret_proof=");
+      expect(page2Call?.url).toMatch(/appsecret_proof=[0-9a-f]{64}/);
+    });
+
     it("regression: insightsToSignals (via snapshot) still produces identical signals post-extraction", async () => {
       responder = (url) => {
         if (url.includes("/insights")) return { data: [{ spend: "150.25", actions: [{ action_type: "purchase", value: "3" }, { action_type: "lead", value: "2" }] }] };

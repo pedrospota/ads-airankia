@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, SectionLabel, Badge, PrimaryButton, GhostDangerButton, UI } from "@/components/ui-kit";
 import type { CcSettingsValues } from "@/lib/command/types";
 
@@ -11,9 +12,24 @@ export default function ResumenClient({
   workspaceId: string;
   initialSettings: CcSettingsValues;
 }) {
+  const router = useRouter();
   const [settings, setSettings] = useState(initialSettings);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Lazy verification sweep (design spec §c): fire-and-forget on mount, then
+  // refresh the server data (counts/settings/Novedades) only if the sweep
+  // actually changed something. Never surfaces an error to the operator —
+  // this is best-effort housekeeping, not a user-initiated action.
+  useEffect(() => {
+    fetch("/api/command/verify", { method: "POST" })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.expired || res.verified || res.drifted) router.refresh();
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function save(patch: Record<string, unknown>) {
     setBusy(true);

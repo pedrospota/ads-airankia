@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, DataTable, THead, Row, Cell, Badge, EmptyState, SectionLabel, PrimaryButton, SecondaryButton, GhostDangerButton, UI } from "@/components/ui-kit";
 
 export interface GateDto { id: string; severity: "blocking" | "warning"; status: "pass" | "fail"; evidence: string }
@@ -23,13 +23,27 @@ const TYPE_LABEL: Record<string, string> = {
 };
 const NET_LABEL = { google_ads: "Google", meta_ads: "Meta" } as const;
 
+// v2.6: "expired"/"verified" added to the filter row (design spec §c
+// "Surface" — statuses cc_actions already types but never filters). Also
+// doubles as the allowlist for the ?filter= deep link from the Novedades
+// card (resumen/page.tsx) — an unrecognized/missing value falls back to
+// "todas" rather than silently rendering an empty table.
+const FILTER_OPTIONS = ["todas", "proposed", "approved", "executed", "verified", "failed", "rolled_back", "expired"];
+
 export default function AccionesClient({ initialActions }: { initialActions: ActionRowDto[] }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [actions, setActions] = useState(initialActions);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [gatePanel, setGatePanel] = useState<{ id: string; gates: GateDto[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<string>("todas");
+  // Preset from ?filter=<status> (Novedades deep link), one-time on mount —
+  // additive on top of the existing local-only filter buttons, which still
+  // work exactly as before once the operator clicks a different one.
+  const [filter, setFilter] = useState<string>(() => {
+    const fromUrl = searchParams.get("filter");
+    return fromUrl && FILTER_OPTIONS.includes(fromUrl) ? fromUrl : "todas";
+  });
   const [importForm, setImportForm] = useState({ engineAccountId: "", connectionId: "", accountRef: "" });
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
@@ -37,6 +51,18 @@ export default function AccionesClient({ initialActions }: { initialActions: Act
     () => (filter === "todas" ? actions : actions.filter((a) => a.status === filter)),
     [actions, filter]
   );
+
+  // Lazy verification sweep (design spec §c), mirrors resumen-client.tsx:
+  // fire-and-forget on mount, refresh only if the sweep changed something.
+  useEffect(() => {
+    fetch("/api/command/verify", { method: "POST" })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.expired || res.verified || res.drifted) router.refresh();
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function call(id: string, verb: "approve" | "reject" | "execute" | "rollback") {
     setBusyId(id); setError(null); setGatePanel(null);
@@ -101,7 +127,7 @@ export default function AccionesClient({ initialActions }: { initialActions: Act
       </Card>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["todas", "proposed", "approved", "executed", "failed", "rolled_back"].map((s) => (
+        {FILTER_OPTIONS.map((s) => (
           <SecondaryButton key={s} onClick={() => setFilter(s)}
             style={filter === s ? { borderColor: UI.accent, color: UI.accent } : undefined}>
             {s === "todas" ? "Todas" : s}

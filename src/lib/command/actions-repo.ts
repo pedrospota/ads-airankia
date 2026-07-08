@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
-import { ccActions, ccExecutions } from "@/lib/schema";
+import { ccActions, ccBlueprints, ccExecutions } from "@/lib/schema";
 import { assertTransition } from "./state";
 import type { CcActionStatus, CcNetwork, CcPayload } from "./types";
 
@@ -196,4 +196,172 @@ export async function recordVerificationDrift(id: string, note: string): Promise
   await adsDb.update(ccActions)
     .set({ error: note, updatedAt: new Date() })
     .where(and(eq(ccActions.id, id), eq(ccActions.status, "executed")));
+}
+
+// ---------------------------------------------------------------------------
+// v2.6 Novedades inbox (design spec §c "Notification channel" + "Surface").
+// A PURE QUERY over cc_actions/cc_blueprints — no new table, no migration,
+// no read/unread state. Every category below is an existing, already-durable
+// status (or status+predicate) that clears itself the moment the underlying
+// row is resolved (re-approve/reject/revert/re-verify).
+// ---------------------------------------------------------------------------
+
+const NOVEDADES_WINDOW_DAYS = 7;
+/** Per-category item cap. Cheap (single indexed query each) and keeps the
+ * numeric counts themselves bounded — at beta's single-operator scale a
+ * category pinned at this cap just reads as "50+", which is an acceptable
+ * fidelity loss for a needs-attention badge (see design spec top-risks: "the
+ * approved-row JS filter is bounded but watch p95 as cc_actions grows"). */
+export const NOVEDADES_ITEM_LIMIT = 50;
+/** The gate-blocked category has no dedicated status column to filter on
+ * (it's 'approved' + a gateResults predicate), so it scans a wider bounded
+ * window before the JS filter narrows it down to NOVEDADES_ITEM_LIMIT. */
+export const NOVEDADES_APPROVED_SCAN_LIMIT = 200;
+
+export interface NovedadItemRef {
+  id: string;
+}
+
+export interface NovedadesCounts {
+  planesFallidos: number;
+  accionesFallidas: number;
+  conDeriva: number;
+  bloqueadas: number;
+  caducadas: number;
+}
+
+export interface NovedadesResult {
+  counts: NovedadesCounts;
+  total: number;
+  /** Minimal id-only refs (already fetched alongside the counts — no extra
+   * query), capped at NOVEDADES_ITEM_LIMIT. Used by the resumen page to build
+   * a precise deep link for the single-failed-blueprint case. */
+  items: {
+    planesFallidos: NovedadItemRef[];
+    accionesFallidas: NovedadItemRef[];
+    conDeriva: NovedadItemRef[];
+    bloqueadas: NovedadItemRef[];
+    caducadas: NovedadItemRef[];
+  };
+}
+
+/**
+ * PURE, unit-testable: does this `gate_results` jsonb value contain at least
+ * one element shaped like a BLOCKING gate FAILURE ({severity:'blocking',
+ * status:'fail'} — see GateResult in types.ts / executor.ts's
+ * approved→approved self-loop stamp on block)?
+ *
+ * Extracted as its own exported function (rather than inlined into
+ * listNovedades) specifically so a gates.ts shape change (id/severity/status/
+ * evidence) fails a fast, direct unit test instead of silently emptying the
+ * "bloqueadas por compuertas" Novedades category — see
+ * actions-repo.test.ts, which exercises this against gates.ts's REAL
+ * runGates() output, not a hand-rolled fixture.
+ */
+export function hasBlockingGateFailure(gateResults: unknown): boolean {
+  if (!Array.isArray(gateResults)) return false;
+  return gateResults.some((g) => {
+    if (!g || typeof g !== "object") return false;
+    const r = g as Record<string, unknown>;
+    return r.severity === "blocking" && r.status === "fail";
+  });
+}
+
+/**
+ * The Novedades inbox: five state-based "needs attention" counts, workspace-
+ * scoped, windowed to the last NOVEDADES_WINDOW_DAYS by `updated_at`. Every
+ * source is an indexed status query (idx_cc_actions_status) except
+ * "bloqueadas", which fetches the bounded 'approved' set and JS-filters via
+ * hasBlockingGateFailure (no gateResults index exists, nor is one needed at
+ * this scan bound).
+ *
+ * Deliberately a query, not a subscription: re-running it after a row
+ * resolves (re-approve, reject, rollback, re-verify) naturally reflects the
+ * new state — there is no separate "dismiss" or read/unread concept to keep
+ * in sync (design spec §c).
+ */
+export async function listNovedades(workspaceIds: string[]): Promise<NovedadesResult> {
+  const cutoff = new Date(Date.now() - NOVEDADES_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+  const [failedBlueprints, failedActions, driftedActions, expiredActions, approvedCandidates] = await Promise.all([
+    // (a) Plan falló mid-execution → cc_blueprints.status='failed'.
+    adsDb.select({ id: ccBlueprints.id }).from(ccBlueprints)
+      .where(and(
+        inArray(ccBlueprints.workspaceId, workspaceIds),
+        eq(ccBlueprints.status, "failed"),
+        gte(ccBlueprints.updatedAt, cutoff),
+      ))
+      .orderBy(desc(ccBlueprints.updatedAt))
+      .limit(NOVEDADES_ITEM_LIMIT),
+    // (b) Acción falló → cc_actions.status='failed'.
+    adsDb.select({ id: ccActions.id }).from(ccActions)
+      .where(and(
+        inArray(ccActions.workspaceId, workspaceIds),
+        eq(ccActions.status, "failed"),
+        gte(ccActions.updatedAt, cutoff),
+      ))
+      .orderBy(desc(ccActions.updatedAt))
+      .limit(NOVEDADES_ITEM_LIMIT),
+    // (c) Deriva → status='executed' AND error IS NOT NULL. Mirrors
+    // listVerifiableExecuted's `error IS NULL` predicate, inverted: this is
+    // exactly the set that predicate excludes — recordVerificationDrift is
+    // the sole writer of `error` on an 'executed' row (see its header
+    // comment), so error≠null here unambiguously means drift.
+    adsDb.select({ id: ccActions.id }).from(ccActions)
+      .where(and(
+        inArray(ccActions.workspaceId, workspaceIds),
+        eq(ccActions.status, "executed"),
+        isNotNull(ccActions.error),
+        gte(ccActions.updatedAt, cutoff),
+      ))
+      .orderBy(desc(ccActions.updatedAt))
+      .limit(NOVEDADES_ITEM_LIMIT),
+    // (e) Caducada → cc_actions.status='expired'.
+    adsDb.select({ id: ccActions.id }).from(ccActions)
+      .where(and(
+        inArray(ccActions.workspaceId, workspaceIds),
+        eq(ccActions.status, "expired"),
+        gte(ccActions.updatedAt, cutoff),
+      ))
+      .orderBy(desc(ccActions.updatedAt))
+      .limit(NOVEDADES_ITEM_LIMIT),
+    // (d) Bloqueada por compuertas en execute → status='approved' AND
+    // gate_results contains a blocking fail (JS-filtered below via
+    // hasBlockingGateFailure over this bounded scan).
+    adsDb.select({ id: ccActions.id, gateResults: ccActions.gateResults }).from(ccActions)
+      .where(and(
+        inArray(ccActions.workspaceId, workspaceIds),
+        eq(ccActions.status, "approved"),
+        gte(ccActions.updatedAt, cutoff),
+      ))
+      .orderBy(desc(ccActions.updatedAt))
+      .limit(NOVEDADES_APPROVED_SCAN_LIMIT),
+  ]);
+
+  const blockedActions = approvedCandidates
+    .filter((a) => hasBlockingGateFailure(a.gateResults))
+    .slice(0, NOVEDADES_ITEM_LIMIT)
+    .map((a) => ({ id: a.id }));
+
+  const counts: NovedadesCounts = {
+    planesFallidos: failedBlueprints.length,
+    accionesFallidas: failedActions.length,
+    conDeriva: driftedActions.length,
+    bloqueadas: blockedActions.length,
+    caducadas: expiredActions.length,
+  };
+
+  return {
+    counts,
+    total:
+      counts.planesFallidos + counts.accionesFallidas + counts.conDeriva +
+      counts.bloqueadas + counts.caducadas,
+    items: {
+      planesFallidos: failedBlueprints,
+      accionesFallidas: failedActions,
+      conDeriva: driftedActions,
+      bloqueadas: blockedActions,
+      caducadas: expiredActions,
+    },
+  };
 }

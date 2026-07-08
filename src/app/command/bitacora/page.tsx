@@ -3,7 +3,8 @@ import { Header } from "@/components/header";
 import { PageHeader, ErrorCard, UI } from "@/components/ui-kit";
 import { getCommandAccess } from "@/lib/command/access";
 import { listExecutions } from "@/lib/command/actions-repo";
-import BitacoraClient, { type ExecutionDto } from "./bitacora-client";
+import type { ExecutionDto } from "@/lib/command/report-csv";
+import BitacoraClient from "./bitacora-client";
 
 // Auth + DB reads (executions) — never prerender.
 export const dynamic = "force-dynamic";
@@ -33,6 +34,9 @@ export default async function BitacoraPage() {
       before: (e.before ?? null) as Record<string, unknown> | null,
       after: (e.after ?? null) as Record<string, unknown> | null,
       rollbackNote: ((e.rollbackRecipe as { note?: string } | null)?.note) ?? null,
+      // v2.7: cc_actions.rationale — listExecutions() already returns the
+      // full CcActionRow, so this is a DTO map only (no repo change).
+      rationale: a.rationale ?? null,
     }));
   } catch (e) {
     error = e instanceof Error ? e.message : "Error cargando la bitácora";

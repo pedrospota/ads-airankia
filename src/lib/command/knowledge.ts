@@ -49,3 +49,10 @@ export const RSA_SPEC = {
   description: { min: 2, max: 4, maxLen: 90 },
   path: { maxLen: 15 },
 } as const;
+
+/** Meta link-ad recommended display limits (single-image link ad, feed placement). */
+export const META_LINK_AD_SPEC = {
+  message: { maxLen: 125 },
+  headline: { maxLen: 40 },
+  description: { maxLen: 30 },
+} as const;

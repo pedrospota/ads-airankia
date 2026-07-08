@@ -104,3 +104,25 @@ describe("buildEditDoc", () => {
     expect(() => parseEditDoc(doc)).toThrow();
   });
 });
+
+// v2.7 final-review regression: smart-bidding campaigns report cpc_bid_micros "0";
+// seeding desired=base with a sub-floor value must NOT brick the doc's own parse.
+describe("buildEditDoc — sub-floor live CPC coercion", () => {
+  it("cpc_bid_micros '0' coerces to null (puja automática) and the doc parses", () => {
+    const tree = JSON.parse(JSON.stringify(TREE)) as RawCampaignTree;
+    (tree.adGroups[0] as { adGroup: Record<string, unknown> }).adGroup.cpcBidMicros = "0";
+    const doc = buildEditDoc(tree, "123", "2026-07-08T12:00:00.000Z");
+    expect(doc.campaign.adGroups[0].base.cpcBidMicros).toBeNull();
+    expect(doc.campaign.adGroups[0].desired.cpcBidMicros).toBeNull();
+    const { parseEditDoc } = require("../edit/schema");
+    expect(() => parseEditDoc(doc)).not.toThrow();
+  });
+  it("cpc_bid_micros 9999 (sub-floor) also coerces to null; 10000 passes through", () => {
+    const t1 = JSON.parse(JSON.stringify(TREE)) as RawCampaignTree;
+    (t1.adGroups[0] as { adGroup: Record<string, unknown> }).adGroup.cpcBidMicros = "9999";
+    expect(buildEditDoc(t1, "123", "2026-07-08T12:00:00.000Z").campaign.adGroups[0].base.cpcBidMicros).toBeNull();
+    const t2 = JSON.parse(JSON.stringify(TREE)) as RawCampaignTree;
+    (t2.adGroups[0] as { adGroup: Record<string, unknown> }).adGroup.cpcBidMicros = "10000";
+    expect(buildEditDoc(t2, "123", "2026-07-08T12:00:00.000Z").campaign.adGroups[0].base.cpcBidMicros).toBe(10_000);
+  });
+});

@@ -99,7 +99,12 @@ function buildAdGroup(agRow: Row, tree: RawCampaignTree) {
   const status = requireEditableStatus(adGroup.status, "grupo de anuncios");
   // null for smart-bidding ad groups (no manual CPC); desired seeds from base
   // on load, same as status — the operator hasn't proposed anything yet.
-  const cpcBidMicros = optNum(adGroup.cpcBidMicros);
+  // Smart-bidding campaigns commonly report cpc_bid_micros as 0: the schema floors
+  // desired.cpcBidMicros at 10_000, so seeding desired=base with a zero/sub-floor
+  // value would make the FRESH doc fail its own parse and 404 the whole edit
+  // workbench for that campaign. Coerce sub-floor to null = "puja automática".
+  const rawCpc = optNum(adGroup.cpcBidMicros);
+  const cpcBidMicros = rawCpc != null && rawCpc < 10_000 ? null : rawCpc;
 
   const baseKeywords = tree.keywords
     .filter((row) => str(((row as Row).adGroup as Row | undefined)?.id) === id)

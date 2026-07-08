@@ -90,13 +90,13 @@ describe("verifyOutcome", () => {
   it("google budget_update: exact micros match → verified", () => {
     const action = baseAction({ network: "google_ads", actionType: "budget_update", payload: { newDailyBudgetMicros: 20_000_000 } });
     const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: 20_000_000 }));
-    expect(out).toEqual({ verified: true });
+    expect(out).toEqual({ outcome: "verified" });
   });
 
   it("google budget_update: mismatch → drift with expected/actual note", () => {
     const action = baseAction({ network: "google_ads", actionType: "budget_update", payload: { newDailyBudgetMicros: 20_000_000 } });
     const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: 15_000_000 }));
-    expect(out.verified).toBe(false);
+    expect(out.outcome).toBe("drift");
     expect(out.note).toContain("20000000");
     expect(out.note).toContain("15000000");
   });
@@ -108,7 +108,7 @@ describe("verifyOutcome", () => {
     const action = baseAction({ network: "meta_ads", actionType: "budget_update", payload: { newDailyBudgetMicros: 34_996_000 } });
     expect(metaBudgetRoundMicros(34_996_000)).toBe(35_000_000); // pin the mirror's own math
     const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: 35_000_000 }));
-    expect(out).toEqual({ verified: true });
+    expect(out).toEqual({ outcome: "verified" });
     // A raw (unrounded) compare would have been 34_996_000 !== 35_000_000 → false drift.
     expect(action.payload).not.toEqual({ newDailyBudgetMicros: 35_000_000 });
   });
@@ -116,33 +116,67 @@ describe("verifyOutcome", () => {
   it("meta budget_update: genuine drift still reported after rounding", () => {
     const action = baseAction({ network: "meta_ads", actionType: "budget_update", payload: { newDailyBudgetMicros: 34_996_000 } });
     const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: 40_000_000 }));
-    expect(out.verified).toBe(false);
+    expect(out.outcome).toBe("drift");
     expect(out.note).toContain("35000000");
     expect(out.note).toContain("40000000");
   });
 
   it("pause: verified iff after.status === 'PAUSED'", () => {
     const action = baseAction({ actionType: "pause", payload: {} });
-    expect(verifyOutcome(action, snapshot({ status: "PAUSED" }))).toEqual({ verified: true });
+    expect(verifyOutcome(action, snapshot({ status: "PAUSED" }))).toEqual({ outcome: "verified" });
     const drift = verifyOutcome(action, snapshot({ status: "ENABLED" }));
-    expect(drift.verified).toBe(false);
+    expect(drift.outcome).toBe("drift");
     expect(drift.note).toContain("PAUSED");
     expect(drift.note).toContain("ENABLED");
   });
 
   it("enable: verified iff after.status === 'ENABLED'", () => {
     const action = baseAction({ actionType: "enable", payload: {} });
-    expect(verifyOutcome(action, snapshot({ status: "ENABLED" }))).toEqual({ verified: true });
+    expect(verifyOutcome(action, snapshot({ status: "ENABLED" }))).toEqual({ outcome: "verified" });
     const drift = verifyOutcome(action, snapshot({ status: "PAUSED" }));
-    expect(drift.verified).toBe(false);
+    expect(drift.outcome).toBe("drift");
     expect(drift.note).toContain("ENABLED");
     expect(drift.note).toContain("PAUSED");
+  });
+
+  it("budget_update: after.dailyBudgetMicros null on a SUCCESSFUL snapshot (Meta CBO/lifetime budget) → unverifiable, not drift", () => {
+    const action = baseAction({ network: "meta_ads", actionType: "budget_update", payload: { newDailyBudgetMicros: 20_000_000 } });
+    const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: null }));
+    expect(out).toEqual({ outcome: "unverifiable" });
+  });
+
+  it("pause/enable: after.status null or 'UNKNOWN' on a SUCCESSFUL snapshot → unverifiable, not drift", () => {
+    const action = baseAction({ actionType: "pause", payload: {} });
+    expect(verifyOutcome(action, snapshot({ status: undefined }))).toEqual({ outcome: "unverifiable" });
+    expect(verifyOutcome(action, snapshot({ status: "UNKNOWN" }))).toEqual({ outcome: "unverifiable" });
+  });
+
+  it("budget_update: malformed payload (missing newDailyBudgetMicros) → unverifiable, not a garbled drift note", () => {
+    const action = baseAction({ actionType: "budget_update", payload: {} as unknown as { newDailyBudgetMicros: number } });
+    const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: 20_000_000 }));
+    expect(out).toEqual({ outcome: "unverifiable" });
   });
 });
 
 describe("VERIFIABLE_ACTION_TYPES", () => {
   it("is exactly {budget_update, pause, enable} — actions-repo.ts's listVerifiableExecuted mirrors this literal", () => {
     expect([...VERIFIABLE_ACTION_TYPES].sort()).toEqual(["budget_update", "enable", "pause"]);
+  });
+
+  it("(duplication pin) actions-repo.ts's listVerifiableExecuted inArray literal contains EXACTLY the members of VERIFIABLE_ACTION_TYPES", () => {
+    // The two can't import each other (repo↔verify circular import — see the
+    // comment above listVerifiableExecuted in actions-repo.ts), so the repo's
+    // literal is duplicated by hand. Grep-assert on the source text — mirrors
+    // this file's "verify.ts source never calls executeAction" technique
+    // below — so the two lists can't silently drift apart.
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "actions-repo.ts"), "utf8");
+    const match = src.match(/inArray\(ccActions\.actionType,\s*\[([^\]]+)\]\)/);
+    expect(match).not.toBeNull();
+    const literalTypes = match![1]
+      .split(",")
+      .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+      .filter(Boolean);
+    expect(literalTypes.sort()).toEqual([...VERIFIABLE_ACTION_TYPES].sort());
   });
 });
 
@@ -259,6 +293,19 @@ describe("runSweep — verification pass", () => {
     expect(rows.filter(selectable).map((r) => r.id)).toEqual(["still-selectable"]);
   });
 
+  it("budget_update: after.dailyBudgetMicros null on a SUCCESSFUL snapshot (Meta CBO/lifetime budget) → skipped untouched, NOT drifted, NOT verified, still selectable next sweep", async () => {
+    const row = baseAction({ id: "nb1", network: "meta_ads", actionType: "budget_update", payload: { newDailyBudgetMicros: 20_000_000 } });
+    const { deps, drifted, transitions, calls } = makeHarness({
+      candidates: [row],
+      adapterOverrides: { network: "meta_ads", snapshot: async () => { calls.snapshot++; return snapshot({ dailyBudgetMicros: null }); } },
+    });
+    const result = await runSweep(access(["w-null-budget"]), deps);
+    expect(calls.snapshot).toBe(1);
+    expect(transitions).toHaveLength(0); // not verified — no evidence stamp written
+    expect(drifted).toHaveLength(0); // not drifted — error column stays null, row stays selectable
+    expect(result).toEqual({ expired: 0, verified: 0, drifted: 0, checked: 1 });
+  });
+
   it("read error on snapshot(): row is skipped untouched, no drift/verified write (retryable next sweep)", async () => {
     const row = baseAction({ id: "r1" });
     const { deps, drifted, transitions, calls } = makeHarness({
@@ -290,6 +337,25 @@ describe("runSweep — verification pass", () => {
     const { deps, calls } = makeHarness({ candidates: [row] });
     await runSweep(access(["w-no-execute"]), deps);
     expect(calls.execute).toBe(0);
+  });
+
+  it("auth.resolve throws for one row in the batch: that row is skipped untouched, the sweep still RESOLVES (not rejects), and a healthy row later in the batch still gets verified", async () => {
+    const poisonRow = baseAction({ id: "poison1" });
+    const healthyRow = baseAction({ id: "healthy1" });
+    const { deps, drifted, transitions, calls } = makeHarness({
+      candidates: [poisonRow, healthyRow],
+      authResolve: async (action) => {
+        if (action.id === "poison1") throw new Error("disconnected OAuth: no connectionId");
+        return { googleRefreshToken: "rt" };
+      },
+      adapterOverrides: { snapshot: async () => { calls.snapshot++; return snapshot({ dailyBudgetMicros: 20_000_000 }); } },
+    });
+    const result = await runSweep(access(["w-poison-row"]), deps);
+    expect(calls.snapshot).toBe(1); // only the healthy row ever reached adapter.snapshot
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0].id).toBe("healthy1");
+    expect(drifted).toHaveLength(0); // poison1 was skipped, not drifted
+    expect(result).toEqual({ expired: 0, verified: 1, drifted: 0, checked: 2 });
   });
 });
 
@@ -326,6 +392,29 @@ describe("runSweep — double-run guard", () => {
     const result = await runSweep(access(["w-throttle-scope-b"]), deps2);
     expect(calls2.expireStaleApproved).toBe(1);
     expect(result.expired).toBe(2);
+  });
+
+  it("in-flight dedupe is scoped per workspace set: concurrent calls for DIFFERENT scopes both execute independently (not deduped into one, don't share counts); same-scope concurrency still dedupes (see test above)", async () => {
+    const rowA = baseAction({ id: "diffA" });
+    const rowB = baseAction({ id: "diffB" });
+    const harnessA = makeHarness({ candidates: [rowA] });
+    const harnessB = makeHarness({ candidates: [rowB] });
+    const [resultA, resultB] = await Promise.all([
+      runSweep(access(["w-dedupe-scope-a"]), harnessA.deps),
+      runSweep(access(["w-dedupe-scope-b"]), harnessB.deps),
+    ]);
+    // Both scopes actually ran their own repo calls — neither was starved by
+    // sharing the other scope's in-flight promise.
+    expect(harnessA.calls.listVerifiableExecuted).toBe(1);
+    expect(harnessB.calls.listVerifiableExecuted).toBe(1);
+    expect(resultA.checked).toBe(1);
+    expect(resultB.checked).toBe(1);
+    // Each scope's own row was verified — not the other scope's row (i.e. no
+    // cross-contamination of counts/results between the two Maps entries).
+    expect(harnessA.transitions).toHaveLength(1);
+    expect(harnessA.transitions[0]?.id).toBe("diffA");
+    expect(harnessB.transitions).toHaveLength(1);
+    expect(harnessB.transitions[0]?.id).toBe("diffB");
   });
 });
 

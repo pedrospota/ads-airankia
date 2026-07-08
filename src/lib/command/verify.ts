@@ -77,40 +77,67 @@ function buildVerifyDeps(access: CommandAccess): VerifyDeps {
   };
 }
 
+export type VerificationOutcome = "verified" | "drift" | "unverifiable";
+
 interface VerificationCheck {
+  outcome: VerificationOutcome;
   checkedField: "dailyBudgetMicros" | "status";
   expected: unknown;
   actual: unknown;
-  verified: boolean;
   note?: string;
 }
 
 /** Shared by verifyOutcome (pure, exported) and runSweep (needs the extra
  * checkedField/expected/actual to build the evidence stamp) so the compare
- * logic lives in exactly one place. */
+ * logic lives in exactly one place.
+ *
+ * Three-state outcome (not a boolean): "unverifiable" covers both a
+ * malformed payload (missing newDailyBudgetMicros) AND a checked field that
+ * is legitimately absent from a SUCCESSFUL snapshot — after.dailyBudgetMicros
+ * null for budget_update (both adapters return this for Meta CBO/lifetime-
+ * budget campaigns with no per-campaign daily budget), or after.status
+ * null/undefined/"UNKNOWN" for pause/enable. Neither case is evidence of
+ * drift, so runSweep must skip these rows untouched (same as a read error)
+ * rather than write a false-alarm drift note. */
 function computeCheck(action: CcActionRow, after: EntitySnapshot): VerificationCheck {
   if (action.actionType === "budget_update") {
     const payload = action.payload as BudgetUpdatePayload;
+    const rawExpected = payload?.newDailyBudgetMicros;
+    if (rawExpected == null) {
+      // Malformed payload: nothing to compare against — not drift.
+      return { outcome: "unverifiable", checkedField: "dailyBudgetMicros", expected: null, actual: after.dailyBudgetMicros ?? null };
+    }
     // Meta writes budgets via microsToCents (see networks/meta.ts); comparing
     // raw micros would false-drift every non-cent-round Meta budget. Mirror
     // that rounding here via the ONE shared helper.
     const expected = action.network === "meta_ads"
-      ? metaBudgetRoundMicros(payload.newDailyBudgetMicros)
-      : payload.newDailyBudgetMicros;
+      ? metaBudgetRoundMicros(rawExpected)
+      : rawExpected;
     const actual = after.dailyBudgetMicros ?? null;
+    if (actual == null) {
+      // Legitimately absent on a successful snapshot (e.g. Meta CBO/lifetime
+      // budget) — skip, never drift.
+      return { outcome: "unverifiable", checkedField: "dailyBudgetMicros", expected, actual: null };
+    }
     const verified = actual === expected;
     return {
-      checkedField: "dailyBudgetMicros", expected, actual, verified,
-      note: verified ? undefined : `Deriva de presupuesto: esperado ${expected} micros, actual ${actual ?? "desconocido"} micros`,
+      outcome: verified ? "verified" : "drift",
+      checkedField: "dailyBudgetMicros", expected, actual,
+      note: verified ? undefined : `Deriva de presupuesto: esperado ${expected} micros, actual ${actual} micros`,
     };
   }
   // pause | enable — the only other VERIFIABLE_ACTION_TYPES members.
   const expectedStatus = action.actionType === "pause" ? "PAUSED" : "ENABLED";
   const actual = after.status ?? null;
+  if (actual == null || actual === "UNKNOWN") {
+    // Snapshot didn't return a usable status — skip, never drift.
+    return { outcome: "unverifiable", checkedField: "status", expected: expectedStatus, actual: actual ?? null };
+  }
   const verified = actual === expectedStatus;
   return {
-    checkedField: "status", expected: expectedStatus, actual, verified,
-    note: verified ? undefined : `Deriva de estado: esperado ${expectedStatus}, actual ${actual ?? "desconocido"}`,
+    outcome: verified ? "verified" : "drift",
+    checkedField: "status", expected: expectedStatus, actual,
+    note: verified ? undefined : `Deriva de estado: esperado ${expectedStatus}, actual ${actual}`,
   };
 }
 
@@ -119,13 +146,22 @@ function computeCheck(action: CcActionRow, after: EntitySnapshot): VerificationC
  * `action` was supposed to have written? budget_update compares payload
  * micros for Google / metaBudgetRoundMicros(payload) for Meta; pause/enable
  * compare after.status. Never touches the network or the DB.
+ *
+ * Returns one of three outcomes — "verified" | "drift" | "unverifiable" —
+ * NOT a boolean: "unverifiable" means the checked field was legitimately
+ * absent from a successful snapshot (or the payload was malformed), which
+ * runSweep must treat as a skip, not as drift.
  */
-export function verifyOutcome(action: CcActionRow, after: EntitySnapshot): { verified: boolean; note?: string } {
-  const { verified, note } = computeCheck(action, after);
-  return note === undefined ? { verified } : { verified, note };
+export function verifyOutcome(action: CcActionRow, after: EntitySnapshot): { outcome: VerificationOutcome; note?: string } {
+  const { outcome, note } = computeCheck(action, after);
+  return note === undefined ? { outcome } : { outcome, note };
 }
 
-let sweepInFlight: Promise<SweepResult> | null = null;
+/** Keyed by the SAME sorted-workspaceIds key as lastSweepAt, so concurrent
+ * sweeps for DIFFERENT workspace scopes never share (or steal) each other's
+ * in-flight promise/counts; concurrent calls for the SAME scope still
+ * dedupe to one execution. */
+const sweepInFlight = new Map<string, Promise<SweepResult>>();
 const lastSweepAt = new Map<string, number>();
 
 function throttleKey(workspaceIds: string[]): string {
@@ -146,23 +182,28 @@ function throttleKey(workspaceIds: string[]): string {
  * Never mutates the ad networks: no executeAction, no adapter.execute call
  * anywhere in this module.
  *
- * Double-run guard: a module-scope in-flight promise dedupes concurrent
- * callers (e.g. two open tabs) down to one execution, and a per-workspace-set
- * throttle (~10 min) turns a call shortly after a completed sweep into a
- * free zero-result — no repo/network calls at all.
+ * Double-run guard: a per-scope in-flight promise (keyed by the same sorted
+ * workspaceIds key as the throttle) dedupes concurrent callers for the SAME
+ * scope (e.g. two open tabs on the same workspace) down to one execution,
+ * without letting concurrent sweeps for DIFFERENT scopes share (or steal)
+ * each other's promise/counts. A per-workspace-set throttle (~10 min) turns
+ * a call shortly after a completed sweep into a free zero-result — no
+ * repo/network calls at all.
  */
 export async function runSweep(
   access: CommandAccess, deps: VerifyDeps = buildVerifyDeps(access)
 ): Promise<SweepResult> {
-  if (sweepInFlight) return sweepInFlight;
-
   const key = throttleKey(access.workspaceIds);
+
+  const existing = sweepInFlight.get(key);
+  if (existing) return existing;
+
   const last = lastSweepAt.get(key);
   if (last !== undefined && Date.now() - last < SWEEP_THROTTLE_MS) {
     return ZERO_RESULT;
   }
 
-  sweepInFlight = (async () => {
+  const promise = (async () => {
     try {
       const expired = await deps.repo.expireStaleApproved(access.workspaceIds, CC_APPROVAL_TTL_HOURS);
 
@@ -173,7 +214,15 @@ export async function runSweep(
       let verified = 0;
       let drifted = 0;
       for (const row of candidates) {
-        const auth = await deps.auth.resolve(row);
+        let auth: AdapterAuth;
+        try {
+          auth = await deps.auth.resolve(row);
+        } catch {
+          // Poison row (disconnected OAuth, missing connectionId, etc.): skip
+          // it, but the sweep — and every other candidate row — must keep
+          // going. Same fail-closed shape as the adapter.snapshot catch below.
+          continue;
+        }
         const adapter = deps.adapters.for(row.network as CcNetwork);
         // Meta sin credenciales (or any adapter without read access): skip
         // WITHOUT stamping, so it auto-verifies the moment creds land.
@@ -190,7 +239,13 @@ export async function runSweep(
         }
 
         const check = computeCheck(row, after);
-        if (check.verified) {
+        if (check.outcome === "unverifiable") {
+          // Legitimately-absent field on a successful snapshot, or a
+          // malformed payload: skip untouched, same as a read error — never
+          // stamp drift on a row we can't actually evaluate.
+          continue;
+        }
+        if (check.outcome === "verified") {
           const priorEvidence = (row.evidence ?? {}) as Record<string, unknown>;
           await deps.repo.transitionAction(row, "verified", {
             evidence: {
@@ -213,9 +268,10 @@ export async function runSweep(
       lastSweepAt.set(key, Date.now());
       return { expired, verified, drifted, checked: candidates.length };
     } finally {
-      sweepInFlight = null;
+      sweepInFlight.delete(key);
     }
   })();
 
-  return sweepInFlight;
+  sweepInFlight.set(key, promise);
+  return promise;
 }

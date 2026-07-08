@@ -47,6 +47,12 @@ export async function POST(request: NextRequest) {
   if (!network || !accountRef || typeof body.doc !== "object" || body.doc === null) {
     return NextResponse.json({ error: "Faltan campos: network, account_ref, doc" }, { status: 400 });
   }
+  // Edit sessions are created ONLY by POST /api/command/edit (server-owned baseline). A doc
+  // smuggling a docType through this route would win the docType-first dispatch in repo/preview
+  // and route a cross-network row into the wrong compiler — reject it outright (fail-closed).
+  if ("docType" in (body.doc as Record<string, unknown>)) {
+    return NextResponse.json({ error: "doc inválido: los documentos de edición no se crean por esta ruta" }, { status: 400 });
+  }
 
   if (network === "google_ads" && typeof body.connection_id !== "string") {
     return NextResponse.json({ error: "connection_id es obligatorio para Google Ads" }, { status: 400 });

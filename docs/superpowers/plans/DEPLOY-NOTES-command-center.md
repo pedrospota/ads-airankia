@@ -213,8 +213,8 @@ Fields set by an accepted proposal (or an accepted ✨ suggestion) carry an **IA
 
 ## Operator permissions matrix (two lines)
 
-- **Operators can:** everything operational within their allow-listed workspace(s) — Resumen (kill-switch read + draft-resume for their own workspace), Constructor (create blueprints), Acciones (propose/approve/execute/Revertir), Cuentas (browse, propose actions), Bitácora (read ledger + Exportar CSV).
-- **Operators cannot:** `/admin`, `/api/migrate` (setting POST, never proposable), `/command/equipo` (Equipo page 404s for non-admins; nav shows no Equipo entry), `/api/command/equipo/*` (returns 403 from `requireAdmin`). Settings mutations (PAUSA/limites) are admin-only routes (`/api/command/settings` POST).
+- **Operators can:** everything operational within their allow-listed workspace(s) — Resumen (estado del kill-switch, solo lectura), Constructor (crear blueprints + copiloto), Acciones (proponer/aprobar/ejecutar/revertir + importar recomendaciones), Cuentas, Bitácora (+ Exportar CSV).
+- **Operators cannot:** `/admin` · `/api/migrate` · ajustes (`/api/command/settings` POST: kill-switch, límites, allowed verbs — admin-only) · Equipo (page 404s for non-admins, no nav entry, `/api/command/equipo` returns 403 from `requireAdmin`).
 
 ## Rollback
 
@@ -226,4 +226,4 @@ Fields set by an accepted proposal (or an accepted ✨ suggestion) carry an **IA
 
 ## Verification (this build)
 
-585 tests / 0 fail · tsc 0 · build 0 (`/command/equipo`, `/api/command/equipo` present) · smoke 200/403/404. Adversarial reviews caught and fixed: a race on `SUPABASE_SERVICE_ROLE_KEY` existence (now per-request), a ONE-SHOT body-reuse trap in NextResponse (now per-request), and a role-separation leak where Equipo nav was unconditionally visible until v3.0's role-aware nav splicing.
+524 tests / 0 fail · tsc 0 · build 0 (`/command/equipo`, `/api/command/equipo` present). Adversarial reviews caught and fixed: a one-shot NextResponse body reused across requests in the equipo 501 path (now built per-request), and a stale-response race in the Equipo client on rapid workspace switching. Bonus fix shipped with this release: the `/admin` nav item was unconditionally visible to EVERY logged-in user (route itself always 401'd) — now rendered only for platform admins.

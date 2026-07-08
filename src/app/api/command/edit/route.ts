@@ -52,10 +52,23 @@ export async function POST(request: NextRequest) {
   const campaignId = typeof body.campaign_id === "string" && body.campaign_id ? body.campaign_id : null;
 
   // Meta needs no connection_id (auth is the workspace env token). The
-  // connection_id requirement moves to a google-only guard placed right AFTER
-  // the meta branch (below) — same error string, so the google contract is
-  // unchanged AND TS keeps narrowing connectionId to string for the google code.
+  // connection_id requirement is checked in a google-only guard immediately
+  // below — same error string as this shared guard, so a google request still
+  // sees the exact original precedence (missing-field check wins over
+  // CAMPAIGN_ID_RE/workspace checks further down), while the meta branch
+  // stays connection_id-free.
   if (!network || !accountRef || !campaignId) {
+    return NextResponse.json(
+      { error: "Faltan campos: network, connection_id, account_ref, campaign_id" }, { status: 400 }
+    );
+  }
+
+  // Google-only: connection_id required. Placed here — before CAMPAIGN_ID_RE
+  // and the workspace check — to reproduce the original single combined guard's
+  // precedence for google requests (pre-meta state: `!network || !connectionId ||
+  // !accountRef || !campaignId`), where a missing connection_id always won over
+  // a malformed campaign_id or workspace failure.
+  if (network === "google_ads" && !connectionId) {
     return NextResponse.json(
       { error: "Faltan campos: network, connection_id, account_ref, campaign_id" }, { status: 400 }
     );
@@ -112,14 +125,8 @@ export async function POST(request: NextRequest) {
   }
   // ── end meta branch ───────────────────────────────────────────────────────
 
-  // Google-only: connection_id is required (relocated from the shared guard so
-  // the meta branch above doesn't need it; same message → same google contract).
-  if (!connectionId) {
-    return NextResponse.json(
-      { error: "Faltan campos: network, connection_id, account_ref, campaign_id" }, { status: 400 }
-    );
-  }
-  // ── google path continues unchanged below ─────────────────────────────────
+  // ── google path continues unchanged below (connection_id already confirmed
+  // present by the google-only guard above) ────────────────────────────────
 
   // Tenant boundary, copied verbatim from blueprint/route.ts's POST: connection_id must
   // belong to the caller's own workspace, never trusted blindly from the body.

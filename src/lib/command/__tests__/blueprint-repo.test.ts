@@ -522,6 +522,19 @@ describe("zero-migration guard (meta-edit risk #11)", () => {
 
   it("CC_SETTINGS_DEFAULTS (types.ts, mirrored by schema.ts's Drizzle default) allows the three meta-edit verbs", () => {
     for (const v of VERBS) expect(CC_SETTINGS_DEFAULTS.allowedActionTypes).toContain(v);
+
+    // types.ts's CC_SETTINGS_DEFAULTS is derived from CC_SETTINGS_ACTION_TYPES, a
+    // wholly separate source from schema.ts's hardcoded `allowedActionTypes` jsonb
+    // column default — the two can drift independently. Pin schema.ts's literal too
+    // by slicing its source between the field name and the closing `.notNull()`,
+    // same readFileSync-and-slice style as the migrate-route assertion below.
+    const schemaSrc = readFileSync(join(import.meta.dir, "../../schema.ts"), "utf8");
+    const fieldStart = schemaSrc.indexOf("allowedActionTypes");
+    const fieldEnd = schemaSrc.indexOf(".notNull()", fieldStart);
+    expect(fieldStart).toBeGreaterThan(-1);
+    expect(fieldEnd).toBeGreaterThan(fieldStart);
+    const defaultBlock = schemaSrc.slice(fieldStart, fieldEnd);
+    for (const v of VERBS) expect(defaultBlock).toContain(`"${v}"`);
   });
 
   it("the migrate route's 007 CREATE TABLE default and 010 cumulative default both carry the three verbs", () => {

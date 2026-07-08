@@ -295,9 +295,15 @@ export const metaAdapter: NetworkAdapter = {
   },
 
   async snapshot(_auth, _accountRef, entityKind, entityRef) {
+    // Per-entityKind field sets (meta-edit spec adjudication #1): the Graph Ad
+    // node has NO daily_budget field — requesting it errors (#100) and killed
+    // every ad-level snapshot (prepare() throws before gates). Budget/learning
+    // fields only where the node actually has them.
     const fields = entityKind === "adset"
       ? "id,name,status,effective_status,daily_budget,learning_stage_info"
-      : "id,name,status,effective_status,daily_budget";
+      : entityKind === "ad"
+        ? "id,name,status,effective_status"
+        : "id,name,status,effective_status,daily_budget";
     const entity = await metaGet(`/${entityRef}`, { fields });
     let signals: { conversions30d: number | null; spend30dMicros: number | null } = { conversions30d: null, spend30dMicros: null };
     try {
@@ -408,3 +414,74 @@ export const metaAdapter: NetworkAdapter = {
     }
   },
 };
+
+// Command Center meta-edit: raw Graph tree for a single campaign, consumed by
+// the PURE mapper in edit/meta-read-tree.ts (buildMetaEditDoc). Kept here (not
+// in meta-read-tree.ts) because metaGet/metaGetUrl are module-private —
+// exactly why google.ts hosts readCampaignTree next to its private gaql().
+export interface RawMetaCampaignTree {
+  campaign: Record<string, unknown>;
+  adsets: Array<Record<string, unknown>>;
+  ads: Array<Record<string, unknown>>;
+  currency: string | null;
+}
+
+// Configured statuses the edit surface models. Adset/ad rows outside this set
+// are FILTERED (leaves — mirrors the GAQL REMOVED exclusion in
+// google.ts#readCampaignTree); only the campaign itself throws.
+const META_EDITABLE_STATUSES = new Set(["ACTIVE", "PAUSED"]);
+
+// Follows paging.next AT MOST once (the listCampaignMetrics precedent above);
+// a SECOND remaining next throws — fail-closed beats a silently truncated
+// baseline whose un-loaded ads would drift invisibly.
+async function metaGetPaged(path: string, params: Record<string, string>): Promise<Array<Record<string, unknown>>> {
+  const first = await metaGet(path, params);
+  const rows = [...((first.data as Array<Record<string, unknown>> | undefined) ?? [])];
+  const nextUrl = (first.paging as { next?: string } | undefined)?.next;
+  if (nextUrl) {
+    const second = await metaGetUrl(nextUrl);
+    rows.push(...((second.data as Array<Record<string, unknown>> | undefined) ?? []));
+    if ((second.paging as { next?: string } | undefined)?.next) {
+      throw new Error("Campaña demasiado grande para el editor.");
+    }
+  }
+  return rows;
+}
+
+/**
+ * The IO half of the meta edit-tree read (mirror of google.ts#readCampaignTree).
+ * `_auth` is unused — Meta auth is the workspace env token (metaGet reads it) —
+ * but the signature mirrors google's so the edit route treats both uniformly.
+ * campaignId is client-supplied: the account_id tenant bind below is the meta
+ * analog of the google route's connection-workspace check.
+ */
+export async function readMetaCampaignTree(_auth: AdapterAuth, accountRef: string, campaignId: string): Promise<RawMetaCampaignTree> {
+  const campaign = await metaGet(`/${campaignId}`, {
+    fields: "id,name,status,effective_status,daily_budget,lifetime_budget,account_id",
+  });
+  // Tenant bind: Graph returns account_id as bare digits; accountRef is "act_<id>".
+  if (String(campaign.account_id ?? "") !== accountRef.replace(/^act_/, "")) {
+    throw new Error("La campaña no pertenece a la cuenta seleccionada.");
+  }
+  const campaignStatus = String(campaign.status ?? "").toUpperCase();
+  if (!META_EDITABLE_STATUSES.has(campaignStatus)) {
+    throw new Error("Campaña archivada/eliminada: no editable.");
+  }
+  const adsets = await metaGetPaged(`/${campaignId}/adsets`, {
+    fields: "id,name,status,effective_status,daily_budget,lifetime_budget,learning_stage_info",
+    limit: "200",
+  });
+  const ads = await metaGetPaged(`/${campaignId}/ads`, {
+    fields: "id,name,status,effective_status,adset_id",
+    limit: "500",
+  });
+  // One field for base.currency (google-doc parity: edit/schema.ts's currency slot).
+  const account = await metaGet(`/${accountRef}`, { fields: "currency" });
+  const editable = (row: Record<string, unknown>) => META_EDITABLE_STATUSES.has(String(row.status ?? "").toUpperCase());
+  return {
+    campaign,
+    adsets: adsets.filter(editable),
+    ads: ads.filter(editable),
+    currency: typeof account.currency === "string" ? account.currency : null,
+  };
+}

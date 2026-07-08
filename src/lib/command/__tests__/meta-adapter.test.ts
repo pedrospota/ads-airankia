@@ -218,6 +218,46 @@ describe("metaAdapter", () => {
     });
   });
 
+  // Risk #6 (spec adjudication #1): the ad node has NO daily_budget field on the
+  // Graph API — requesting it → error #100 → prepare() throws BEFORE gates,
+  // killing every ad-level pause/enable, its rollback input, and its verify read.
+  it("snapshot('ad') requests id,name,status,effective_status ONLY (no budget, no learning fields)", async () => {
+    responder = (url) => {
+      if (url.includes("/insights")) return { data: [] };
+      return { id: "999", name: "Ad X", status: "ACTIVE", effective_status: "ACTIVE" };
+    };
+    const snap = await metaAdapter.snapshot({}, "act_1", "ad", "999");
+    const entityCall = calls.find((c) => c.url.includes("/999?"));
+    const fields = new URL(entityCall!.url).searchParams.get("fields");
+    expect(fields).toBe("id,name,status,effective_status");
+    expect(snap.status).toBe("ENABLED");
+    expect(snap.dailyBudgetMicros).toBeNull();
+    expect(snap.learningPhase).toBe("UNKNOWN");
+  });
+
+  it("snapshot('adset') regression: still requests daily_budget + learning_stage_info and maps both", async () => {
+    responder = (url) => {
+      if (url.includes("/insights")) return { data: [] };
+      return { id: "555", name: "Adset X", status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "2000", learning_stage_info: { status: "LEARNING" } };
+    };
+    const snap = await metaAdapter.snapshot({}, "act_1", "adset", "555");
+    const fields = new URL(calls.find((c) => c.url.includes("/555?"))!.url).searchParams.get("fields");
+    expect(fields).toBe("id,name,status,effective_status,daily_budget,learning_stage_info");
+    expect(snap.dailyBudgetMicros).toBe(20_000_000);
+    expect(snap.learningPhase).toBe("LEARNING");
+  });
+
+  it("snapshot('campaign') regression: requests daily_budget (no learning_stage_info)", async () => {
+    responder = (url) => {
+      if (url.includes("/insights")) return { data: [] };
+      return { id: "111", name: "Camp", status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "5000" };
+    };
+    const snap = await metaAdapter.snapshot({}, "act_1", "campaign", "111");
+    const fields = new URL(calls.find((c) => c.url.includes("/111?"))!.url).searchParams.get("fields");
+    expect(fields).toBe("id,name,status,effective_status,daily_budget");
+    expect(snap.dailyBudgetMicros).toBe(50_000_000);
+  });
+
   describe("metaBudgetRoundMicros", () => {
     it("rounds micros to the nearest whole minor-unit (cent) boundary, matching the adapter's write-time rounding", () => {
       expect(metaBudgetRoundMicros(30_000_000)).toBe(30_000_000); // already cent-aligned

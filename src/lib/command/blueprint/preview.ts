@@ -25,6 +25,8 @@
 import { blockingFailures, runGates, type GateInput } from "../gates";
 import { diffEditDoc } from "../edit/diff";
 import { parseEditDoc } from "../edit/schema";
+import { diffMetaEditDoc } from "../edit/meta-diff";
+import { parseMetaEditDoc } from "../edit/meta-schema";
 import { getBlueprint, type BlueprintRepoDeps } from "./repo";
 import { parseBlueprint } from "./schema";
 import { compile } from "./compile";
@@ -96,6 +98,16 @@ const SYNTHETIC_CAPABILITIES_META: AdapterCapabilities = {
   actionTypes: ["create_campaign", "create_adset", "create_ad", "remove_entity"],
 };
 
+/** META-EDIT BRANCH: a DISTINCT constant (same rationale as the two above) —
+ * the edit surface is exactly the v1 verb triple; sharing/widening a list
+ * would let an edit doc pass CAPABILITY for create verbs it can never run,
+ * and vice versa. */
+const SYNTHETIC_CAPABILITIES_META_EDIT: AdapterCapabilities = {
+  read: true,
+  write: true,
+  actionTypes: ["budget_update", "pause", "enable"],
+};
+
 /**
  * Loads `blueprintId` (workspace-scoped), parses + compiles its doc, and runs the
  * deterministic gates for every compiled action against the account's real settings and
@@ -138,6 +150,47 @@ export async function previewBlueprintGates(
         network: "google_ads",
         action: { actionType: action.actionType, entityKind: action.entityKind, entityRef: action.entityRef, payload: action.payload },
         capabilities: SYNTHETIC_CAPABILITIES_EDIT,
+        before,
+        expected: null,
+        executedTodayForAccount,
+        validateResult: null,
+      };
+      const gates = runGates(input);
+      const blocking = blockingFailures(gates).filter((g) => g.id !== "VALIDATE_ONLY");
+      return { seq: action.seq, actionType: action.actionType, entityKind: action.entityKind, gates, blocking };
+    });
+
+    const summary = {
+      actions: perAction.length,
+      gatesRun: perAction.reduce((sum, a) => sum + a.gates.length, 0),
+      blockingCount: perAction.reduce((sum, a) => sum + a.blocking.length, 0),
+    };
+
+    return { perAction, summary, validateOnlyDeferred: true };
+  }
+
+  // META-EDIT BRANCH: docType-first, BEFORE the meta network branch below (a
+  // meta-edit row satisfies `network === "meta_ads"` and would 500 inside
+  // parseMetaBlueprint). Synthetic before is seeded from action.expected (the
+  // google-edit pattern above, NOT the create branches' bare UNKNOWN) —
+  // BUDGET_DELTA and META_LEARNING_RESET need the prior budget to say anything
+  // true. Self-contained, same shape as its three siblings.
+  if (rawDoc?.docType === "meta_edit_v1") {
+    const compiled = diffMetaEditDoc(parseMetaEditDoc(blueprint.doc), blueprintId);
+
+    const settings = await deps.settings.get(blueprint.workspaceId);
+    const executedTodayForAccount = await deps.repo.countExecutedToday(blueprint.accountRef);
+
+    const perAction: GatePreviewAction[] = compiled.map((action) => {
+      const before: EntitySnapshot = {
+        entityKind: action.entityKind, entityRef: action.entityRef, status: "UNKNOWN",
+        ...(action.expected ?? {}),
+      };
+      const input: GateInput = {
+        settings,
+        network: "meta_ads",
+        action: { actionType: action.actionType, entityKind: action.entityKind, entityRef: action.entityRef, payload: action.payload },
+        capabilities: SYNTHETIC_CAPABILITIES_META_EDIT,
         before,
         expected: null,
         executedTodayForAccount,

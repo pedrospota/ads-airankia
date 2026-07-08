@@ -7,11 +7,20 @@ import { parseMetaBlueprint } from "@/lib/command/blueprint/meta-schema";
 import { parseBlueprint } from "@/lib/command/blueprint/schema";
 import { diffEditDoc } from "@/lib/command/edit/diff";
 import { mergeEditDoc, parseEditDoc } from "@/lib/command/edit/schema";
+import { diffMetaEditDoc } from "@/lib/command/edit/meta-diff";
+import { mergeMetaEditDoc, parseMetaEditDoc } from "@/lib/command/edit/meta-schema";
 import { attachProvenance } from "@/lib/command/patch/schema";
 
 /** v2.3 edit docs are keyed by this literal docType, distinct from the v2 create-blueprint doc. */
 function isEditDoc(doc: unknown): boolean {
   return (doc as { docType?: unknown } | null)?.docType === "google_search_edit_v1";
+}
+
+/** Meta edit docs are keyed by this literal docType — checked BEFORE every
+ * `network === "meta_ads"` branch in this file (a meta-edit row satisfies the
+ * network check and would otherwise hit parseMetaBlueprint / the smuggle guard). */
+function isMetaEditDoc(doc: unknown): boolean {
+  return (doc as { docType?: unknown } | null)?.docType === "meta_edit_v1";
 }
 
 export const runtime = "nodejs";
@@ -32,9 +41,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     // never the google create compiler, but land under the SAME `compiled` response key.
     const compiled = isEditDoc(blueprint.doc)
       ? diffEditDoc(parseEditDoc(blueprint.doc), id)
-      : blueprint.network === "meta_ads"
-        ? compileMeta(parseMetaBlueprint(blueprint.doc), id)
-        : compile(parseBlueprint(blueprint.doc), id);
+      : isMetaEditDoc(blueprint.doc)
+        ? diffMetaEditDoc(parseMetaEditDoc(blueprint.doc), id)
+        : blueprint.network === "meta_ads"
+          ? compileMeta(parseMetaBlueprint(blueprint.doc), id)
+          : compile(parseBlueprint(blueprint.doc), id);
     return NextResponse.json({ blueprint, compiled });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });
@@ -85,6 +96,35 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     try {
       const updated = await saveBlueprintDoc(id, docToSave, access.workspaceIds);
+      if (!updated) {
+        return NextResponse.json({ error: "El blueprint ya no está en borrador." }, { status: 409 });
+      }
+      return NextResponse.json({ blueprint: updated });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });
+    }
+  }
+
+  // META-EDIT BRANCH: stored docType wins the dispatch, BEFORE the meta CREATE
+  // branch below (see isMetaEditDoc's comment — risk #2). Applied through
+  // mergeMetaEditDoc: client-owned `desired` merged onto the server-owned
+  // baseline/ids, final re-parse against server truth. NO attachProvenance —
+  // the meta editor never mounts CopilotoDock (spec adjudication #4), so a
+  // `_prov`/`_ai` sibling has nothing legitimate to say here.
+  if (isMetaEditDoc(blueprint.doc)) {
+    let merged;
+    try {
+      merged = mergeMetaEditDoc(parseMetaEditDoc(blueprint.doc), body.doc);
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "doc de edición Meta inválido" }, { status: 400 });
+    }
+
+    if (blueprint.status !== "draft") {
+      return NextResponse.json({ error: `No se puede editar desde estado ${blueprint.status}` }, { status: 409 });
+    }
+
+    try {
+      const updated = await saveBlueprintDoc(id, merged, access.workspaceIds);
       if (!updated) {
         return NextResponse.json({ error: "El blueprint ya no está en borrador." }, { status: 409 });
       }

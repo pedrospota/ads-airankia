@@ -255,3 +255,79 @@ describe("previewBlueprintGates — meta network branch (Task 6)", () => {
     expect(preview.summary.blockingCount).toBeGreaterThan(0);
   });
 });
+
+// Meta-EDIT doc fixture (meta-edit plan Task 5) — ABO adset with base 20.00,
+// desired parameterized; plus one ad pause so status verbs are exercised too.
+function metaEditDocFixture(desiredAdsetBudgetMicros: number) {
+  return {
+    docType: "meta_edit_v1", network: "meta_ads", accountRef: "act_123",
+    loadedAt: "2026-07-08T12:00:00.000Z",
+    campaign: {
+      id: "111",
+      base: { name: "C", status: "ENABLED", effectiveStatus: "ACTIVE",
+              dailyBudgetMicros: null, lifetimeBudgetMicros: null, currency: "MXN" },
+      desired: { status: "ENABLED", dailyBudgetMicros: null },
+      adsets: [{
+        id: "222",
+        base: { name: "AS", status: "ENABLED", effectiveStatus: "ACTIVE",
+                dailyBudgetMicros: 20_000_000, lifetimeBudgetMicros: null, learningPhase: "STABLE" },
+        desired: { status: "ENABLED", dailyBudgetMicros: desiredAdsetBudgetMicros },
+        ads: [{ id: "333", base: { name: "Ad 1", status: "ENABLED", effectiveStatus: "ACTIVE" }, desired: { status: "PAUSED" } }],
+      }],
+    },
+  };
+}
+
+function baseMetaEditBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
+  return baseMetaBlueprint({ doc: metaEditDocFixture(22_000_000), ...over });
+}
+
+describe("previewBlueprintGates — meta-edit docType branch", () => {
+  it("compiles via the differ; every action's gates carry network meta_ads and pass under the DEFAULT allow-list (zero migrations)", async () => {
+    // NOTE: settings deliberately NOT overridden — CC_SETTINGS_DEFAULTS already
+    // allows budget_update|pause|enable (the zero-migration property).
+    const deps = makeDeps({ blueprint: baseMetaEditBlueprint() });
+    const preview = await previewBlueprintGates("bp1", ["w1"], { ...deps, settings: { get: async () => ({ ...CC_SETTINGS_DEFAULTS }) } });
+
+    expect(preview.perAction.map((a) => a.actionType)).toEqual(["pause", "budget_update"]);
+    expect(preview.summary.blockingCount).toBe(0);
+    // META_LEARNING_RESET only exists as a non-"No aplica" result when the gate
+    // ran with network meta_ads AND saw a real prior budget — both properties at once.
+    const budgetGates = preview.perAction[1].gates;
+    const mlr = budgetGates.find((g) => g.id === "META_LEARNING_RESET")!;
+    expect(mlr.status).toBe("pass");
+    expect(mlr.evidence).toContain("10.0%"); // 20.00 → 22.00 = 10% — computed FROM expected
+  });
+
+  it("synthetic before is seeded from action.expected: BUDGET_DELTA blocks a >30% jump (needs the prior budget)", async () => {
+    const deps = makeDeps({ blueprint: baseMetaEditBlueprint({ doc: metaEditDocFixture(30_000_000) }) }); // +50%
+    const preview = await previewBlueprintGates("bp1", ["w1"], { ...deps, settings: { get: async () => ({ ...CC_SETTINGS_DEFAULTS }) } });
+
+    const budget = preview.perAction.find((a) => a.actionType === "budget_update")!;
+    expect(budget.blocking.map((g) => g.id)).toContain("BUDGET_DELTA");
+    // Had before been the create branches' bare UNKNOWN, BUDGET_DELTA would fail
+    // with "Sin presupuesto base medible" — assert the delta evidence instead.
+    expect(budget.blocking.find((g) => g.id === "BUDGET_DELTA")!.evidence).toContain("50.0%");
+  });
+
+  it("CAPABILITY: SYNTHETIC_CAPABILITIES_META_EDIT grants exactly budget_update|pause|enable (a create verb would block)", async () => {
+    const deps = makeDeps({ blueprint: baseMetaEditBlueprint() });
+    const preview = await previewBlueprintGates("bp1", ["w1"], { ...deps, settings: { get: async () => ({ ...CC_SETTINGS_DEFAULTS }) } });
+    for (const a of preview.perAction) {
+      expect(a.gates.find((g) => g.id === "CAPABILITY")!.status).toBe("pass");
+      // Meta non-create verbs never require a rehearsal — VALIDATE_ONLY passes
+      // ("No aplica"), unlike every google preview row.
+      expect(a.gates.find((g) => g.id === "VALIDATE_ONLY")!.status).toBe("pass");
+    }
+  });
+
+  it("risk #1 regression: a meta CREATE blueprint still previews through compileMeta with SYNTHETIC_CAPABILITIES_META", async () => {
+    const deps = makeDeps({
+      blueprint: baseMetaBlueprint(),
+      settings: { allowedActionTypes: ALLOWED_WITH_ADSET },
+    });
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+    expect(preview.perAction.map((a) => a.actionType)).toEqual(["create_campaign", "create_adset", "create_ad"]);
+    expect(preview.summary.blockingCount).toBe(0);
+  });
+});

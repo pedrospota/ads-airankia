@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCommandAccess, commandDenied } from "@/lib/command/access";
 import { createBlueprint, listBlueprints } from "@/lib/command/blueprint/repo";
+import { metaAccountRefs } from "@/lib/command/networks/meta";
 import { createSupabaseReadClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "workspace inválido" }, { status: 403 });
   }
 
-  const network = body.network === "google_ads" ? "google_ads" : null;
+  const network = body.network === "google_ads" ? "google_ads" : body.network === "meta_ads" ? "meta_ads" : null;
   const accountRef = typeof body.account_ref === "string" && body.account_ref ? body.account_ref : null;
   if (!network || !accountRef || typeof body.doc !== "object" || body.doc === null) {
     return NextResponse.json({ error: "Faltan campos: network, account_ref, doc" }, { status: 400 });
@@ -58,6 +59,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "connection_id no pertenece a este workspace" }, { status: 400 });
     }
     connectionId = body.connection_id;
+  }
+
+  // Meta: no per-blueprint OAuth connection (system-user token, workspace-wide — see
+  // networks/meta.ts) — connection_id is never required here, connectionId stays null. The
+  // account itself is validated against the env allowlist instead, since there is no Supabase
+  // ownership row to check against. The token is deliberately NOT required at create time:
+  // drafting/previewing a meta blueprint is safe even without credentials — the gate preview
+  // shows CAPABILITY as blocked, and the real token is only needed at execute time.
+  if (network === "meta_ads" && !metaAccountRefs().includes(accountRef)) {
+    return NextResponse.json({ error: "Cuenta de Meta no permitida (META_AD_ACCOUNT_IDS)." }, { status: 400 });
   }
 
   try {

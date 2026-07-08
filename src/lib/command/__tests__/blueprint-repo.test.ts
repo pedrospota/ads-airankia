@@ -76,6 +76,35 @@ function baseBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
   } as CcBlueprintRow;
 }
 
+// Meta doc fixture (Task 6): same node-graph shape proven valid by meta-compile.test.ts's
+// fixtures against metaBlueprintDocSchema + compileMeta(): campaign → adset → ad = 3 actions.
+function metaDocFixture(dailyBudgetMicros = 10_000_000) {
+  return {
+    network: "meta_ads",
+    campaign: {
+      nodeId: "c1", tempId: "campaign:1", name: "Meta Camp", status: "PAUSED", objective: "OUTCOME_TRAFFIC",
+      adsets: [
+        {
+          nodeId: "as1", tempId: "adset:1", name: "Meta Adset", status: "PAUSED",
+          dailyBudgetMicros,
+          targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+          ads: [
+            { nodeId: "ad1", tempId: "ad:1", name: "Ad 1", link: "https://example.com", message: "Check this out!" },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function baseMetaBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
+  return {
+    id: "bp1", workspaceId: "w1", createdBy: "op@x.com", network: "meta_ads",
+    accountRef: "act_123", connectionId: null, doc: metaDocFixture(), status: "draft", error: null,
+    createdAt: new Date(), updatedAt: new Date(), ...over,
+  } as CcBlueprintRow;
+}
+
 function baseAction(over: Record<string, unknown> = {}): CcActionRow {
   return {
     id: "a1", workspaceId: "w1", createdBy: "op@x.com", network: "google_ads",
@@ -263,6 +292,43 @@ describe("compileBlueprintToActions — edit-doc branch (Task 5)", () => {
     const rows = await compileBlueprintToActions("bp1", [WS], deps);
 
     expect(rows[0].recKey?.startsWith("bp-")).toBe(true); // create compiler, not the edit one
+  });
+});
+
+describe("compileBlueprintToActions — meta network branch (Task 6)", () => {
+  const WS = "w1";
+
+  it("a meta blueprint compiles via compileMeta: 3 rows in order, recKey 'bp-', connectionId null, source manual", async () => {
+    const { deps, actionStore } = makeHarness([baseMetaBlueprint()]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows.map((r) => r.actionType)).toEqual(["create_campaign", "create_adset", "create_ad"]);
+    expect(rows.map((r) => r.seq)).toEqual([0, 1, 2]);
+    expect(rows.every((r) => r.blueprintId === "bp1")).toBe(true);
+    expect(rows.every((r) => typeof r.recKey === "string" && r.recKey!.startsWith("bp-"))).toBe(true);
+    expect(rows.every((r) => r.connectionId === null)).toBe(true);
+    expect(rows.every((r) => r.source === "manual")).toBe(true);
+    expect(rows.every((r) => r.status === "proposed")).toBe(true);
+    expect(actionStore.size).toBe(3);
+  });
+
+  it("three-way dispatch: a google create doc still compiles via the google path", async () => {
+    const { deps } = makeHarness([baseBlueprint()]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows).toHaveLength(5); // budget, campaign, ad_group, keywords, ad
+    expect(rows.map((r) => r.actionType)).toEqual([
+      "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+    ]);
+  });
+
+  it("three-way dispatch: an edit doc still routes to the differ, not the meta or google compiler", async () => {
+    const { deps } = makeHarness([baseBlueprint({ doc: editDocWithBudgetChange() })]);
+    const rows = await compileBlueprintToActions("bp1", [WS], deps);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actionType).toBe("budget_update");
+    expect(rows[0].recKey?.startsWith("ed-")).toBe(true);
   });
 });
 

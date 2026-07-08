@@ -40,6 +40,36 @@ function baseBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
   } as CcBlueprintRow;
 }
 
+// Meta doc fixture (Task 6), parameterized on the adset's daily budget so tests can drive a
+// compliant vs. over-cap scenario — same node-graph shape proven valid by
+// meta-compile.test.ts's fixtures: campaign → adset → ad = 3 actions.
+function metaDocFixture(dailyBudgetMicros = 10_000_000) {
+  return {
+    network: "meta_ads",
+    campaign: {
+      nodeId: "c1", tempId: "campaign:1", name: "Meta Camp", status: "PAUSED", objective: "OUTCOME_TRAFFIC",
+      adsets: [
+        {
+          nodeId: "as1", tempId: "adset:1", name: "Meta Adset", status: "PAUSED",
+          dailyBudgetMicros,
+          targeting: { countryCodes: ["MX"], ageMin: 18, ageMax: 65 },
+          ads: [
+            { nodeId: "ad1", tempId: "ad:1", name: "Ad 1", link: "https://example.com", message: "Check this out!" },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function baseMetaBlueprint(over: Partial<CcBlueprintRow> = {}): CcBlueprintRow {
+  return {
+    id: "bp1", workspaceId: "w1", createdBy: "op@x.com", network: "meta_ads",
+    accountRef: "act_123", connectionId: null, doc: metaDocFixture(), status: "draft", error: null,
+    createdAt: new Date(), updatedAt: new Date(), ...over,
+  } as CcBlueprintRow;
+}
+
 /** In-memory fake of BlueprintRepoDeps, backed by one blueprint — mirrors
  * blueprint-repo.test.ts's harness. Never touches adsDb. Only `selectBlueprint` is actually
  * exercised by previewBlueprintGates; the rest are unreachable no-ops. */
@@ -65,6 +95,14 @@ function fakeBlueprintRepo(blueprint: CcBlueprintRow | null): BlueprintRepoDeps 
 // must reuse the SAME real settings the executor uses, gap and all).
 const ALLOWED_WITH_CREATES = [
   "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad",
+] as unknown as CcSettingsValues["allowedActionTypes"];
+
+// Meta's create verb set (Task 6) is disjoint from ALLOWED_WITH_CREATES above (no
+// create_budget/create_ad_group/create_keywords; adds create_adset) — a compliant meta
+// preview needs its own allow-list override or ACTION_ALLOWED blocks create_adset regardless
+// of the scenario under test.
+const ALLOWED_WITH_ADSET = [
+  "create_campaign", "create_adset", "create_ad",
 ] as unknown as CcSettingsValues["allowedActionTypes"];
 
 function makeDeps(opts: {
@@ -180,5 +218,40 @@ describe("previewBlueprintGates — edit-doc branch (Task 5)", () => {
 
     expect(preview.summary.actions).toBe(1); // only the budget change diffs
     expect(preview.summary.blockingCount).toBe(0);
+  });
+});
+
+describe("previewBlueprintGates — meta network branch (Task 6)", () => {
+  it("a compliant meta blueprint has zero blocking gates, network:'meta_ads' reaches GateInput", async () => {
+    const deps = makeDeps({
+      blueprint: baseMetaBlueprint(),
+      settings: { allowedActionTypes: ALLOWED_WITH_ADSET },
+    });
+
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+
+    expect(preview.summary.actions).toBe(3); // campaign, adset, ad
+    expect(preview.summary.blockingCount).toBe(0);
+    expect(preview.validateOnlyDeferred).toBe(true);
+    // PAUSED_ON_CREATE runs and passes for the campaign+adset actions — only reachable if the
+    // meta-shaped payload (status: "PAUSED" literal from compileMeta) made it into GateInput,
+    // and only stays a *pass* (not a block) if CAPABILITY/ACTION_ALLOWED also passed against
+    // the meta-shaped capabilities/allow-list rather than the google ones.
+    const pausedOnCreateRows = preview.perAction.flatMap((a) => a.gates).filter((g) => g.id === "PAUSED_ON_CREATE");
+    expect(pausedOnCreateRows.length).toBeGreaterThan(0);
+    expect(pausedOnCreateRows.every((g) => g.status === "pass")).toBe(true);
+  });
+
+  it("an over-cap adset budget blocks the create_adset action with ABS_BUDGET_CAP", async () => {
+    const deps = makeDeps({
+      blueprint: baseMetaBlueprint({ doc: metaDocFixture(900_000_000) }),
+      settings: { allowedActionTypes: ALLOWED_WITH_ADSET, maxDailyBudgetMicros: 500_000_000 },
+    });
+
+    const preview = await previewBlueprintGates("bp1", ["w1"], deps);
+
+    const adsetAction = preview.perAction.find((a) => a.actionType === "create_adset");
+    expect(adsetAction?.blocking.map((g) => g.id)).toContain("ABS_BUDGET_CAP");
+    expect(preview.summary.blockingCount).toBeGreaterThan(0);
   });
 });

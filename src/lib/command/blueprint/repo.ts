@@ -16,6 +16,8 @@ import { createActions, listActionsByBlueprint, type CcActionRow } from "../acti
 import { diffEditDoc } from "../edit/diff";
 import { EDIT_BASELINE_MAX_AGE_MS, parseEditDoc } from "../edit/schema";
 import { compile } from "./compile";
+import { compileMeta } from "./meta-compile";
+import { parseMetaBlueprint } from "./meta-schema";
 import { parseBlueprint } from "./schema";
 
 export type CcBlueprintRow = typeof ccBlueprints.$inferSelect;
@@ -183,6 +185,36 @@ export async function compileBlueprintToActions(
       actionType: a.actionType, payload: a.payload as never, expected: a.expected as never,
       source: "manual" as const, recKey: a.recKey, rationale: a.note,
       status: "proposed" as const, blueprintId, seq: a.seq, localRef: a.localRef,
+    }));
+    return deps.insertActions(rows);
+  }
+
+  // v2.2 META BRANCH (Task 6): keyed on the ROW's `network` column (not a docType literal,
+  // unlike the edit branch above) — every meta_ads blueprint's doc compiles through
+  // compileMeta (Task 4), never the google create compiler below. Rows mirror the google
+  // branch's field-by-field shape, but `connectionId` is always null (Meta auth is a
+  // workspace-wide system-user token, never a per-blueprint OAuth connection — see
+  // networks/meta.ts) and `source` is always "manual" (the AI-accepted-node marker `_ai` is
+  // a google-blueprint-only convention; meta docs never carry it).
+  if (blueprint.network === "meta_ads") {
+    const doc = parseMetaBlueprint(blueprint.doc);
+    const compiled = compileMeta(doc, blueprintId);
+    const rows: Array<typeof ccActions.$inferInsert> = compiled.map((action) => ({
+      blueprintId,
+      seq: action.seq,
+      localRef: action.localRef,
+      recKey: action.recKey,
+      workspaceId: blueprint.workspaceId,
+      createdBy: blueprint.createdBy,
+      network: blueprint.network,
+      accountRef: blueprint.accountRef,
+      connectionId: null,
+      entityKind: action.entityKind,
+      entityRef: action.entityRef,
+      actionType: action.actionType,
+      payload: action.payload,
+      status: "proposed",
+      source: "manual",
     }));
     return deps.insertActions(rows);
   }

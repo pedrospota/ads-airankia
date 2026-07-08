@@ -28,6 +28,8 @@ import { parseEditDoc } from "../edit/schema";
 import { getBlueprint, type BlueprintRepoDeps } from "./repo";
 import { parseBlueprint } from "./schema";
 import { compile } from "./compile";
+import { compileMeta } from "./meta-compile";
+import { parseMetaBlueprint } from "./meta-schema";
 import { CC_ACTION_TYPES } from "../types";
 import type { AdapterCapabilities, CcSettingsValues, EntitySnapshot, GateResult } from "../types";
 
@@ -83,6 +85,17 @@ const SYNTHETIC_CAPABILITIES_EDIT: AdapterCapabilities = {
   actionTypes: [...CC_ACTION_TYPES, "create_keywords", "create_ad"],
 };
 
+/** v2.2 META BRANCH (Task 6): a DISTINCT constant from SYNTHETIC_CAPABILITIES above — Meta's
+ * create surface is a different verb set (create_adset instead of create_budget/
+ * create_ad_group/create_keywords) plus remove_entity for rollback, so a shared/widened list
+ * would let the meta branch pass CAPABILITY for google-only verbs it can never actually run,
+ * and vice versa. */
+const SYNTHETIC_CAPABILITIES_META: AdapterCapabilities = {
+  read: true,
+  write: true,
+  actionTypes: ["create_campaign", "create_adset", "create_ad", "remove_entity"],
+};
+
 /**
  * Loads `blueprintId` (workspace-scoped), parses + compiles its doc, and runs the
  * deterministic gates for every compiled action against the account's real settings and
@@ -125,6 +138,46 @@ export async function previewBlueprintGates(
         network: "google_ads",
         action: { actionType: action.actionType, entityKind: action.entityKind, entityRef: action.entityRef, payload: action.payload },
         capabilities: SYNTHETIC_CAPABILITIES_EDIT,
+        before,
+        expected: null,
+        executedTodayForAccount,
+        validateResult: null,
+      };
+      const gates = runGates(input);
+      const blocking = blockingFailures(gates).filter((g) => g.id !== "VALIDATE_ONLY");
+      return { seq: action.seq, actionType: action.actionType, entityKind: action.entityKind, gates, blocking };
+    });
+
+    const summary = {
+      actions: perAction.length,
+      gatesRun: perAction.reduce((sum, a) => sum + a.gates.length, 0),
+      blockingCount: perAction.reduce((sum, a) => sum + a.blocking.length, 0),
+    };
+
+    return { perAction, summary, validateOnlyDeferred: true };
+  }
+
+  // v2.2 META BRANCH (Task 6): mirrors compileBlueprintToActions's own network dispatch in
+  // repo.ts, same ROW-column check (`blueprint.network`, not a docType) — meta_ads blueprints
+  // preview through compileMeta/parseMetaBlueprint (Task 3/4), never the google create
+  // schema/compiler below. `network: "meta_ads"` goes into EVERY GateInput here (the google
+  // path below hardcodes "google_ads") — several gates (VALIDATE_ONLY, LEARNING_PHASE,
+  // META_LEARNING_RESET) branch on it. Self-contained (own settings/executedToday reads, own
+  // perAction/summary build, own return), same shape as the two branches above/below it.
+  if (blueprint.network === "meta_ads") {
+    const doc = parseMetaBlueprint(blueprint.doc);
+    const compiled = compileMeta(doc, blueprintId);
+
+    const settings = await deps.settings.get(blueprint.workspaceId);
+    const executedTodayForAccount = await deps.repo.countExecutedToday(blueprint.accountRef);
+
+    const perAction: GatePreviewAction[] = compiled.map((action) => {
+      const before: EntitySnapshot = { entityKind: action.entityKind, entityRef: action.entityRef, status: "UNKNOWN" };
+      const input: GateInput = {
+        settings,
+        network: "meta_ads",
+        action: { actionType: action.actionType, entityKind: action.entityKind, entityRef: action.entityRef, payload: action.payload },
+        capabilities: SYNTHETIC_CAPABILITIES_META,
         before,
         expected: null,
         executedTodayForAccount,

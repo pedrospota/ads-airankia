@@ -82,3 +82,24 @@ v2 adds a full guided UI to CREATE (and later edit) a Google Search campaign, co
 ## CC_DRY_RUN and multi-action blueprints
 
 `CC_DRY_RUN=true` makes `executeAction` return no `resourceNames`, so the plan runner can't resolve a child's `tmp:` ref from its parent and fails closed ("Ref temporal sin resolver"). Dry-run therefore rehearses single actions, not a full multi-action blueprint. This is safe (no live mutation, fails closed) — use `CC_DRY_RUN` for the v1 per-action rehearsal; rehearse the create flow with a throwaway campaign on a real test account (it's created PAUSED and one-click rollbackable).
+
+---
+
+# Command Center v2.3 — Edit Mode (slice 1)
+
+Edit a LIVE Google Search campaign through the same rail. **No migration needed** — edit sessions reuse `cc_blueprints` with an in-doc `docType: "google_search_edit_v1"` discriminator. Zero new action types; `types.ts`/`gates.ts`/`executor.ts`/`plan-runner.ts` untouched.
+
+## Flow
+Cuentas → «Editar» on a Google SEARCH campaign → `POST /api/command/edit` loads the live tree (4 GAQL reads) into a server-owned edit doc → workbench at `/command/editar/[id]` (budget, statuses, add negatives/keywords/RSAs, RSA refresh) → `/revisar` shows Antes→Después per action + deterministic gate preview → «Aplicar cambios» = approve (recompiles via the differ, TTL-checked) → execute (plan runner, stop-on-first-failure) → Bitácora.
+
+## Edit surface (slice 1)
+budget (`budget_update`, locked for shared budgets) · campaign/ad-group status (`pause`/`enable`) · add campaign negatives (`add_negatives`) · add keywords/negatives to an existing group (`create_keywords`, real parent ref) · add RSA (`create_ad`) · **RSA refresh** = create new + pause old (Google RSAs are API-immutable). Deferred: removals (needs a user-facing remove verb), renames, bidding/geo/CPC edits, new ad-group subtrees, non-SEARCH.
+
+## Staleness honesty (operator-facing truth)
+DRIFT protects ONLY status+budget of the entity each action touches (field-scoped `expected` stamped at load time; `mergeEditDoc` keeps the baseline server-owned). Creates get ZERO DRIFT protection — concurrent structural changes are caught only by Google validateOnly + stop-on-first-failure. Belt: a baseline older than 60 min refuses to compile («Baseline caducado») — TTL validated BEFORE any destructive recompile step.
+
+## Failure recovery
+RSA replace has a create-succeeds/pause-fails window = transient double-serving (never zero enabled ads — a failed create means its paired pause never runs). Any partial failure leaves the blueprint `failed`: recovery = «Revertir lo aplicado» (reverse-seq rollback of executed actions) or leave-as-is. A `failed` edit blueprint cannot be re-executed (status machine) — re-edit from Cuentas.
+
+## Verification (this build)
+170 tests / 0 fail · tsc exit 0 · build exit 0 (`/command/editar/[id]`, `/revisar`, `/api/command/edit` present) · smoke: login 200, editar 404-gated, edit API 403-denied. Every task adversarially reviewed; the differ's two safety properties (enabled-ad-count never decreases from a failure; field-scoped DRIFT baselines) held under adversarial probing.

@@ -110,6 +110,14 @@ export default function EditorClient({
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [reloading, setReloading] = useState(false);
   const [reloadError, setReloadError] = useState<string | null>(null);
+  // spec §d "✦ Pedir al copiloto" shortcut — bumped by the selected-node panel's button to
+  // force the dock open with a seeded prompt (see copiloto-dock.tsx's openSignal/seedPrompt).
+  const [copilotoSignal, setCopilotoSignal] = useState(0);
+  const [copilotoSeed, setCopilotoSeed] = useState<string | undefined>(undefined);
+  function requestCopiloto(prompt: string) {
+    setCopilotoSeed(prompt);
+    setCopilotoSignal((n) => n + 1);
+  }
 
   const n = useMemo(() => countEdits(doc), [doc]);
 
@@ -269,7 +277,7 @@ export default function EditorClient({
           </div>
           {saveError ? <ErrorCard message={saveError} style={{ marginBottom: 16 }} /> : null}
 
-          <NodePanel doc={doc} selected={selected} onSelect={setSelected} onChange={updateDoc} prov={prov} />
+          <NodePanel doc={doc} selected={selected} onSelect={setSelected} onChange={updateDoc} prov={prov} onRequestCopiloto={requestCopiloto} />
         </Card>
 
         <div style={{ position: "sticky", top: 16, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -292,6 +300,8 @@ export default function EditorClient({
         getDoc={() => doc}
         onAccept={handleAcceptPatch}
         onSelectNode={handleSelectNode}
+        openSignal={copilotoSignal}
+        seedPrompt={copilotoSeed}
       />
     </div>
   );

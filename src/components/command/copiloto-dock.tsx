@@ -31,6 +31,15 @@ export interface CopilotoDockProps {
   /** "Ver nodo" — editor NodeSelection / builder step jump. Optional: the dock still works
    * (Aceptar/Rechazar only) without it. */
   onSelectNode?: (nodeId: string) => void;
+  /** v2.4 spec §d "✦ Pedir al copiloto" shortcut — imperative open. The host bumps this
+   * (any change, e.g. a counter incremented on click) to force the dock open regardless of
+   * its current internal open/collapsed state; undefined/unchanged is a no-op. Paired with
+   * `seedPrompt` so a per-section shortcut button can also prefill (never auto-send) the
+   * input. */
+  openSignal?: number;
+  /** Prefilled into the input the moment `openSignal` changes — the operator still has to
+   * press Enviar; this never sends on the host's behalf. */
+  seedPrompt?: string;
 }
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -122,7 +131,7 @@ function EmptyBody({ docKind, onPick }: { docKind: DocKind; onPick: (text: strin
   );
 }
 
-export function CopilotoDock({ docKind, blueprintId, accountRef, getDoc, onAccept, onSelectNode }: CopilotoDockProps) {
+export function CopilotoDock({ docKind, blueprintId, accountRef, getDoc, onAccept, onSelectNode, openSignal, seedPrompt }: CopilotoDockProps) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -131,6 +140,19 @@ export function CopilotoDock({ docKind, blueprintId, accountRef, getDoc, onAccep
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // spec §d "✦ Pedir al copiloto" shortcut — a host bumps `openSignal` to force this open from
+  // outside (a step header / panel header button), optionally seeding the input. Tracks the
+  // LAST handled value so the initial mount (where openSignal already equals its own starting
+  // value) never spuriously pops the dock open; only an actual CHANGE does.
+  const lastOpenSignal = useRef(openSignal);
+  useEffect(() => {
+    if (openSignal === undefined || openSignal === lastOpenSignal.current) return;
+    lastOpenSignal.current = openSignal;
+    setOpen(true);
+    if (seedPrompt) setInput(seedPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSignal]);
 
   // Esc collapses — only listens while open, mirrors command-palette.tsx's pattern but scoped
   // to a global keydown (this panel is non-modal: it never blocks the builder/editor behind it).

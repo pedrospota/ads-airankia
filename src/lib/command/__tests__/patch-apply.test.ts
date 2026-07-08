@@ -103,7 +103,7 @@ describe("WRITABLE_FIELDS registry", () => {
   it("matches the spec's google_create field lists exactly", () => {
     expect([...WRITABLE_FIELDS.google_create.campaign].sort()).toEqual(["bidding", "geo", "languageCode", "name"]);
     expect([...WRITABLE_FIELDS.google_create.budget].sort()).toEqual(["dailyMicros"]);
-    expect([...WRITABLE_FIELDS.google_create.adGroup].sort()).toEqual(["cpcMicros", "keywords", "name", "negatives"]);
+    expect([...WRITABLE_FIELDS.google_create.adGroup].sort()).toEqual(["keywords", "name", "negatives"]);
     expect([...WRITABLE_FIELDS.google_create.ad].sort()).toEqual(["descriptions", "finalUrl", "headlines", "path1", "path2"]);
     expect([...WRITABLE_FIELDS.google_create.baseKeyword]).toEqual([]);
   });
@@ -125,6 +125,31 @@ describe("WRITABLE_FIELDS registry", () => {
     for (const kind of Object.keys(WRITABLE_FIELDS.google_edit) as Array<keyof typeof WRITABLE_FIELDS.google_edit>) {
       for (const f of WRITABLE_FIELDS.google_edit[kind]) expect(forbidden).not.toContain(f);
     }
+  });
+
+  // Fail-closed: the builder has no BuilderState slot for ad-group CPC, so an accepted
+  // create-doc patch on adGroup.cpcMicros would silently vanish on the next buildDoc() while
+  // its `_prov` key kept mislabeling the field as AI-authored. Re-add once BuilderState loads
+  // it — the edit-doc side already supports the equivalent via desired.cpcBidMicros below.
+  it("rejects a create-doc patch on adGroup field cpcMicros — not writable (no BuilderState slot)", () => {
+    const doc = createDoc();
+    const result = expectFail(applyBlueprintPatch(
+      { docKind: "google_create", doc },
+      createPatch([op({ nodeId: doc.campaign.adGroups[0].nodeId, field: "cpcMicros", value: 900_000 })])
+    ));
+    expect(result.errors[0].message).toContain("cpcMicros");
+    expect(result.errors[0].message).toContain("no se puede modificar");
+  });
+
+  it("edit-side desired.cpcBidMicros stays writable and unaffected by the create-side cpcMicros removal", () => {
+    expect(WRITABLE_FIELDS.google_edit.adGroup).toContain("desired.cpcBidMicros");
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const result = expectOk(applyBlueprintPatch(
+      { docKind: "google_edit", doc },
+      editPatch([op({ nodeId: ag.resourceName, field: "desired.cpcBidMicros", value: 900_000 })])
+    ));
+    expect((result.doc as GoogleSearchEditDoc).campaign.adGroups[0].desired.cpcBidMicros).toBe(900_000);
   });
 });
 

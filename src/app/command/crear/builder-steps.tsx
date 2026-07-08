@@ -229,14 +229,41 @@ export interface StepCtx {
    * or ✨ suggestion touched. */
   prov: ProvenanceMap;
   ids: BuilderIds;
+  /** v2.4 spec §d "✦ Pedir al copiloto" shortcut — seeds+opens the dock. Undefined before a
+   * draft exists (the dock itself doesn't mount yet — see builder-client.tsx), so steps must
+   * omit the shortcut button rather than call a function with nothing to open. */
+  requestCopiloto?: (seedPrompt: string) => void;
 }
 
-function StepHead({ index, total }: { index: number; total: number }) {
+function CopilotoShortcutButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: `1px solid ${UI.borderStrong}`,
+        background: "none",
+        color: UI.muted,
+        borderRadius: UI.radiusSm,
+        padding: "5px 10px",
+        fontSize: 12.5,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+      }}
+    >
+      ✦ Pedir al copiloto
+    </button>
+  );
+}
+
+function StepHead({ index, total, onCopiloto }: { index: number; total: number; onCopiloto?: () => void }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
       <span style={{ fontFamily: UI.fontMono, fontSize: 12, color: UI.faint }}>
         Paso {index + 1} de {total} · Google Ads
       </span>
+      {onCopiloto ? <CopilotoShortcutButton onClick={onCopiloto} /> : null}
     </div>
   );
 }
@@ -246,10 +273,14 @@ function StepHead({ index, total }: { index: number; total: number }) {
  * ------------------------------------------------------------------------- */
 
 export function StepObjetivo({ ctx, onNext }: { ctx: StepCtx; onNext: () => void }) {
-  const { state, patch, account, accounts, selectAccount, accountLocked, prov, ids } = ctx;
+  const { state, patch, account, accounts, selectAccount, accountLocked, prov, ids, requestCopiloto } = ctx;
   return (
     <div>
-      <StepHead index={0} total={4} />
+      <StepHead
+        index={0}
+        total={4}
+        onCopiloto={requestCopiloto ? () => requestCopiloto("Ayúdame a definir el objetivo y el nombre de esta campaña.") : undefined}
+      />
       <h2 style={{ fontFamily: UI.fontDisplay, fontWeight: 500, fontSize: 23, margin: "6px 0 2px" }}>¿Qué quieres lograr?</h2>
       <p style={{ color: UI.muted, fontSize: 14, margin: "0 0 18px", maxWidth: "58ch" }}>
         Esto decide cómo la red optimiza tu inversión. Sin jerga: elige lo que de verdad quieres que pase.
@@ -311,10 +342,14 @@ export function StepObjetivo({ ctx, onNext }: { ctx: StepCtx; onNext: () => void
  * ------------------------------------------------------------------------- */
 
 export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () => void; onNext: () => void }) {
-  const { state, patch, account, prov, ids } = ctx;
+  const { state, patch, account, prov, ids, requestCopiloto } = ctx;
   return (
     <div>
-      <StepHead index={1} total={4} />
+      <StepHead
+        index={1}
+        total={4}
+        onCopiloto={requestCopiloto ? () => requestCopiloto("Propón un presupuesto diario y una estrategia de puja adecuados.") : undefined}
+      />
       <h2 style={{ fontFamily: UI.fontDisplay, fontWeight: 500, fontSize: 23, margin: "6px 0 2px" }}>¿Cuánto inviertes al día?</h2>
       <p style={{ color: UI.muted, fontSize: 14, margin: "0 0 18px", maxWidth: "58ch" }}>
         Empieza con un monto que puedas sostener 2 semanas — la red necesita ese tiempo para aprender.
@@ -423,7 +458,7 @@ export function StepPresupuesto({ ctx, onBack, onNext }: { ctx: StepCtx; onBack:
  * ------------------------------------------------------------------------- */
 
 export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () => void; onNext: () => void }) {
-  const { state, patch, account, busyField, suggest, applySuggestion, prov, ids } = ctx;
+  const { state, patch, account, busyField, suggest, applySuggestion, prov, ids, requestCopiloto } = ctx;
   // Local-only draft text for the "add keywords"/"add negatives" textareas; not part of the blueprint doc.
   const [draft, setDraft] = useState("");
   const [draftMatch, setDraftMatch] = useState<MatchType>("PHRASE");
@@ -452,7 +487,11 @@ export function StepGrupo({ ctx, onBack, onNext }: { ctx: StepCtx; onBack: () =>
 
   return (
     <div>
-      <StepHead index={2} total={4} />
+      <StepHead
+        index={2}
+        total={4}
+        onCopiloto={requestCopiloto ? () => requestCopiloto("Sugiere más palabras clave y negativas para este grupo.") : undefined}
+      />
       <h2 style={{ fontFamily: UI.fontDisplay, fontWeight: 500, fontSize: 23, margin: "6px 0 2px" }}>¿Qué busca tu cliente?</h2>
       <p style={{ color: UI.muted, fontSize: 14, margin: "0 0 18px", maxWidth: "58ch" }}>
         Escribe las frases que alguien pondría en Google cuando necesita lo tuyo. Nosotros las agrupamos en un tema.
@@ -601,7 +640,7 @@ const removeBtnStyle: React.CSSProperties = {
  * ------------------------------------------------------------------------- */
 
 export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: StepCtx; onBack: () => void; onReview: () => void; reviewDisabled: boolean }) {
-  const { state, patch, account, busyField, suggest, applySuggestion, prov, ids } = ctx;
+  const { state, patch, account, busyField, suggest, applySuggestion, prov, ids, requestCopiloto } = ctx;
 
   function updateHeadline(i: number, v: string) {
     patch({ headlines: state.headlines.map((h, idx) => (idx === i ? v : h)) });
@@ -631,7 +670,11 @@ export function StepAnuncio({ ctx, onBack, onReview, reviewDisabled }: { ctx: St
 
   return (
     <div>
-      <StepHead index={3} total={4} />
+      <StepHead
+        index={3}
+        total={4}
+        onCopiloto={requestCopiloto ? () => requestCopiloto("Proponme títulos y descripciones para este anuncio.") : undefined}
+      />
       <h2 style={{ fontFamily: UI.fontDisplay, fontWeight: 500, fontSize: 23, margin: "6px 0 2px" }}>Escribe tu anuncio</h2>
       <p style={{ color: UI.muted, fontSize: 14, margin: "0 0 18px", maxWidth: "58ch" }}>
         {RSA_SPEC.headline.min} títulos y {RSA_SPEC.description.min} descripciones bastan para empezar. Míralo armado a

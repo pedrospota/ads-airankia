@@ -70,7 +70,11 @@ const CREATE_FIELD_SCHEMAS: Record<NodeKind, Record<string, z.ZodTypeAny>> = {
   },
   adGroup: {
     name: z.string().min(1),
-    cpcMicros: z.number().int().optional(),
+    // cpcMicros is NOT writable here: el builder no tiene campo para CPC de grupo — re-añadir
+    // cuando BuilderState lo cargue; el edit-doc SÍ lo soporta vía desired.cpcBidMicros. Until
+    // then, an accepted create-doc patch on this field would silently vanish on the next
+    // buildDoc() (BuilderState has no slot to source it from) while its `_prov` key kept
+    // mislabeling the field as AI-authored — fail-closed by omission.
     keywords: z.array(keywordSchema).min(1),
     negatives: z.array(keywordSchema),
   },
@@ -127,9 +131,10 @@ function fieldNames(schemas: Record<string, z.ZodTypeAny>): readonly string[] {
 
 // Explicit const registry — anything NOT listed is rejected (fail-closed).
 //  google_create — campaign: name, bidding, geo, languageCode | budget: dailyMicros
-//                  adGroup: name, cpcMicros, keywords, negatives | ad: finalUrl, headlines,
+//                  adGroup: name, keywords, negatives | ad: finalUrl, headlines,
 //                  descriptions, path1, path2 (NEVER status/channel — schema literals — nor
-//                  nodeId/tempId).
+//                  nodeId/tempId; NEVER cpcMicros — the builder has no state slot for it, see
+//                  CREATE_FIELD_SCHEMAS.adGroup above).
 //  google_edit    — EXACTLY the mergeEditDoc-lifted set (edit/schema.ts:139-224):
 //                  campaign: desired.status, desired.dailyBudgetMicros, newNegatives,
 //                  removeNegatives | adGroup: desired.status, desired.cpcBidMicros,
@@ -265,8 +270,11 @@ export function clearProv(prov: ProvenanceMap, key: string): ProvenanceMap {
  * dormant repo.ts:229-252 `_ai` reader.
  *   - campaign (name/bidding/geo/languageCode) -> campaign's bare tempId (compile.ts:98).
  *   - budget (dailyMicros)                     -> budget's bare tempId (compile.ts:70-78).
- *   - adGroup name/cpcMicros                    -> adGroup's bare tempId, the create_ad_group
- *                                                  action (compile.ts:100-109).
+ *   - adGroup name                              -> adGroup's bare tempId, the create_ad_group
+ *                                                  action (compile.ts:100-109). (cpcMicros is
+ *                                                  not patch-writable — see CREATE_FIELD_SCHEMAS
+ *                                                  above — so it never reaches this function via
+ *                                                  a legitimately-stamped `_prov` key.)
  *   - adGroup keywords/negatives                -> `${tempId}:kw` — these two fields feed the
  *                                                  SEPARATE create_keywords action, not
  *                                                  create_ad_group (compile.ts:110-125).

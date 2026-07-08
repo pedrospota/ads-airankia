@@ -107,9 +107,38 @@ function Chip({ label, active, onClick }: { label: string; active?: boolean; onC
   );
 }
 
-function PanelHead({ children }: { children: React.ReactNode }) {
+function PanelHead({ children, onCopiloto }: { children: React.ReactNode; onCopiloto?: () => void }) {
   return (
-    <span style={{ fontFamily: UI.fontMono, fontSize: 12, color: UI.faint }}>{children}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+      <span style={{ fontFamily: UI.fontMono, fontSize: 12, color: UI.faint }}>{children}</span>
+      {onCopiloto ? <CopilotoShortcutButton onClick={onCopiloto} /> : null}
+    </div>
+  );
+}
+
+// v2.4 spec §d "✦ Pedir al copiloto" shortcut — mirrors crear/builder-steps.tsx's identical
+// button verbatim (same style, same copy); kept as a separate small component here rather than
+// imported so this file's import surface stays scoped to what it already pulls from
+// builder-steps.tsx (Field/CharCount only).
+function CopilotoShortcutButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: `1px solid ${UI.borderStrong}`,
+        background: "none",
+        color: UI.muted,
+        borderRadius: UI.radiusSm,
+        padding: "5px 10px",
+        fontSize: 12.5,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+      }}
+    >
+      ✦ Pedir al copiloto
+    </button>
   );
 }
 
@@ -493,12 +522,16 @@ function AdGroupPanel({
   onChange,
   onSelect,
   prov,
+  onRequestCopiloto,
 }: {
   group: EditAdGroup;
   currency: string | null;
   onChange: DocUpdater;
   onSelect: (s: NodeSelection) => void;
   prov: ProvenanceMap;
+  /** v2.4 spec §d "✦ Pedir al copiloto" shortcut — undefined callers (none today) simply omit
+   * the button, mirroring builder-steps.tsx's StepCtx.requestCopiloto optionality. */
+  onRequestCopiloto?: (seedPrompt: string) => void;
 }) {
   // NodePanel keys this component by group.resourceName, so this local state
   // resets whenever the operator selects a different ad group — it never
@@ -523,7 +556,15 @@ function AdGroupPanel({
 
   return (
     <div>
-      <PanelHead>Grupo de anuncios</PanelHead>
+      <PanelHead
+        onCopiloto={
+          onRequestCopiloto
+            ? () => onRequestCopiloto("Proponme cambios para este grupo (keywords, CPC, estado).")
+            : undefined
+        }
+      >
+        Grupo de anuncios
+      </PanelHead>
       <NodeTitle>{group.base.name}</NodeTitle>
 
       <Field label="Estado" cnt={<IaBadgeFor prov={prov} nodeId={group.resourceName} field="desired.status" />}>
@@ -824,6 +865,7 @@ export function NodePanel({
   onSelect,
   onChange,
   prov,
+  onRequestCopiloto,
 }: {
   doc: GoogleSearchEditDoc;
   selected: NodeSelection;
@@ -832,6 +874,10 @@ export function NodePanel({
   /** v2.4 Copiloto — read-only, threaded to every sub-panel for <IaBadgeFor/>/<ProvBadge/>.
    * Optional so any other caller of NodePanel keeps compiling unchanged. */
   prov?: ProvenanceMap;
+  /** v2.4 spec §d "✦ Pedir al copiloto" shortcut — threaded only to AdGroupPanel today (the
+   * spec's illustrative placement); optional so any other caller of NodePanel keeps compiling
+   * unchanged. */
+  onRequestCopiloto?: (seedPrompt: string) => void;
 }) {
   const p = prov ?? {};
   if (selected.kind === "campaign") {
@@ -855,6 +901,7 @@ export function NodePanel({
         onChange={onChange}
         onSelect={onSelect}
         prov={p}
+        onRequestCopiloto={onRequestCopiloto}
       />
     );
   }

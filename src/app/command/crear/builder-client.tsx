@@ -104,6 +104,14 @@ export default function BuilderClient({ accounts }: { accounts: CrearAccountOpti
   // fresh), so there is no raw `_prov` to seed from; every entry is either stamped by an
   // accepted propose_patch op (handleAcceptPatch) or an accepted ✨ suggest (applySuggestion).
   const [prov, setProv] = useState<ProvenanceMap>({});
+  // spec §d "✦ Pedir al copiloto" shortcut — bumped by a per-step button to force the dock
+  // open with a seeded prompt (see copiloto-dock.tsx's openSignal/seedPrompt props).
+  const [copilotoSignal, setCopilotoSignal] = useState(0);
+  const [copilotoSeed, setCopilotoSeed] = useState<string | undefined>(undefined);
+  function requestCopiloto(prompt: string) {
+    setCopilotoSeed(prompt);
+    setCopilotoSignal((n) => n + 1);
+  }
 
   const account = useMemo(() => accounts.find((a) => a.accountRef === state.accountRef) ?? null, [accounts, state.accountRef]);
 
@@ -298,6 +306,7 @@ export default function BuilderClient({ accounts }: { accounts: CrearAccountOpti
     applySuggestion,
     prov,
     ids: idsRef.current,
+    requestCopiloto: blueprintId ? requestCopiloto : undefined,
   };
   const elementCount = 1 + 1 + 1 + 1 + doc.campaign.adGroups[0].ads[0].headlines.length + doc.campaign.adGroups[0].ads[0].descriptions.length;
 
@@ -370,6 +379,8 @@ export default function BuilderClient({ accounts }: { accounts: CrearAccountOpti
           getDoc={() => buildDoc(state, idsRef.current)}
           onAccept={handleAcceptPatch}
           onSelectNode={handleSelectNode}
+          openSignal={copilotoSignal}
+          seedPrompt={copilotoSeed}
         />
       ) : null}
     </div>

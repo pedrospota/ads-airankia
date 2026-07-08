@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { adsDb } from "@/lib/ads-db";
 import { ccActions, ccExecutions } from "@/lib/schema";
 import { assertTransition } from "./state";
@@ -124,4 +124,76 @@ export async function countByStatus(workspaceIds: string[]): Promise<Record<stri
   const rows = await adsDb.select({ status: ccActions.status, n: sql<number>`count(*)::int` })
     .from(ccActions).where(inArray(ccActions.workspaceId, workspaceIds)).groupBy(ccActions.status);
   return Object.fromEntries(rows.map((r) => [r.status, r.n]));
+}
+
+// ---------------------------------------------------------------------------
+// v2.6 lazy verification sweep (src/lib/command/verify.ts). Read-only against
+// the ad networks: these three functions only ever touch cc_actions rows via
+// atomic/guarded SQL — verify.ts never calls executeAction/adapter.execute.
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE atomic set-based UPDATE: every stale 'approved' row (in the given
+ * workspaces, approved more than `olderThanHours` ago) expires in a single
+ * statement — inherently race-free, no per-row optimistic guard needed.
+ * The legality of approved→expired is sanity-checked once at import time by
+ * verify.ts (`assertTransition("approved", "expired")`), not here, because
+ * this write is a raw UPDATE rather than a transitionAction call.
+ */
+export async function expireStaleApproved(workspaceIds: string[], olderThanHours: number): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanHours * 60 * 60 * 1000);
+  const rows = await adsDb.update(ccActions)
+    .set({
+      status: "expired",
+      error: "Aprobación caducada (>72h): vuelve a aprobar",
+      updatedAt: new Date(),
+    })
+    .where(and(
+      inArray(ccActions.workspaceId, workspaceIds),
+      eq(ccActions.status, "approved"),
+      lt(ccActions.approvedAt, cutoff),
+    ))
+    .returning({ id: ccActions.id });
+  return rows.length;
+}
+
+/**
+ * Candidate rows for the verification pass: workspace-scoped, executed more
+ * than `afterHours` ago, no drift/failure text recorded yet (`error IS NULL`
+ * — this predicate is what makes drift one-shot: recordVerificationDrift sets
+ * error, so a drifted row drops out of this select on the next sweep), action
+ * type in the verifiable set, oldest first, capped at `limit`.
+ *
+ * The verifiable-type literal here mirrors verify.ts's exported
+ * `VERIFIABLE_ACTION_TYPES` constant (kept separate, not imported, to avoid a
+ * repo↔verify circular import) — verify.test.ts pins the constant's contents
+ * so the two can't silently drift apart.
+ */
+export async function listVerifiableExecuted(
+  workspaceIds: string[], afterHours: number, limit: number
+): Promise<CcActionRow[]> {
+  const cutoff = new Date(Date.now() - afterHours * 60 * 60 * 1000);
+  return adsDb.select().from(ccActions)
+    .where(and(
+      inArray(ccActions.workspaceId, workspaceIds),
+      eq(ccActions.status, "executed"),
+      lt(ccActions.executedAt, cutoff),
+      isNull(ccActions.error),
+      inArray(ccActions.actionType, ["budget_update", "pause", "enable"]),
+    ))
+    .orderBy(asc(ccActions.executedAt))
+    .limit(limit);
+}
+
+/**
+ * Guarded UPDATE — the SOLE writer of `error` on an 'executed' row. Scoping to
+ * `status='executed'` (not just `id`) makes the write a no-op if the row moved
+ * on (rolled back, etc.) between the sweep's select and this write, and keeps
+ * `error` unambiguous: executeAction/rollbackAction always clear it to null on
+ * success, so error≠null on an 'executed' row means, and can only mean, drift.
+ */
+export async function recordVerificationDrift(id: string, note: string): Promise<void> {
+  await adsDb.update(ccActions)
+    .set({ error: note, updatedAt: new Date() })
+    .where(and(eq(ccActions.id, id), eq(ccActions.status, "executed")));
 }

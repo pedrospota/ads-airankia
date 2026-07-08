@@ -133,6 +133,171 @@ describe("googleAdapter", () => {
       expect(caps.actionTypes).toContain(t));
   });
 
+  it("v2.7: capabilities include update_keyword_status + update_cpc", () => {
+    const caps = googleAdapter.capabilities(AUTH);
+    expect(caps.actionTypes).toContain("update_keyword_status");
+    expect(caps.actionTypes).toContain("update_cpc");
+  });
+
+  describe("v2.7 update_keyword_status", () => {
+    it("execute → adGroupCriteria:mutate with one status-updateMask op per keyword", async () => {
+      responder = () => ({ results: [
+        { resourceName: "customers/123/adGroupCriteria/10~1" },
+        { resourceName: "customers/123/adGroupCriteria/10~2" },
+      ] });
+      const exec = await googleAdapter.execute(AUTH, "123", {
+        actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10",
+        payload: { status: "PAUSED", keywords: [
+          { resourceName: "customers/123/adGroupCriteria/10~1", text: "zapatos" },
+          { resourceName: "customers/123/adGroupCriteria/10~2", text: "botas" },
+        ] },
+      }, before());
+      expect(exec.operation).toBe("adGroupCriteria:mutate");
+      const body = JSON.parse(String(calls.find((c) => c.url.endsWith("adGroupCriteria:mutate"))?.init?.body));
+      expect(body.operations).toHaveLength(2);
+      expect(body.operations[0]).toEqual({ updateMask: "status", update: { resourceName: "customers/123/adGroupCriteria/10~1", status: "PAUSED" } });
+      expect(body.operations[1]).toEqual({ updateMask: "status", update: { resourceName: "customers/123/adGroupCriteria/10~2", status: "PAUSED" } });
+    });
+
+    it("execute status:ENABLED (reactivate) sets status ENABLED on every op", async () => {
+      responder = () => ({ results: [{ resourceName: "customers/123/adGroupCriteria/10~1" }] });
+      await googleAdapter.execute(AUTH, "123", {
+        actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10",
+        payload: { status: "ENABLED", keywords: [{ resourceName: "customers/123/adGroupCriteria/10~1", text: "zapatos" }] },
+      }, before());
+      const body = JSON.parse(String(calls.find((c) => c.url.endsWith("adGroupCriteria:mutate"))?.init?.body));
+      expect(body.operations[0].update.status).toBe("ENABLED");
+    });
+
+    it("fail-closed resourceName guard: throws when a resourceName is missing /adGroupCriteria/", async () => {
+      await expect(googleAdapter.execute(AUTH, "123", {
+        actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10",
+        payload: { status: "PAUSED", keywords: [{ resourceName: "customers/123/campaignCriteria/10~1", text: "x" }] },
+      }, before())).rejects.toThrow();
+    });
+
+    it("fail-closed resourceName guard: throws on a wrong-account resourceName", async () => {
+      await expect(googleAdapter.execute(AUTH, "123", {
+        actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10",
+        payload: { status: "PAUSED", keywords: [{ resourceName: "customers/999/adGroupCriteria/10~1", text: "x" }] },
+      }, before())).rejects.toThrow();
+    });
+
+    it("fail-closed resourceName guard: a single bad ref among good ones still throws (no partial mutate)", async () => {
+      await expect(googleAdapter.execute(AUTH, "123", {
+        actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10",
+        payload: { status: "PAUSED", keywords: [
+          { resourceName: "customers/123/adGroupCriteria/10~1", text: "ok" },
+          { resourceName: "customers/123/campaignCriteria/10~2", text: "bad" },
+        ] },
+      }, before())).rejects.toThrow();
+    });
+
+    it("validate() rehearses update_keyword_status with validateOnly:true", async () => {
+      responder = () => ({});
+      const res = await googleAdapter.validate!(AUTH, "123", {
+        actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10",
+        payload: { status: "PAUSED", keywords: [{ resourceName: "customers/123/adGroupCriteria/10~1", text: "x" }] },
+      }, before());
+      expect(res.ok).toBe(true);
+      const body = JSON.parse(String(calls.find((c) => c.url.endsWith("adGroupCriteria:mutate"))?.init?.body));
+      expect(body.validateOnly).toBe(true);
+    });
+  });
+
+  describe("v2.7 update_cpc", () => {
+    it("execute → adGroups:mutate with a cpcBidMicros-updateMask op, value stringified", async () => {
+      responder = () => ({ results: [{ resourceName: "customers/123/adGroups/10" }] });
+      const exec = await googleAdapter.execute(AUTH, "123", {
+        actionType: "update_cpc", entityKind: "ad_group", entityRef: "10", payload: { newCpcBidMicros: 650_000 },
+      }, before());
+      expect(exec.operation).toBe("adGroups:mutate");
+      const body = JSON.parse(String(calls.find((c) => c.url.endsWith("adGroups:mutate"))?.init?.body));
+      expect(body.operations[0]).toEqual({ updateMask: "cpcBidMicros", update: { resourceName: "customers/123/adGroups/10", cpcBidMicros: "650000" } });
+    });
+
+    it("validate() rehearses update_cpc with validateOnly:true", async () => {
+      responder = () => ({});
+      const res = await googleAdapter.validate!(AUTH, "123", {
+        actionType: "update_cpc", entityKind: "ad_group", entityRef: "10", payload: { newCpcBidMicros: 650_000 },
+      }, before());
+      expect(res.ok).toBe(true);
+      const body = JSON.parse(String(calls.find((c) => c.url.endsWith("adGroups:mutate"))?.init?.body));
+      expect(body.validateOnly).toBe(true);
+    });
+  });
+
+  describe("v2.7 snapshot(ad_group) cpcBidMicros", () => {
+    it("SELECT includes ad_group.cpc_bid_micros and maps a present value to a number", async () => {
+      responder = (url, init) => {
+        const q = String(JSON.parse(String(init?.body ?? "{}")).query ?? "");
+        expect(q).toContain("ad_group.cpc_bid_micros");
+        return { results: [{ adGroup: { id: "10", name: "AG", status: "ENABLED", cpcBidMicros: "500000" } }] };
+      };
+      const snap = await googleAdapter.snapshot(AUTH, "123", "ad_group", "10");
+      expect(snap.cpcBidMicros).toBe(500_000);
+    });
+
+    it("maps an absent cpcBidMicros (smart-bidding ad group) to null, not 0/undefined", async () => {
+      responder = () => ({ results: [{ adGroup: { id: "10", name: "AG", status: "ENABLED" } }] });
+      const snap = await googleAdapter.snapshot(AUTH, "123", "ad_group", "10");
+      expect(snap.cpcBidMicros).toBeNull();
+    });
+  });
+
+  describe("v2.7 buildRollback — update_keyword_status / update_cpc / remove_negatives", () => {
+    it("update_keyword_status → same verb, inverted status, same keywords (payload self-sufficient)", () => {
+      const keywords = [{ resourceName: "customers/123/adGroupCriteria/10~1", text: "zapatos" }];
+      const r = googleAdapter.buildRollback(
+        { actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10", payload: { status: "PAUSED", keywords } },
+        before(), { operation: "adGroupCriteria:mutate", request: {}, response: {} }
+      );
+      expect(r?.action).toEqual({ actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10", payload: { status: "ENABLED", keywords } });
+    });
+
+    it("update_keyword_status(ENABLED) rollback inverts to PAUSED", () => {
+      const keywords = [{ resourceName: "customers/123/adGroupCriteria/10~1", text: "zapatos" }];
+      const r = googleAdapter.buildRollback(
+        { actionType: "update_keyword_status", entityKind: "ad_group", entityRef: "10", payload: { status: "ENABLED", keywords } },
+        before(), { operation: "adGroupCriteria:mutate", request: {}, response: {} }
+      );
+      expect((r?.action.payload as { status: string }).status).toBe("PAUSED");
+    });
+
+    it("update_cpc → update_cpc(before.cpcBidMicros) when a manual CPC baseline exists", () => {
+      const r = googleAdapter.buildRollback(
+        { actionType: "update_cpc", entityKind: "ad_group", entityRef: "10", payload: { newCpcBidMicros: 650_000 } },
+        before({ cpcBidMicros: 500_000 }), { operation: "adGroups:mutate", request: {}, response: {} }
+      );
+      expect(r?.action).toEqual({ actionType: "update_cpc", entityKind: "ad_group", entityRef: "10", payload: { newCpcBidMicros: 500_000 } });
+    });
+
+    it("update_cpc rollback (risk #2): null when before.cpcBidMicros is null (smart-bidding — honestly un-rollbackable)", () => {
+      const r = googleAdapter.buildRollback(
+        { actionType: "update_cpc", entityKind: "ad_group", entityRef: "10", payload: { newCpcBidMicros: 650_000 } },
+        before({ cpcBidMicros: null }), { operation: "adGroups:mutate", request: {}, response: {} }
+      );
+      expect(r).toBeNull();
+    });
+
+    it("remove_negatives → add_negatives(payload.removed) when removed is present", () => {
+      const r = googleAdapter.buildRollback(
+        { actionType: "remove_negatives", entityKind: "campaign", entityRef: "111",
+          payload: { resourceNames: ["customers/123/campaignCriteria/111~9"], removed: [{ text: "gratis", match: "PHRASE" }] } },
+        before(), { operation: "campaignCriteria:mutate", request: {}, response: {} }
+      );
+      expect(r?.action).toEqual({ actionType: "add_negatives", entityKind: "campaign", entityRef: "111", payload: { negatives: [{ text: "gratis", match: "PHRASE" }] } });
+    });
+
+    it("remove_negatives rollback: null when removed is absent (preserves today's no-rollback-of-rollback behavior)", () => {
+      const r = googleAdapter.buildRollback(
+        { actionType: "remove_negatives", entityKind: "campaign", entityRef: "111", payload: { resourceNames: ["customers/123/campaignCriteria/111~9"] } },
+        before(), { operation: "campaignCriteria:mutate", request: {}, response: {} }
+      );
+      expect(r).toBeNull();
+    });
+  });
+
   it("create_budget → campaignBudgets:mutate create with amountMicros string", async () => {
     responder = () => ({ results: [{ resourceName: "customers/123/campaignBudgets/9" }] });
     const exec = await googleAdapter.execute(AUTH, "123",
@@ -307,6 +472,45 @@ describe("googleAdapter", () => {
       customer: { currencyCode: "USD" },
     }] });
     await expect(readCampaignTree(AUTH, "123", "5")).rejects.toThrow("Solo campañas de Búsqueda");
+  });
+
+  describe("v2.7 readCampaignTree deltas", () => {
+    it("ad_group GAQL selects cpc_bid_micros; keyword GAQL selects criterion status; NEW 5th GAQL loads live campaign negatives", async () => {
+      responder = (url, init) => {
+        const q = String(JSON.parse(String(init?.body ?? "{}")).query ?? "");
+        if (q.includes("FROM campaign WHERE campaign.id")) {
+          return { results: [{
+            campaign: { id: "5", resourceName: "customers/123/campaigns/5", name: "C", status: "ENABLED",
+              advertisingChannelType: "SEARCH", campaignBudget: "customers/123/campaignBudgets/9" },
+            campaignBudget: { amountMicros: "350000000", explicitlyShared: false },
+            customer: { currencyCode: "USD" },
+          }] };
+        }
+        if (q.includes("FROM ad_group WHERE")) {
+          expect(q).toContain("ad_group.cpc_bid_micros");
+          return { results: [{ adGroup: { id: "10", resourceName: "customers/123/adGroups/10", name: "AG", status: "ENABLED", cpcBidMicros: "500000" } }] };
+        }
+        if (q.includes("FROM ad_group_criterion")) {
+          expect(q).toContain("ad_group_criterion.status");
+          return { results: [] };
+        }
+        if (q.includes("FROM ad_group_ad")) return { results: [] };
+        if (q.includes("FROM campaign_criterion")) {
+          expect(q).toContain("campaign_criterion.type = 'KEYWORD'");
+          expect(q).toContain("campaign_criterion.negative = true");
+          expect(q).toContain("campaign_criterion.status != 'REMOVED'");
+          return { results: [{ campaignCriterion: {
+            resourceName: "customers/123/campaignCriteria/5~99",
+            keyword: { text: "gratis", matchType: "PHRASE" },
+          } }] };
+        }
+        return { results: [] };
+      };
+      const tree = await readCampaignTree(AUTH, "123", "5");
+      expect(tree.campaignNegatives).toHaveLength(1);
+      const row = tree.campaignNegatives[0] as { campaignCriterion?: { resourceName?: string } };
+      expect(row.campaignCriterion?.resourceName).toBe("customers/123/campaignCriteria/5~99");
+    });
   });
 
   describe("listCampaignMetrics", () => {

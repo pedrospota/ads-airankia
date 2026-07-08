@@ -156,11 +156,37 @@ describe("verifyOutcome", () => {
     const out = verifyOutcome(action, snapshot({ dailyBudgetMicros: 20_000_000 }));
     expect(out).toEqual({ outcome: "unverifiable" });
   });
+
+  it("v2.7 update_cpc: exact micros match → verified", () => {
+    const action = baseAction({ actionType: "update_cpc", payload: { newCpcBidMicros: 650_000 } });
+    const out = verifyOutcome(action, snapshot({ cpcBidMicros: 650_000 }));
+    expect(out).toEqual({ outcome: "verified" });
+  });
+
+  it("v2.7 update_cpc: mismatch → drift with expected/actual note", () => {
+    const action = baseAction({ actionType: "update_cpc", payload: { newCpcBidMicros: 650_000 } });
+    const out = verifyOutcome(action, snapshot({ cpcBidMicros: 500_000 }));
+    expect(out.outcome).toBe("drift");
+    expect(out.note).toContain("650000");
+    expect(out.note).toContain("500000");
+  });
+
+  it("v2.7 update_cpc: after.cpcBidMicros null on a SUCCESSFUL snapshot (smart-bidding ad group) → unverifiable, not drift", () => {
+    const action = baseAction({ actionType: "update_cpc", payload: { newCpcBidMicros: 650_000 } });
+    const out = verifyOutcome(action, snapshot({ cpcBidMicros: null }));
+    expect(out).toEqual({ outcome: "unverifiable" });
+  });
+
+  it("v2.7 update_cpc: malformed payload (missing newCpcBidMicros) → unverifiable, not a garbled drift note", () => {
+    const action = baseAction({ actionType: "update_cpc", payload: {} as unknown as { newCpcBidMicros: number } });
+    const out = verifyOutcome(action, snapshot({ cpcBidMicros: 650_000 }));
+    expect(out).toEqual({ outcome: "unverifiable" });
+  });
 });
 
 describe("VERIFIABLE_ACTION_TYPES", () => {
-  it("is exactly {budget_update, pause, enable} — actions-repo.ts's listVerifiableExecuted mirrors this literal", () => {
-    expect([...VERIFIABLE_ACTION_TYPES].sort()).toEqual(["budget_update", "enable", "pause"]);
+  it("is exactly {budget_update, pause, enable, update_cpc} — actions-repo.ts's listVerifiableExecuted mirrors this literal", () => {
+    expect([...VERIFIABLE_ACTION_TYPES].sort()).toEqual(["budget_update", "enable", "pause", "update_cpc"]);
   });
 
   it("(duplication pin) actions-repo.ts's listVerifiableExecuted inArray literal contains EXACTLY the members of VERIFIABLE_ACTION_TYPES", () => {
@@ -265,6 +291,18 @@ describe("runSweep — verification pass", () => {
     });
     await runSweep(access(["w-verify-enable"]), enableDeps);
     expect(enableTransitions[0]?.to).toBe("verified");
+  });
+
+  it("verified: v2.7 google update_cpc matching", async () => {
+    const row = baseAction({ id: "cpc1", actionType: "update_cpc", payload: { newCpcBidMicros: 650_000 } });
+    const { deps, drifted, transitions } = makeHarness({
+      candidates: [row],
+      adapterOverrides: { snapshot: async () => snapshot({ cpcBidMicros: 650_000 }) },
+    });
+    const result = await runSweep(access(["w-verify-cpc"]), deps);
+    expect(drifted).toHaveLength(0);
+    expect(transitions[0]?.to).toBe("verified");
+    expect(result.verified).toBe(1);
   });
 
   it("drift: status mismatch → recordVerificationDrift with a Spanish note, row status UNCHANGED (no transitionAction call)", async () => {

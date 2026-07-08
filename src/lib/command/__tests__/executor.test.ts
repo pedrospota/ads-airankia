@@ -213,4 +213,34 @@ describe("rollbackAction", () => {
     expect(deps.log).toContain("transition:rolled_back");
     expect(deps.log.filter(l => l.startsWith("insertExec"))).toHaveLength(1);
   });
+
+  it("PROMOTION-SAFETY PIN (v2.7 risk #1): rollback of an executed add_negatives action (recipe = remove_negatives) EXECUTES even when remove_negatives is NOT in settings.allowedActionTypes", async () => {
+    // remove_negatives was promoted out of INTERNAL_ACTION_TYPES in v2.7 — it now
+    // faces ACTION_ALLOWED like any user verb. But its use as the internal
+    // rollback-of-add_negatives must keep working regardless of the operator's
+    // allow-list, because rollbackAction's hard-blocker filter (executor.ts)
+    // excludes ACTION_ALLOWED. This pins that coupling: if the filter list ever
+    // grows to include ACTION_ALLOWED, this test fails loudly.
+    const deps = fakeDeps({
+      settings: { get: async () => ({ ...CC_SETTINGS_DEFAULTS, allowedActionTypes: ["budget_update", "pause", "enable"] as CcSettingsValues["allowedActionTypes"] }) },
+    });
+    deps.repo.getAction = async () =>
+      baseAction({ status: "executed", actionType: "add_negatives", entityKind: "campaign", payload: { negatives: [{ text: "gratis", match: "PHRASE" }] } }) as never;
+    deps.repo.latestDoneExecution = async () => ({
+      id: "e1", actionId: "a1", attempt: 1, network: "google_ads", accountRef: "123",
+      operation: "campaignCriteria:mutate", requestHash: "h", validateOnly: false,
+      before: snapshot(), request: {}, response: {}, after: null,
+      rollbackRecipe: {
+        action: { actionType: "remove_negatives", entityKind: "campaign", entityRef: "111", payload: { resourceNames: ["customers/123/campaignCriteria/111~9"] } },
+        note: "Eliminar 1 negativa creada.",
+      },
+      status: "done", actor: "op@x.com", createdAt: new Date(), updatedAt: new Date(),
+    }) as never;
+    // Sanity: the fake adapter's capability list DOES include remove_negatives
+    // (CAPABILITY is a hard blocker and must legitimately pass), but settings
+    // above deliberately excludes it — that's the gap this test proves is safe.
+    const out = await rollbackAction("a1", "op@x.com", ["w1"], deps);
+    expect(out.ok).toBe(true);
+    expect(deps.log).toContain("transition:rolled_back");
+  });
 });

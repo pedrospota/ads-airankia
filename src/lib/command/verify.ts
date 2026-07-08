@@ -13,7 +13,7 @@ import type { CcActionRow } from "./actions-repo";
 import type { CommandAccess } from "./access";
 import type {
   AdapterAuth, BudgetUpdatePayload, CcActionStatus, CcEntityKind, CcNetwork,
-  EntitySnapshot, NetworkAdapter,
+  EntitySnapshot, NetworkAdapter, UpdateCpcPayload,
 } from "./types";
 
 // Sanity check, run once at module load. The expiry pass below writes
@@ -27,7 +27,7 @@ assertTransition("approved", "expired");
 export const CC_APPROVAL_TTL_HOURS = 72;
 export const VERIFY_AFTER_HOURS = 4;
 export const VERIFY_BATCH_LIMIT = 10;
-export const VERIFIABLE_ACTION_TYPES: ReadonlySet<string> = new Set(["budget_update", "pause", "enable"]);
+export const VERIFIABLE_ACTION_TYPES: ReadonlySet<string> = new Set(["budget_update", "pause", "enable", "update_cpc"]);
 
 /** In-process throttle: skip redundant reads on rapid navigation across tabs/pages. */
 const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
@@ -81,7 +81,7 @@ export type VerificationOutcome = "verified" | "drift" | "unverifiable";
 
 interface VerificationCheck {
   outcome: VerificationOutcome;
-  checkedField: "dailyBudgetMicros" | "status";
+  checkedField: "dailyBudgetMicros" | "status" | "cpcBidMicros";
   expected: unknown;
   actual: unknown;
   note?: string;
@@ -124,6 +124,27 @@ function computeCheck(action: CcActionRow, after: EntitySnapshot): VerificationC
       outcome: verified ? "verified" : "drift",
       checkedField: "dailyBudgetMicros", expected, actual,
       note: verified ? undefined : `Deriva de presupuesto: esperado ${expected} micros, actual ${actual} micros`,
+    };
+  }
+  if (action.actionType === "update_cpc") {
+    const payload = action.payload as UpdateCpcPayload;
+    const expected = payload?.newCpcBidMicros;
+    if (expected == null) {
+      // Malformed payload: nothing to compare against — not drift.
+      return { outcome: "unverifiable", checkedField: "cpcBidMicros", expected: null, actual: after.cpcBidMicros ?? null };
+    }
+    const actual = after.cpcBidMicros ?? null;
+    if (actual == null) {
+      // Legitimately absent on a successful snapshot (smart-bidding ad group,
+      // no manual CPC) — skip, never drift. Mirrors the dailyBudgetMicros
+      // null-actual precedent above.
+      return { outcome: "unverifiable", checkedField: "cpcBidMicros", expected, actual: null };
+    }
+    const verified = actual === expected;
+    return {
+      outcome: verified ? "verified" : "drift",
+      checkedField: "cpcBidMicros", expected, actual,
+      note: verified ? undefined : `Deriva de CPC: esperado ${expected} micros, actual ${actual} micros`,
     };
   }
   // pause | enable — the only other VERIFIABLE_ACTION_TYPES members.

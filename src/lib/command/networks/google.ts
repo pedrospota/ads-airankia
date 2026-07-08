@@ -6,7 +6,8 @@ import type {
   AdapterAuth, AdapterCapabilities, CampaignMetrics, CcActionInput, CcEntityKind, CcMetricsRange,
   CreateAdGroupPayload, CreateAdPayload, CreateBudgetPayload, CreateCampaignPayload,
   CreateKeywordsPayload, EntitySnapshot, ExecuteResult, NetworkAdapter,
-  RemoveEntityPayload, RollbackRecipe,
+  RemoveEntityPayload, RemoveNegativesPayload, RollbackRecipe,
+  UpdateCpcPayload, UpdateKeywordStatusPayload,
 } from "../types";
 
 const apiVersion = () => process.env.GOOGLE_ADS_API_VERSION || "v21";
@@ -155,6 +156,39 @@ function buildMutation(accountRef: string, action: CcActionInput, before: Entity
         return { endpoint: "adGroups:mutate", body: { operations: [{ updateMask: "status", update: { resourceName: adGroupRes, status } }] } };
       }
       return { endpoint: "campaigns:mutate", body: { operations: [{ updateMask: "status", update: { resourceName: campaignRes, status } }] } };
+    }
+    case "update_keyword_status": {
+      const payload = action.payload as UpdateKeywordStatusPayload;
+      // Fail-closed guard (belt-and-braces even though resourceNames come from
+      // the server-owned baseline): every resourceName must be a criterion
+      // AND scoped to this account, else throw before any mutate is built.
+      const prefix = `customers/${accountRef}/`;
+      for (const kw of payload.keywords) {
+        if (!kw.resourceName.includes("/adGroupCriteria/") || !kw.resourceName.startsWith(prefix)) {
+          throw new Error(`resourceName inválido para update_keyword_status: ${kw.resourceName}`);
+        }
+      }
+      return {
+        endpoint: "adGroupCriteria:mutate",
+        body: {
+          operations: payload.keywords.map((kw) => ({
+            updateMask: "status",
+            update: { resourceName: kw.resourceName, status: payload.status },
+          })),
+        },
+      };
+    }
+    case "update_cpc": {
+      const payload = action.payload as UpdateCpcPayload;
+      return {
+        endpoint: "adGroups:mutate",
+        body: {
+          operations: [{
+            updateMask: "cpcBidMicros",
+            update: { resourceName: adGroupRes, cpcBidMicros: String(payload.newCpcBidMicros) },
+          }],
+        },
+      };
     }
     case "add_negatives": {
       const payload = action.payload as { negatives: Array<{ text: string; match: string }> };
@@ -315,6 +349,7 @@ export const googleAdapter: NetworkAdapter = {
       read: true, write: true,
       actionTypes: [
         "budget_update", "pause", "enable", "add_negatives", "remove_negatives",
+        "update_keyword_status", "update_cpc",
         "create_budget", "create_campaign", "create_ad_group", "create_keywords", "create_ad", "remove_entity",
       ],
     };
@@ -340,10 +375,16 @@ export const googleAdapter: NetworkAdapter = {
     }
     if (entityKind === "ad_group") {
       const rows = await gaql(auth, accountRef, `
-        SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE ad_group.id = ${Number(entityRef)}`);
+        SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros FROM ad_group WHERE ad_group.id = ${Number(entityRef)}`);
       if (!rows.length) throw new Error(`Grupo de anuncios ${entityRef} no encontrado.`);
       const g = rows[0].adGroup as Record<string, unknown>;
-      return { entityKind, entityRef, name: String(g.name ?? ""), status: (g.status as EntitySnapshot["status"]) ?? "UNKNOWN", learningPhase: "UNKNOWN", raw: rows[0] };
+      return {
+        entityKind, entityRef, name: String(g.name ?? ""),
+        status: (g.status as EntitySnapshot["status"]) ?? "UNKNOWN",
+        // null = smart-bidding (no manual CPC) — never coerce to 0.
+        cpcBidMicros: g.cpcBidMicros != null ? num(g.cpcBidMicros) : null,
+        learningPhase: "UNKNOWN", raw: rows[0],
+      };
     }
     const rows = await gaql(auth, accountRef, `
       SELECT campaign.id, campaign.name, campaign.status, campaign.campaign_budget,
@@ -452,10 +493,42 @@ export const googleAdapter: NetworkAdapter = {
         return { action: { ...common, actionType: "enable", payload: {} }, note: "Reactivar la entidad pausada." };
       case "enable":
         return { action: { ...common, actionType: "pause", payload: {} }, note: "Volver a pausar la entidad." };
+      case "update_keyword_status": {
+        // Self-inverse: the payload carries everything needed (resourceNames +
+        // text), so the rollback is fully reversible with no before-snapshot
+        // dependency — same verb, inverted status, same keywords.
+        const payload = action.payload as UpdateKeywordStatusPayload;
+        const inverted = payload.status === "PAUSED" ? "ENABLED" : "PAUSED";
+        return {
+          action: { ...common, actionType: "update_keyword_status", payload: { status: inverted, keywords: payload.keywords } },
+          note: `${inverted === "ENABLED" ? "Reactivar" : "Pausar"} de nuevo ${payload.keywords.length} keyword(s).`,
+        };
+      }
+      case "update_cpc": {
+        // Honestly un-rollbackable when the ad group had no manual CPC baseline
+        // (smart-bidding) — matches the budget_update null precedent above.
+        if (beforeSnap.cpcBidMicros == null) return null;
+        return {
+          action: { ...common, actionType: "update_cpc", payload: { newCpcBidMicros: beforeSnap.cpcBidMicros } },
+          note: `Restaurar CPC a ${beforeSnap.cpcBidMicros} micros.`,
+        };
+      }
       case "add_negatives":
         if (!exec.resourceNames?.length) return null;
         return { action: { ...common, actionType: "remove_negatives", payload: { resourceNames: exec.resourceNames } },
                  note: `Eliminar ${exec.resourceNames.length} negativas creadas.` };
+      case "remove_negatives": {
+        // Only reversible when the caller supplied `removed` (the user-proposal
+        // path does). The internal rollback-of-add_negatives usage passes only
+        // resourceNames, so ITS rollback recipe is null — no rollback-of-rollback,
+        // exactly today's behavior. Re-created negatives get NEW resourceNames.
+        const payload = action.payload as RemoveNegativesPayload;
+        if (!payload.removed?.length) return null;
+        return {
+          action: { ...common, actionType: "add_negatives", payload: { negatives: payload.removed } },
+          note: `Volver a crear ${payload.removed.length} negativa(s) eliminadas.`,
+        };
+      }
       case "create_campaign": {
         // Only the campaign — its criteria cascade-delete with it. Removing a
         // criterion after its parent campaign is gone errors, so never list
@@ -489,7 +562,11 @@ export const googleAdapter: NetworkAdapter = {
 // Command Center v2.3 edit-mode: raw GAQL tree for a single Search campaign,
 // consumed by the PURE mapper in edit/read-tree.ts (buildEditDoc). Kept here
 // (not in read-tree.ts) because gaql() is module-private to this file.
-export interface RawCampaignTree { campaign: GaqlRow; adGroups: GaqlRow[]; keywords: GaqlRow[]; ads: GaqlRow[] }
+export interface RawCampaignTree {
+  campaign: GaqlRow; adGroups: GaqlRow[]; keywords: GaqlRow[]; ads: GaqlRow[];
+  /** v2.7: live campaign-level negative keyword criteria (5th GAQL). */
+  campaignNegatives: GaqlRow[];
+}
 
 export async function readCampaignTree(auth: AdapterAuth, accountRef: string, campaignId: string): Promise<RawCampaignTree> {
   const id = Number(campaignId);
@@ -502,18 +579,24 @@ export async function readCampaignTree(auth: AdapterAuth, accountRef: string, ca
   if (camp?.advertisingChannelType !== "SEARCH") throw new Error("Solo campañas de Búsqueda se pueden editar en esta versión.");
   if (camp?.status === "REMOVED") throw new Error("La campaña está eliminada.");
   const adGroups = await gaql(auth, accountRef, `
-    SELECT ad_group.id, ad_group.resource_name, ad_group.name, ad_group.status
+    SELECT ad_group.id, ad_group.resource_name, ad_group.name, ad_group.status, ad_group.cpc_bid_micros
     FROM ad_group WHERE campaign.id = ${id} AND ad_group.status != 'REMOVED' ORDER BY ad_group.name`);
   const keywords = await gaql(auth, accountRef, `
     SELECT ad_group_criterion.resource_name, ad_group_criterion.negative, ad_group_criterion.keyword.text,
-           ad_group_criterion.keyword.match_type, ad_group.id
+           ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id
     FROM ad_group_criterion WHERE campaign.id = ${id} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`);
   const ads = await gaql(auth, accountRef, `
     SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.type, ad_group_ad.ad.final_urls,
            ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions,
            ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group.id
     FROM ad_group_ad WHERE campaign.id = ${id} AND ad_group_ad.status != 'REMOVED'`);
-  return { campaign: c, adGroups, keywords, ads };
+  // v2.7 5th GAQL: live campaign-level negative keyword criteria, feeding
+  // edit/schema.ts's server-owned baseNegatives (Task 3).
+  const campaignNegatives = await gaql(auth, accountRef, `
+    SELECT campaign_criterion.resource_name, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
+    FROM campaign_criterion WHERE campaign.id = ${id} AND campaign_criterion.type = 'KEYWORD'
+      AND campaign_criterion.negative = true AND campaign_criterion.status != 'REMOVED'`);
+  return { campaign: c, adGroups, keywords, ads, campaignNegatives };
 }
 
 function rowToSnapshot(entityKind: CcEntityKind, row: GaqlRow): EntitySnapshot {

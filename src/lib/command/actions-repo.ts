@@ -179,7 +179,7 @@ export async function listVerifiableExecuted(
       eq(ccActions.status, "executed"),
       lt(ccActions.executedAt, cutoff),
       isNull(ccActions.error),
-      inArray(ccActions.actionType, ["budget_update", "pause", "enable"]),
+      inArray(ccActions.actionType, ["budget_update", "pause", "enable", "update_cpc"]),
     ))
     .orderBy(asc(ccActions.executedAt))
     .limit(limit);

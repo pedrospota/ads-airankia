@@ -14,6 +14,9 @@ const TREE: RawCampaignTree = {
           responsiveSearchAd: { headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }], descriptions: [{ text: "D1" }, { text: "D2" }], path1: "ofertas" } } }, adGroup: { id: "7" } },
     { adGroupAd: { resourceName: "customers/123/adGroupAds/7~12", status: "ENABLED", ad: { type: "EXPANDED_TEXT_AD" } }, adGroup: { id: "7" } },
   ],
+  // v2.7: readCampaignTree's 5th GAQL (Task 3 consumes this field; buildEditDoc
+  // doesn't read it yet, so an empty fixture is sufficient here).
+  campaignNegatives: [],
 };
 
 describe("buildEditDoc", () => {

@@ -31,8 +31,8 @@ const LANGUAGE_CONSTANTS: Record<string, string> = {
   it: "1004",
 };
 
-const tmp = (ref: string) => `tmp:${ref}`;
-function recKey(blueprintId: string, seq: number): string {
+export const tmp = (ref: string) => `tmp:${ref}`;
+export function recKey(blueprintId: string, seq: number): string {
   return (
     "bp-" +
     createHash("sha256")

@@ -2,48 +2,6 @@ import { describe, it, expect } from "bun:test";
 import { compileMeta } from "../blueprint/meta-compile";
 import { parseMetaBlueprint } from "../blueprint/meta-schema";
 
-function doc(overrides?: Record<string, any>) {
-  const base = {
-    network: "meta_ads",
-    campaign: {
-      nodeId: "c1",
-      tempId: "campaign:1",
-      name: "Test Campaign",
-      status: "PAUSED" as const,
-      objective: "OUTCOME_TRAFFIC" as const,
-      adsets: [
-        {
-          nodeId: "as1",
-          tempId: "adset:1",
-          name: "Test Adset",
-          status: "PAUSED" as const,
-          dailyBudgetMicros: 10_000_000,
-          targeting: {
-            countryCodes: ["US"],
-            ageMin: 18,
-            ageMax: 65,
-          },
-          ads: [
-            {
-              nodeId: "ad1",
-              tempId: "ad:1",
-              name: "Ad 1",
-              link: "https://example.com",
-              message: "Check this out!",
-            },
-          ],
-        },
-      ],
-    },
-  };
-
-  // Deep merge overrides
-  if (overrides) {
-    return parseMetaBlueprint(JSON.parse(JSON.stringify(base)).then(() => {}, () => {}) || { ...base, ...overrides });
-  }
-  return parseMetaBlueprint(base);
-}
-
 describe("compileMeta", () => {
   it("emits create_campaign→create_adset→create_ad in seq order", () => {
     const d = parseMetaBlueprint({

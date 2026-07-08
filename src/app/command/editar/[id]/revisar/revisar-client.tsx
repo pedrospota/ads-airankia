@@ -59,7 +59,7 @@ const ACTION_LABEL: Record<string, string> = {
   create_keywords: "Añadir palabras clave",
   create_ad: "Crear anuncio (RSA)",
   // v2.7 maintenance verbs (weekly loop: pruning + CPC edits + live-negative removal)
-  update_keyword_status: "Pausar/Reactivar keywords",
+  update_keyword_status: "Pausar/Reactivar palabras clave",
   update_cpc: "Cambiar CPC",
   remove_negatives: "Quitar negativas",
 };

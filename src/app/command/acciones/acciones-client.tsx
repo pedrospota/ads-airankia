@@ -30,7 +30,7 @@ const STATUS_TONE: Record<string, "ok" | "accent" | "warn" | "danger" | "muted">
 const TYPE_LABEL: Record<string, string> = {
   budget_update: "Cambio de presupuesto", pause: "Pausar", enable: "Activar", add_negatives: "Añadir negativas",
   // v2.7 maintenance verbs (weekly loop: pruning + CPC edits + live-negative removal)
-  update_keyword_status: "Pausar/Reactivar keywords", update_cpc: "Cambiar CPC", remove_negatives: "Quitar negativas",
+  update_keyword_status: "Pausar/Reactivar palabras clave", update_cpc: "Cambiar CPC", remove_negatives: "Quitar negativas",
 };
 const NET_LABEL = { google_ads: "Google", meta_ads: "Meta" } as const;
 

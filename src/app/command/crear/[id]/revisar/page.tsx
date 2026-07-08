@@ -61,7 +61,7 @@ export default async function RevisarPage({ params }: { params: Promise<{ id: st
       <main style={{ maxWidth: UI.maxWidth, margin: "0 auto", padding: "40px 32px" }}>
         <PageHeader
           title="Revisar y publicar"
-          subtitle="Cada acción que se enviará a Google Ads, agrupada por nodo de la campaña. Nada toca la cuenta hasta que confirmes abajo — todo nace en pausa."
+          subtitle={`Cada acción que se enviará a ${blueprint.network === "meta_ads" ? "Meta Ads" : "Google Ads"}, agrupada por nodo de la campaña. Nada toca la cuenta hasta que confirmes abajo — todo nace en pausa.`}
         />
         {error || !gatePreview ? (
           <ErrorCard message={error ?? "Error preparando la vista previa de compuertas."} />

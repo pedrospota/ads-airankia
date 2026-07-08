@@ -89,6 +89,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   // the edit-doc branch above and the google-doc block below it. The RAW body.doc is what
   // gets saved, same convention as the google path.
   if (blueprint.network === "meta_ads") {
+    // Same docType-smuggle guard as the create route: parseMetaBlueprint is non-strict
+    // (ignores extras), so a smuggled docType would survive the raw save and brick the
+    // draft on the next docType-first dispatch. Reject before validating.
+    if (body.doc && typeof body.doc === "object" && "docType" in (body.doc as Record<string, unknown>)) {
+      return NextResponse.json({ error: "doc inválido: docType no permitido en un blueprint de Meta" }, { status: 400 });
+    }
     try {
       parseMetaBlueprint(body.doc);
     } catch (e) {

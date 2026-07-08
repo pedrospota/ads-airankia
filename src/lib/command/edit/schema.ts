@@ -216,5 +216,10 @@ export function mergeEditDoc(stored: GoogleSearchEditDoc, incoming: unknown): Go
     }
   }
 
-  return result;
+  // Two-layer validation guard: incoming.parse (shape) + result.parse (truth).
+  // If a client spoofs status/"ENABLED"→"PAUSED" on every stored keyword, incoming
+  // sees 0 changes (desiredStatus = status, no disposition), bypassing the incoming
+  // superRefine. But after merge, result has stored's true status + lifted desiredStatus,
+  // so the blast-bound fires here on re-validation. Throws ZodError → 400 → doc never poisoned.
+  return editDocSchema.parse(result);
 }

@@ -287,4 +287,63 @@ describe("mergeEditDoc (server-owned baseline)", () => {
 
     expect(out.campaign.removeNegatives).toEqual(["customers/123/campaignCriteria/5~1"]);
   });
+
+  // v2.7 blast-bound re-validation: status-spoofing attack (HIGH finding)
+  describe("mergeEditDoc re-validation against server-truth status (HIGH security)", () => {
+    it("THROWS when spoofed status-flip on 150 keywords exceeds EDIT_BATCH_MAX after merge", () => {
+      const stored = baseDoc();
+      const incoming = baseDoc();
+
+      // Build 150 keywords in stored (clean baseline: no desiredStatus, only status:"ENABLED")
+      const template = stored.campaign.adGroups[0].baseKeywords[0];
+      stored.campaign.adGroups[0].baseKeywords = Array.from({ length: 150 }, (_, i) => ({
+        ...template,
+        resourceName: `customers/123/adGroupCriteria/7~${i}`,
+        status: "ENABLED" as const,
+        // NO desiredStatus in stored (server-owned baseline)
+      }));
+
+      // Incoming mirrors the 150, but SPOOFS status:"PAUSED" + desiredStatus:"PAUSED"
+      // (incoming-side superRefine sees 0 changes: desiredStatus = status, so passes)
+      incoming.campaign.adGroups[0].baseKeywords = Array.from({ length: 150 }, (_, i) => ({
+        ...template,
+        resourceName: `customers/123/adGroupCriteria/7~${i}`,
+        status: "PAUSED" as const, // SPOOFED (incoming-side parse doesn't catch it)
+        desiredStatus: "PAUSED" as const, // Matches spoofed status → 0 changes, bypasses refine
+      }));
+
+      // After merge: 150 rows have stored's true status:"ENABLED" + incoming's desiredStatus:"PAUSED"
+      // → 150 non-KEEP dispositions → re-validation parse throws ZodError (over EDIT_BATCH_MAX)
+      expect(() => mergeEditDoc(stored, incoming)).toThrow();
+    });
+
+    it("allows 50 spoofed-status keywords (under cap, passes re-validation)", () => {
+      const stored = baseDoc();
+      const incoming = baseDoc();
+
+      // Build 50 keywords in stored
+      const template = stored.campaign.adGroups[0].baseKeywords[0];
+      stored.campaign.adGroups[0].baseKeywords = Array.from({ length: 50 }, (_, i) => ({
+        ...template,
+        resourceName: `customers/123/adGroupCriteria/7~${i}`,
+        status: "ENABLED" as const,
+      }));
+
+      // Incoming spoofs status:"PAUSED" on all 50 with desiredStatus:"PAUSED"
+      incoming.campaign.adGroups[0].baseKeywords = Array.from({ length: 50 }, (_, i) => ({
+        ...template,
+        resourceName: `customers/123/adGroupCriteria/7~${i}`,
+        status: "PAUSED" as const, // SPOOFED
+        desiredStatus: "PAUSED" as const,
+      }));
+
+      const out = mergeEditDoc(stored, incoming);
+
+      // Merge succeeds: 50 < EDIT_BATCH_MAX
+      expect(out.campaign.adGroups[0].baseKeywords).toHaveLength(50);
+      // Server's true status is preserved, client's desiredStatus is lifted
+      expect(out.campaign.adGroups[0].baseKeywords[0].status).toBe("ENABLED");
+      expect(out.campaign.adGroups[0].baseKeywords[0].desiredStatus).toBe("PAUSED");
+    });
+  });
 });

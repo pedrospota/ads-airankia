@@ -243,6 +243,36 @@ describe("applyBlueprintPatch — rule 3: server-owned fields rejected (edit)", 
 });
 
 // ---------------------------------------------------------------------------
+// Rule 3 — prototype-chain field names must fail closed, never throw
+// ---------------------------------------------------------------------------
+
+describe("applyBlueprintPatch — rule 3: prototype-chain field names never crash the chokepoint", () => {
+  const protoFields = ["__proto__", "constructor", "toString"];
+
+  for (const field of protoFields) {
+    it(`create: field "${field}" returns ok:false instead of throwing`, () => {
+      const doc = createDoc();
+      let result: ApplyPatchResult | undefined;
+      expect(() => {
+        result = applyBlueprintPatch({ docKind: "google_create", doc }, createPatch([op({ nodeId: doc.campaign.nodeId, field, value: "x" })]));
+      }).not.toThrow();
+      const failed = expectFail(result as ApplyPatchResult);
+      expect(failed.errors[0].message).toContain(field);
+    });
+
+    it(`edit: field "${field}" returns ok:false instead of throwing`, () => {
+      const doc = editDoc();
+      let result: ApplyPatchResult | undefined;
+      expect(() => {
+        result = applyBlueprintPatch({ docKind: "google_edit", doc }, editPatch([op({ nodeId: "campaign", field, value: "x" })]));
+      }).not.toThrow();
+      const failed = expectFail(result as ApplyPatchResult);
+      expect(failed.errors[0].message).toContain(field);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Rule 3 — value rejected by the field's own real sub-schema
 // ---------------------------------------------------------------------------
 
@@ -475,6 +505,19 @@ describe("applyBlueprintPatch — happy paths (edit)", () => {
     const outDoc = applyEditOk(doc, editPatch([op({ nodeId: "campaign", field: "removeNegatives", value: [rn] })]));
     expect(outDoc.campaign.removeNegatives).toEqual([rn]);
   });
+
+  it("touched reports the CANONICAL id, not the raw op.nodeId — the 'campaign' alias normalizes to the real resourceName", () => {
+    const doc = editDoc();
+    const result = expectOk(applyBlueprintPatch({ docKind: "google_edit", doc }, editPatch([op({ nodeId: "campaign", field: "desired.status", value: "PAUSED" })])));
+    expect(result.touched).toEqual([{ nodeId: doc.campaign.resourceName, field: "desired.status" }]);
+  });
+
+  it("touched reports the resourceName unchanged when the op already addressed it directly", () => {
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const result = expectOk(applyBlueprintPatch({ docKind: "google_edit", doc }, editPatch([op({ nodeId: ag.resourceName, field: "desired.cpcBidMicros", value: 900_000 })])));
+    expect(result.touched).toEqual([{ nodeId: ag.resourceName, field: "desired.cpcBidMicros" }]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -521,14 +564,14 @@ describe("provenance helpers", () => {
     expect(deriveAiMarkers(doc, prov)).toEqual([]);
   });
 
-  it("deriveAiMarkers (edit): keys by resourceName, normalizing the 'campaign' alias to the real resourceName", () => {
+  it("deriveAiMarkers (edit): keys by diff.ts's entityRef literal (campaign.id / group.id) — NOT resourceName — normalizing the 'campaign' alias too", () => {
     const doc = editDoc();
     const prov: ProvenanceMap = {
       "campaign:desired.status": "ia",
       [`${doc.campaign.adGroups[0].resourceName}:desired.cpcBidMicros`]: "ia",
     };
     const markers = deriveAiMarkers(doc, prov).sort();
-    expect(markers).toEqual([doc.campaign.resourceName, doc.campaign.adGroups[0].resourceName].sort());
+    expect(markers).toEqual([doc.campaign.id, doc.campaign.adGroups[0].id].sort());
   });
 
   it("deriveAiMarkers (edit): dedupes multiple 'ia' fields on the same node into one marker", () => {
@@ -538,7 +581,63 @@ describe("provenance helpers", () => {
       [`${ag.resourceName}:desired.status`]: "ia",
       [`${ag.resourceName}:desired.cpcBidMicros`]: "ia",
     };
-    expect(deriveAiMarkers(doc, prov)).toEqual([ag.resourceName]);
+    expect(deriveAiMarkers(doc, prov)).toEqual([ag.id]);
+  });
+
+  it("deriveAiMarkers (edit): campaign desired.dailyBudgetMicros + a baseKeyword desiredStatus -> [campaign.id, group.id] (batched keyword action's entityRef is the GROUP id, not the keyword row's resourceName)", () => {
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const kwRow = ag.baseKeywords[0];
+    const prov: ProvenanceMap = {
+      "campaign:desired.dailyBudgetMicros": "ia",
+      [`${kwRow.resourceName}:desiredStatus`]: "ia",
+    };
+    const markers = deriveAiMarkers(doc, prov).sort();
+    expect(markers).toEqual([doc.campaign.id, ag.id].sort());
+  });
+
+  it("deriveAiMarkers (edit): adGroup.newKeywords -> the create_keywords action's entityRef `tmp:kw:${group.id}`", () => {
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const prov: ProvenanceMap = { [`${ag.resourceName}:newKeywords`]: "ia" };
+    expect(deriveAiMarkers(doc, prov)).toEqual([`tmp:kw:${ag.id}`]);
+  });
+
+  it("deriveAiMarkers (edit): ad.replacement marks BOTH the create (tmp:tempId) and the old ad's pause (resourceName) when the old ad was ENABLED", () => {
+    const doc = editDoc();
+    const ag = doc.campaign.adGroups[0];
+    const adRow = ag.ads[0];
+    expect(adRow.base.status).toBe("ENABLED");
+    const withReplacement: GoogleSearchEditDoc = structuredClone(doc);
+    withReplacement.campaign.adGroups[0].ads[0].replacement = {
+      tempId: "t-new-ad", finalUrl: "https://x.com/new",
+      headlines: [{ text: "H1" }, { text: "H2" }, { text: "H3" }],
+      descriptions: [{ text: "D1" }, { text: "D2" }],
+    };
+    const prov: ProvenanceMap = { [`${adRow.resourceName}:replacement`]: "ia" };
+    const markers = deriveAiMarkers(withReplacement, prov).sort();
+    expect(markers).toEqual([adRow.resourceName, "tmp:t-new-ad"].sort());
+  });
+
+  it("deriveAiMarkers (create): adGroup.keywords -> the create_keywords action's localRef `${tempId}:kw`, not the bare adGroup tempId", () => {
+    const doc = createDoc();
+    const ag = doc.campaign.adGroups[0];
+    const prov: ProvenanceMap = { [`${ag.nodeId}:keywords`]: "ia" };
+    expect(deriveAiMarkers(doc, prov)).toEqual([`${ag.tempId}:kw`]);
+  });
+
+  it("deriveAiMarkers (create): adGroup.negatives -> the same create_keywords `:kw` localRef as keywords", () => {
+    const doc = createDoc();
+    const ag = doc.campaign.adGroups[0];
+    const prov: ProvenanceMap = { [`${ag.nodeId}:negatives`]: "ia" };
+    expect(deriveAiMarkers(doc, prov)).toEqual([`${ag.tempId}:kw`]);
+  });
+
+  it("deriveAiMarkers (create): adGroup.name -> the bare adGroup tempId (create_ad_group's own localRef, distinct from :kw)", () => {
+    const doc = createDoc();
+    const ag = doc.campaign.adGroups[0];
+    const prov: ProvenanceMap = { [`${ag.nodeId}:name`]: "ia" };
+    expect(deriveAiMarkers(doc, prov)).toEqual([ag.tempId]);
   });
 
   describe("sanitizeProv", () => {
@@ -547,6 +646,11 @@ describe("provenance helpers", () => {
       const ag = doc.campaign.adGroups[0];
       const key = `${ag.resourceName}:desired.status`;
       expect(sanitizeProv(doc, { [key]: "ia" })).toEqual({ [key]: "ia" });
+    });
+
+    it("drops a prototype-chain field name (__proto__) instead of treating it as a valid writable field", () => {
+      const doc = editDoc();
+      expect(sanitizeProv(doc, { "campaign:__proto__": "ia" })).toEqual({});
     });
 
     it("drops a key whose field is not writable (e.g. resourceName, base)", () => {

@@ -186,6 +186,11 @@ export function applyBlueprintPatch(target: PatchTarget, patch: BlueprintPatch):
 
   // Rule 6: no side effects — just the new doc + what changed. Caller (accept handler /
   // propose_patch dry run) decides persistence, prov stamping, and cc_actions.
-  const touched = resolved.map((r) => ({ nodeId: r.nodeId, field: r.field }));
+  // `nodeId` here is the CANONICAL id (node.canonicalId), not the raw op.nodeId the model
+  // sent — for edit docs the "campaign" alias and the real resourceName must collapse to the
+  // SAME touched entry, or a caller stamping `_prov` keys from `touched` (`${nodeId}:${field}`)
+  // could end up with two differently-spelled keys for the one node that deriveAiMarkers/
+  // sanitizeProv (both keyed on canonicalId) would then disagree about.
+  const touched = resolved.map((r) => ({ nodeId: r.canonicalId, field: r.field }));
   return { ok: true, doc: reparsed.data as PatchTarget["doc"], touched };
 }

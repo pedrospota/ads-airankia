@@ -110,9 +110,15 @@ function fieldSchemasFor(docKind: DocKind): Record<NodeKind, Record<string, z.Zo
   return docKind === "google_create" ? CREATE_FIELD_SCHEMAS : EDIT_FIELD_SCHEMAS;
 }
 
-/** Rule 3's per-field sub-schema lookup — reused verbatim by apply.ts and sanitizeProv below. */
+/** Rule 3's per-field sub-schema lookup — reused verbatim by apply.ts and sanitizeProv below.
+ * Uses `Object.hasOwn` (never a bare bracket lookup) so a `field` of "__proto__" /
+ * "constructor" / "toString" — anything living on the prototype chain rather than as the
+ * registry's OWN property — resolves to `undefined` (fail-closed) instead of returning a
+ * prototype member that then crashes the caller's `.safeParse(...)` call with an uncaught
+ * TypeError. */
 export function fieldSchemaFor(docKind: DocKind, nodeKind: NodeKind, field: string): z.ZodTypeAny | undefined {
-  return fieldSchemasFor(docKind)[nodeKind][field];
+  const schemas = fieldSchemasFor(docKind)[nodeKind];
+  return Object.hasOwn(schemas, field) ? schemas[field] : undefined;
 }
 
 function fieldNames(schemas: Record<string, z.ZodTypeAny>): readonly string[] {
@@ -251,10 +257,36 @@ export function clearProv(prov: ProvenanceMap, key: string): ProvenanceMap {
 }
 
 /**
- * create: the tempIds (compile's `localRef`) of every node with ≥1 'ia' field — feeds the
- * dormant repo.ts:229-252 `_ai` reader. edit: the resourceNames ("campaign" alias normalized
- * to the real one) of every node with ≥1 'ia' field — feeds repo.ts:186's entityRef match.
- * Coarse (node/action-level), matching the create path's existing granularity.
+ * Markers must match the LITERAL `localRef`/`entityRef` the compiler for this docKind will
+ * stamp on the action(s) that field produces — never the patch node's own `canonicalId` — or
+ * the repo-layer `aiPaths.has(...)` match silently labels nothing (or the wrong thing).
+ *
+ * create (blueprint/compile.ts): matched against `CompiledAction.localRef` — feeds the
+ * dormant repo.ts:229-252 `_ai` reader.
+ *   - campaign (name/bidding/geo/languageCode) -> campaign's bare tempId (compile.ts:98).
+ *   - budget (dailyMicros)                     -> budget's bare tempId (compile.ts:70-78).
+ *   - adGroup name/cpcMicros                    -> adGroup's bare tempId, the create_ad_group
+ *                                                  action (compile.ts:100-109).
+ *   - adGroup keywords/negatives                -> `${tempId}:kw` — these two fields feed the
+ *                                                  SEPARATE create_keywords action, not
+ *                                                  create_ad_group (compile.ts:110-125).
+ *   - ad (finalUrl/headlines/descriptions/path*) -> ad's bare tempId (compile.ts:126-140).
+ *
+ * edit (edit/diff.ts): matched against `EditCompiledAction.entityRef` — feeds the (not yet
+ * wired) equivalent of repo.ts's `aiPaths.has(a.entityRef)` for edit docs.
+ *   - EVERY campaign field's action (pause/enable/budget_update/add|remove_negatives) carries
+ *     entityRef = campaign.id — NOT campaign.resourceName (diff.ts:100,153,193,207,350).
+ *   - adGroup desired.status/desired.cpcBidMicros -> group.id (diff.ts:113,172,337).
+ *   - adGroup newKeywords -> `tmp:kw:${group.id}`, the create_keywords action (diff.ts:223-232).
+ *   - adGroup newAds -> `tmp:${tempId}` for EACH entry in the (merged) newAds array — one
+ *     create_ad action per entry (diff.ts:279-302); a single 'ia' field can yield N markers.
+ *   - a baseKeyword row's desiredStatus is folded into the BATCHED per-ad-group
+ *     update_keyword_status action -> group.id (diff.ts:122-142,305-328), NOT the keyword
+ *     row's own resourceName.
+ *   - an ad's replacement pairs a create_ad (`tmp:${replacement.tempId}`, diff.ts:246-262)
+ *     with, IF the old ad was ENABLED, a pause on the OLD ad (entityRef = ad.resourceName,
+ *     diff.ts:264-275) — both actions get marked.
+ * Coarse (action-level), matching the create path's existing granularity.
  */
 export function deriveAiMarkers(doc: CcBlueprintDoc | GoogleSearchEditDoc, prov: ProvenanceMap): string[] {
   const edit = isEditDoc(doc);
@@ -265,8 +297,40 @@ export function deriveAiMarkers(doc: CcBlueprintDoc | GoogleSearchEditDoc, prov:
     if (!split) continue;
     const resolved = resolveNode(doc, split.nodeId);
     if (!resolved) continue;
-    if (edit) markers.add(resolved.canonicalId);
-    else if (resolved.tempId) markers.add(resolved.tempId);
+
+    if (!edit) {
+      if (!resolved.tempId) continue;
+      if (resolved.kind === "adGroup" && (split.field === "keywords" || split.field === "negatives")) {
+        markers.add(`${resolved.tempId}:kw`);
+      } else {
+        markers.add(resolved.tempId);
+      }
+      continue;
+    }
+
+    const editDoc = doc as GoogleSearchEditDoc;
+    if (resolved.kind === "campaign") {
+      markers.add(editDoc.campaign.id);
+    } else if (resolved.kind === "adGroup") {
+      const ag = editDoc.campaign.adGroups.find((a) => a.resourceName === resolved.canonicalId);
+      if (!ag) continue;
+      if (split.field === "newKeywords") {
+        markers.add(`tmp:kw:${ag.id}`);
+      } else if (split.field === "newAds") {
+        for (const na of ag.newAds) markers.add(`tmp:${na.tempId}`);
+      } else {
+        markers.add(ag.id);
+      }
+    } else if (resolved.kind === "baseKeyword") {
+      const ag = editDoc.campaign.adGroups.find((a) => a.baseKeywords.some((k) => k.resourceName === resolved.canonicalId));
+      if (ag) markers.add(ag.id);
+    } else if (resolved.kind === "ad") {
+      markers.add(resolved.canonicalId); // pairs the paired pause(old)'s entityRef, if emitted
+      for (const ag of editDoc.campaign.adGroups) {
+        const adRow = ag.ads.find((a) => a.resourceName === resolved.canonicalId);
+        if (adRow?.replacement) markers.add(`tmp:${adRow.replacement.tempId}`);
+      }
+    }
   }
   return Array.from(markers);
 }

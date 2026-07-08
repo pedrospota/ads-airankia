@@ -138,3 +138,22 @@ Reverse-seq `remove_entity` → `DELETE /<id>` (ad → adset → campaign). Inli
 
 ## Verification (this build)
 240 tests / 0 fail · tsc exit 0 · build exit 0 (`/command/crear-meta` present) · smoke 200/404/403. Every task adversarially reviewed; the review chain also closed a pre-existing cross-compiler smuggling hole (blueprint POST now rejects docs carrying a docType) and caught a review-page dispatch gap that would have blocked every Meta publish.
+
+---
+
+# Command Center v2.6 — Operations Loop
+
+**No migration.** Turns the rail into a daily operating center: performance metrics in Cuentas (Inversión/Clics/Conv./CPA, 7d/30d, both networks — Meta shows «—» until credentials exist), batch approve/reject/execute in Acciones (sequential over the existing per-action endpoints, continue-on-gate-block, stop-on-error, cap 20), import pickers, and the verification loop.
+
+## The verification loop (lazy, read-only)
+Visiting /command or /command/acciones fires a fire-and-forget sweep (`POST /api/command/verify`, 10-min throttle): (1) approvals older than **72h** expire (`Aprobación caducada — vuelve a aprobar`; also enforced at execute time as a backstop); (2) up to 10 executed actions ≥4h old are re-read from the network — the write landed → `verified` (green); it didn't → the row is marked **con deriva** (red, one-shot) for Revertir/manual fix; unreadable/absent fields → skipped and retried. The sweep NEVER mutates the networks. «Verificada» means *the write we intended landed*, not *delivering* (Meta effective_status out of scope).
+
+## Novedades
+The /command resumen shows a needs-attention card (pure query, no new tables): Planes fallidos · Acciones fallidas · Con deriva · Bloqueadas por compuertas · Caducadas — deep-linking into filtered Acciones. It clears itself when rows are resolved.
+
+## Caveats
+- Lazy trigger: if nobody opens /command, nothing verifies/expires (execute-time TTL backstop covers the risky case). External cron endpoint is the deferred escape hatch.
+- Expiry runs under CC_DRY_RUN too: rehearsal-week approvals >72h will expire and need re-proposing — expected, the baseline is stale.
+
+## Verification (this build)
+285 tests / 0 fail · tsc exit 0 · build exit 0 (`/api/command/verify` present) · smoke 200/403. Adversarial reviews caught and fixed: a false-drift bug on null budget snapshots (would have stickily flagged healthy CBO campaigns), a poison-pill auth failure that could livelock the sweep, a zero-defaults display contract violation, a range-toggle race, and a stale-props table after refresh.

@@ -172,3 +172,21 @@ The /command resumen shows a needs-attention card (pure query, no new tables): P
 
 ## Verification (this build)
 372 tests / 0 fail · tsc 0 · build 0 (`/command/bitacora/reporte` present) · smoke 200/404. Reviews caught+fixed a HIGH blast-bound bypass (spoofed keyword status could over-cap a batch then brick the draft — mergeEditDoc now re-validates the merged doc against server truth).
+
+---
+
+# Command Center v2.4 — Copiloto Anclado
+
+**No migration.** A docked AI copilot («✦ Copiloto», bottom-right pill) in the Google builder AND the edit workbench. The covenant: **AI proposes → human accepts → gates enforce.** The model's ONLY effect channel is a proposal card; Accept runs the pure `applyBlueprintPatch` chokepoint (writable-fields registry + full-doc re-parse) against the live draft, then the normal autosave/server re-validation/rail applies. No AI code path imports the executor/gates.
+
+## Provenance (dato/ia/auto)
+Fields set by an accepted proposal (or an accepted ✨ suggestion) carry an **IA** badge; editing one manually downgrades it (the badge disappears — «Sin etiqueta = escrito por ti»). Edit baselines show **Dato**. AI-touched nodes compile with `source: 'copiloto'` in the ledger (visible as Origen in Acciones).
+
+## Operational notes
+- Requires `OPENROUTER_API_KEY` (already in prod). Bounds: 6 tool rounds / 30s / 2048 tokens / ≤3 proposals per reply / ≤20 ops per proposal. Never-Anthropic model guard mirrors /api/copiloto.
+- The dock appears once a draft is saved (it grounds against the stored blueprint).
+- The legacy /copiloto page now runs on the same extracted tool-loop (behavior-preserved).
+- Deferred: Meta dock, live-metrics tool, v2.5 chat-entry, per-item array provenance, create-side ad-group CPC patches (removed fail-closed until the builder carries the field).
+
+## Verification (this build)
+500 tests / 0 fail · tsc 0 · build 0 (`/api/command/copiloto` present) · smoke 200/403. Reviews caught+fixed: prototype-chain field names crashing the chokepoint, a provenance-identity mismatch that would have mislabeled every AI edit as manual, and the silent-drop cpcMicros gap.

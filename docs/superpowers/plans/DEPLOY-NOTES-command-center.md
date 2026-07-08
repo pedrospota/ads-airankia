@@ -190,3 +190,40 @@ Fields set by an accepted proposal (or an accepted ✨ suggestion) carry an **IA
 
 ## Verification (this build)
 500 tests / 0 fail · tsc 0 · build 0 (`/api/command/copiloto` present) · smoke 200/403. Reviews caught+fixed: prototype-chain field names crashing the chokepoint, a provenance-identity mismatch that would have mislabeled every AI edit as manual, and the silent-drop cpcMicros gap.
+
+---
+
+# Command Center v3.0 — SaaS-lite (roles/asientos + notificaciones Telegram + equipo)
+
+**Migration 011 required** (`POST /api/migrate`, idempotent): creates `cc_notifications` table (dedup ledger for Telegram sends). Notifications gracefully no-op if the table is missing (catch + skip on insert error), but run the migration before setting `TELEGRAM_*` env vars.
+
+## Activation (in order)
+
+1. Merge `feat/command-center-v3-saas-lite` → main → Coolify auto-deploys.
+2. Set Coolify **runtime** env vars on the app:
+   - **Operator allow-list (critical):** `COMMAND_WORKSPACE_IDS=<uuid>,<uuid>` (comma-separated workspace UUIDs; **unset or empty = zero operator seats, preserving today's admin-only posture**). Membership in an allow-listed workspace IS an operator seat; Meta accounts are shared across all operators (spec finding #2).
+   - **Team management:** `SUPABASE_SERVICE_ROLE_KEY=<service-role-secret>` (from Supabase dashboard → Settings → API; without it, `/api/command/equipo` returns 501 — Equipo page unusable).
+   - **Telegram notifications:** `TELEGRAM_BOT_TOKEN=<bot-token>` + `TELEGRAM_CHAT_ID=<chat-id>` (both required; if unset or incomplete, notifications silently stay off). Optional: `CC_NOTIFY_ENABLED=false` to master-disable even when `TELEGRAM_*` are set.
+   - **Optional:** `NEXT_PUBLIC_APP_URL` (for Telegram deep links into Acciones; defaults to `https://ads.airankia.com` if unset).
+   - Reused (already set for the existing app): `COMMAND_CENTER_BETA`, `CONNECTIONS_KEY`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_API_VERSION`, `ADS_DATABASE_URL`, the Supabase pair, `ADMIN_EMAILS`.
+3. **Run the migration**: `POST /api/migrate` (logged in as an admin) → confirm `011_command_center_v3_0` appears in `schema_migrations` and the `cc_notifications` table exists.
+4. **RUNBOOK — before setting `COMMAND_WORKSPACE_IDS`** (spec §g risk 3, verbatim): enumerate the target workspace's `workspace_members` rows via Supabase dashboard or CLI (`SELECT user_id FROM workspace_members WHERE workspace_id = '<uuid>'` then match each user_id to email via auth tab). Confirm every listed email is expected to receive Command access — there is no approval flow, and Meta accounts are shared across all operators, so seat assignment must be explicit and audited per workspace.
+5. **First-operator bring-up (recommended path):** Do NOT rely on the Supabase invite email yet. Instead: (a) log into the admin panel with your Google account; (b) visit `/command/equipo` (Equipo page, admin-only); (c) enter a colleague's email and click Invitar for their workspace(s); (d) have that colleague log in via "Continuar con Google" (the invite creates a `workspace_members` row). Once confirmed working, customize the Supabase invite email template (Settings → Email Templates → Invitation) to es-MX in the Supabase dashboard for future invites.
+6. **Bootstrap via email invite (advanced):** If Equipo onboarding is blocked, fall back to Supabase's `inviteUserByEmail` (Settings → Users → Invite). Sent email must match the email at Command login time. The user clicks the link, sets a password, then can log in via email+password OR link their Google account later.
+
+## Operator permissions matrix (two lines)
+
+- **Operators can:** everything operational within their allow-listed workspace(s) — Resumen (kill-switch read + draft-resume for their own workspace), Constructor (create blueprints), Acciones (propose/approve/execute/Revertir), Cuentas (browse, propose actions), Bitácora (read ledger + Exportar CSV).
+- **Operators cannot:** `/admin`, `/api/migrate` (setting POST, never proposable), `/command/equipo` (Equipo page 404s for non-admins; nav shows no Equipo entry), `/api/command/equipo/*` (returns 403 from `requireAdmin`). Settings mutations (PAUSA/limites) are admin-only routes (`/api/command/settings` POST).
+
+## Rollback
+
+- Unset `COMMAND_WORKSPACE_IDS` → instantly revert to admin-only (access.ts returns null for non-admin without an allow-listed membership; no code path depends on it being set).
+- Unset `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` → notifications OFF (same guard: `notifyEnabled()` returns false).
+- Unset `CC_NOTIFY_ENABLED` (optional; it defaults to enabled if `TELEGRAM_*` are set).
+- `cc_notifications` rows are inert history — no cleanup needed, they do not affect runtime behavior.
+- Settings `allowed_action_types` in `cc_settings` are unchanged by this migration; pre-existing allow-lists carry forward.
+
+## Verification (this build)
+
+585 tests / 0 fail · tsc 0 · build 0 (`/command/equipo`, `/api/command/equipo` present) · smoke 200/403/404. Adversarial reviews caught and fixed: a race on `SUPABASE_SERVICE_ROLE_KEY` existence (now per-request), a ONE-SHOT body-reuse trap in NextResponse (now per-request), and a role-separation leak where Equipo nav was unconditionally visible until v3.0's role-aware nav splicing.

@@ -64,6 +64,13 @@ export default function AccionesClient({ initialActions }: { initialActions: Act
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // router.refresh() re-renders the server page with fresh rows, but useState only
+  // consumes initialActions on mount — re-sync so a post-sweep refresh actually
+  // updates the table (expired/verified/drifted rows would otherwise render stale).
+  useEffect(() => {
+    setActions(initialActions);
+  }, [initialActions]);
+
   async function call(id: string, verb: "approve" | "reject" | "execute" | "rollback") {
     setBusyId(id); setError(null); setGatePanel(null);
     try {

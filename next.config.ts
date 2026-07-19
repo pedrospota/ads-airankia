@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // type-check fuera del build: corre en GitHub Actions (no bloquea el deploy)
+  typescript: { ignoreBuildErrors: true },
   output: "standalone",
   images: {
     remotePatterns: [

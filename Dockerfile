@@ -1,14 +1,10 @@
+# syntax=docker/dockerfile:1
 FROM node:22-alpine AS base
-
-FROM base AS deps
-WORKDIR /app
-COPY package.json ./
-COPY package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -16,7 +12,7 @@ ENV NEXT_PUBLIC_SUPABASE_URL=https://tnnguzekgtqbdbpankos.supabase.co
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_ueJ8PmwtF6Tfj2cpmBOkbg_yQq8De6a
 ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=placeholder
 
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM base AS runner
 WORKDIR /app
